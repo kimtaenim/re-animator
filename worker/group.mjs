@@ -71,16 +71,14 @@ export async function buildContactSheet(canvas, fileBuffers, candidates) {
     .toBuffer();
 }
 
-// 라벨 배열 → 연속 같은 라벨끼리 병합.
-function mergeByLabels(candidates, labels) {
-  const n = candidates.length;
-  if (!Array.isArray(labels) || labels.length !== n) return candidates;
+// "앞 컷에 합쳐라" 번호 집합(1-based) → 병합. 범위 밖·형식오류에 강함.
+function mergeByList(candidates, mergeSet) {
   const merged = [];
-  let start = 0;
-  for (let i = 1; i <= n; i++) {
-    if (i === n || labels[i] !== labels[i - 1]) {
-      merged.push({ yStart: candidates[start].yStart, yEnd: candidates[i - 1].yEnd });
-      start = i;
+  for (let i = 0; i < candidates.length; i++) {
+    if (i > 0 && mergeSet.has(i + 1) && merged.length > 0) {
+      merged[merged.length - 1].yEnd = candidates[i].yEnd; // 앞 장면에 흡수
+    } else {
+      merged.push({ yStart: candidates[i].yStart, yEnd: candidates[i].yEnd });
     }
   }
   return merged.length ? merged : candidates;
@@ -99,12 +97,13 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
   }
 
   const prompt =
-    `이 이미지는 위→아래로 흐르는 웹툰에서 잘라낸 후보 컷 ${candidates.length}개를 ` +
-    `좌→우, 위→아래 순서로 1번부터 번호 매긴 대조표다(초록 숫자). 이 후보들은 시각적 여백으로 ` +
-    `기계 분할된 것이라 한 장면이 여러 조각으로 쪼개져 있을 수 있다.\n` +
-    `각 컷이 "의미상 같은 장면/컷"인지 판단해서, 순서대로 장면 번호를 매겨라. ` +
-    `연속된 컷이 같은 장면이면 같은 번호, 새 장면이 시작되면 번호를 올려라(1,1,1,2,3,3,...).\n` +
-    `오직 JSON만 출력: {"labels":[정수 ${candidates.length}개]}`;
+    `이 대조표는 위→아래로 흐르는 웹툰에서 기계로 잘라낸 후보 컷 ${candidates.length}개다` +
+    `(초록 숫자 1~${candidates.length}, 좌→우·위→아래 순서). 기계가 시각적 여백만 보고 잘라서, ` +
+    `한 장면(예: 돈이 흩날리는 장면, 같은 인물의 연속 동작, 같은 배경/맥락)이 여러 조각으로 ` +
+    `과분할돼 있다.\n` +
+    `각 컷 중 "바로 앞 컷과 같은 장면/맥락에 속하는" 컷의 번호만 나열해라. ` +
+    `나열된 컷은 앞 컷에 합쳐진다. 확실히 새 장면이 시작되는 컷은 넣지 마라.\n` +
+    `오직 JSON만: {"mergeWithPrev":[번호들]}`;
 
   try {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -132,8 +131,10 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
     if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
     const d = await r.json();
     const txt = d.choices?.[0]?.message?.content ?? "{}";
-    const labels = JSON.parse(txt).labels;
-    const merged = mergeByLabels(candidates, labels);
+    await log?.(`VLM 응답: ${txt.slice(0, 220)}`);
+    const parsed = JSON.parse(txt);
+    const mergeSet = new Set((parsed.mergeWithPrev || []).map((x) => Number(x)));
+    const merged = mergeByList(candidates, mergeSet);
     const costUsd = vlmCostUsd(MODEL, d.usage);
     await recordCost({
       projectId,
@@ -143,7 +144,9 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
       meta: { kind: "scene-group", usage: d.usage, candidates: candidates.length },
     });
     await log?.(
-      `VLM 그룹핑: 후보 ${candidates.length} → 장면 ${merged.length} (~$${costUsd.toFixed(4)})`
+      `VLM 그룹핑: 후보 ${candidates.length} → 장면 ${merged.length} (병합 ${
+        candidates.length - merged.length
+      }개, ~$${costUsd.toFixed(4)})`
     );
     return merged;
   } catch (e) {
