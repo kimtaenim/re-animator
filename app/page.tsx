@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listProjects } from "@/lib/projectStore";
 import { type StepStatus } from "@/lib/types";
+import DeleteButton from "@/components/DeleteButton";
 
 export const dynamic = "force-dynamic";
 
@@ -47,10 +48,10 @@ export default async function Home() {
 
       <ul className="grid gap-2">
         {projects.map((p) => (
-          <li key={p.id}>
+          <li key={p.id} className="flex items-center gap-2">
             <Link
               href={`/project/${p.id}`}
-              className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--panel)] px-4 py-3 hover:border-[var(--accent)]"
+              className="flex flex-1 items-center justify-between rounded-md border border-[var(--border)] bg-[var(--panel)] px-4 py-3 hover:border-[var(--accent)]"
             >
               <span className="font-medium">{p.name}</span>
               <span className="flex items-center gap-3 text-xs text-[var(--muted)]">
@@ -62,6 +63,7 @@ export default async function Home() {
                 </span>
               </span>
             </Link>
+            <DeleteButton id={p.id} name={p.name} />
           </li>
         ))}
       </ul>

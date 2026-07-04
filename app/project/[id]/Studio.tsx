@@ -19,6 +19,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
   const [costKrw, setCostKrw] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [nameVal, setNameVal] = useState("");
   const [uploadMsg, setUploadMsg] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const elapsedTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -169,6 +171,18 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
+  async function saveName() {
+    setEditingName(false);
+    const nm = nameVal.trim();
+    if (!nm || nm === project.name) return;
+    setProject((p) => ({ ...p, name: nm }));
+    await fetch(`/api/project/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: nm }),
+    }).catch(() => {});
+  }
+
   async function runSplit() {
     setBusy(true);
     setError("");
@@ -232,7 +246,30 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     <div>
       {/* 헤더 */}
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-semibold">{project.name}</h1>
+        {editingName ? (
+          <input
+            value={nameVal}
+            autoFocus
+            onChange={(e) => setNameVal(e.target.value)}
+            onBlur={saveName}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveName();
+              if (e.key === "Escape") setEditingName(false);
+            }}
+            className="rounded-md border border-[var(--accent)] bg-[var(--panel)] px-2 py-1 text-lg font-semibold"
+          />
+        ) : (
+          <h1
+            onClick={() => {
+              setNameVal(project.name);
+              setEditingName(true);
+            }}
+            title="클릭해서 제목 편집"
+            className="cursor-text text-lg font-semibold hover:opacity-70"
+          >
+            {project.name}
+          </h1>
+        )}
         <span className="text-xs text-[var(--muted)]">{project.aspectRatio}</span>
       </div>
 
