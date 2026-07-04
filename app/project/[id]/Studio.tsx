@@ -73,29 +73,41 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     abortRef.current = controller;
     try {
       const list = Array.from(files);
+      const totalBytes = list.reduce((s, f) => s + f.size, 0) || 1;
+      let completedBytes = 0;
       const registered: { url: string; width: number; height: number }[] = [];
-      // 각 파일을 브라우저에서 Blob 로 "직접" 업로드(서버리스 4.5MB 본문 한계 우회).
-      // 큰 웹툰 파일은 multipart 로 청크 전송. 크기는 여기서 재서 함께 등록.
-      // 진행률(onUploadProgress)을 파일별로 중계 → 사용자가 멈춤/진행을 구분.
+      // 브라우저 → Blob 직접 업로드(4.5MB 함수 한계 우회). 큰 웹툰 파일은 multipart
+      // 청크 전송이라야 단일 PUT 실패→재시도(0→100→0 반복)를 피한다.
+      // 진행률은 전체 바이트 기준 "하나의 바"로 표시(파일마다 0 으로 리셋돼 보이는 혼란 제거).
       for (let i = 0; i < list.length; i++) {
         const f = list[i];
         const bmp = await createImageBitmap(f);
         const dims = { width: bmp.width, height: bmp.height };
         bmp.close?.();
-        setUploadMsg(`업로드 중 ${i + 1}/${list.length} · ${f.name} · 0%`);
+        setUploadMsg(
+          `업로드 중 · ${i + 1}/${list.length}장 · 전체 ${Math.round((completedBytes / totalBytes) * 100)}%`
+        );
         const blob = await upload(
           `project/${project.id}/source-${Date.now()}-${f.name}`,
           f,
           {
             access: "public",
             handleUploadUrl: "/api/source/blob-upload",
+            multipart: true,
             abortSignal: controller.signal,
             onUploadProgress: (p) => {
-              const pct = Number.isFinite(p.percentage) ? Math.round(p.percentage) : 0;
-              setUploadMsg(`업로드 중 ${i + 1}/${list.length} · ${f.name} · ${pct}%`);
+              const overall = Math.min(
+                100,
+                Math.round(((completedBytes + p.loaded) / totalBytes) * 100)
+              );
+              const tail = p.percentage >= 100 ? " · 서버 저장 마무리 중…" : "";
+              setUploadMsg(
+                `업로드 중 · ${i + 1}/${list.length}장 · 전체 ${overall}%${tail}`
+              );
             },
           }
         );
+        completedBytes += f.size;
         registered.push({ url: blob.url, width: dims.width, height: dims.height });
       }
       // 업로드된 URL·크기를 프로젝트에 등록(메타데이터만).

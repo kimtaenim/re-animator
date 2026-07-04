@@ -12,18 +12,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const jsonResponse = await handleUpload({
       body,
       request: req,
-      onBeforeGenerateToken: async () => ({
-        allowedContentTypes: [
-          "image/png",
-          "image/jpeg",
-          "image/webp",
-          "image/gif",
-          "image/bmp",
-        ],
-        addRandomSuffix: true,
-      }),
-      onUploadCompleted: async () => {
+      onBeforeGenerateToken: async (pathname) => {
+        console.log(`[blob-upload] token 요청 ${pathname} @ ${new Date().toISOString()}`);
+        return {
+          allowedContentTypes: [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif",
+            "image/bmp",
+          ],
+          addRandomSuffix: true,
+        };
+      },
+      onUploadCompleted: async ({ blob }) => {
         // 등록은 클라가 upload() 완료 후 /api/source/register 로 처리(웹훅 의존 X).
+        console.log(`[blob-upload] 완료 콜백 ${blob.pathname} @ ${new Date().toISOString()}`);
       },
     });
     return NextResponse.json(jsonResponse);
