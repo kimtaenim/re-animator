@@ -21,6 +21,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [uploadMsg, setUploadMsg] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const elapsedTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const sourceStatus = project.steps.source.status;
@@ -68,6 +69,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       () => setElapsed(Math.floor((Date.now() - startedAt) / 1000)),
       500
     );
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const list = Array.from(files);
       const registered: { url: string; width: number; height: number }[] = [];
@@ -86,6 +89,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           {
             access: "public",
             handleUploadUrl: "/api/source/blob-upload",
+            abortSignal: controller.signal,
             onUploadProgress: (p) => {
               const pct = Number.isFinite(p.percentage) ? Math.round(p.percentage) : 0;
               setUploadMsg(`업로드 중 ${i + 1}/${list.length} · ${f.name} · ${pct}%`);
@@ -105,7 +109,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       if (!d.ok) throw new Error(d.error ?? "등록 실패");
       setProject(d.project);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "업로드 실패");
+      const msg = e instanceof Error ? e.message : "업로드 실패";
+      const aborted =
+        e instanceof Error && (e.name === "AbortError" || /abort/i.test(msg));
+      setError(aborted ? "업로드를 중지했어요." : msg);
     } finally {
       setBusy(false);
       setUploadMsg("");
@@ -113,6 +120,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         clearInterval(elapsedTimer.current);
         elapsedTimer.current = null;
       }
+      abortRef.current = null;
       if (fileRef.current) fileRef.current.value = "";
     }
   }
@@ -230,12 +238,18 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         />
 
         {busy && uploadMsg && (
-          <p className="mb-3 flex items-center gap-2 text-sm text-[var(--muted)]">
+          <div className="mb-3 flex items-center gap-2 text-sm text-[var(--muted)]">
             <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
             <span>
               {uploadMsg} · {elapsed}초
             </span>
-          </p>
+            <button
+              onClick={() => abortRef.current?.abort()}
+              className="ml-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:border-[var(--danger)] hover:text-[var(--danger)]"
+            >
+              중지
+            </button>
+          </div>
         )}
 
         {project.sourceFiles.length > 0 && (
