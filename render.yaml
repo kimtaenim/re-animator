@@ -1,0 +1,22 @@
+# Render 블루프린트 — re-animator 입력단 워커(백그라운드 워커).
+# Render 대시보드 New → Blueprint 로 이 리포를 고르면 아래 서비스가 자동 구성된다.
+# 무거운 픽셀 연산(컷 분할·추출)을 Vercel 서버리스 밖 상시 서버에서 처리.
+services:
+  - type: worker # HTTP 포트 없는 백그라운드 워커(큐 폴링 루프)
+    name: re-animator-worker
+    runtime: node # Dockerfile 대신 Node 런타임(sharp prebuilt 로 빌드 빠름)
+    rootDir: worker # worker/package.json 기준으로 설치·실행
+    plan: starter # 백그라운드 워커는 유료(무료 티어 없음). ~$7/mo.
+    region: singapore # 한국에서 가장 가까운 Render 리전
+    buildCommand: npm install
+    startCommand: node index.mjs
+    autoDeploy: true # main 에 push 하면 자동 재배포
+    envVars:
+      # Vercel 프로젝트에 넣은 것과 "같은 값"을 Render 대시보드에서 입력.
+      # sync:false = 블루프린트에 값 안 박고, 대시보드에서 수동 입력(시크릿).
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: BLOB_READ_WRITE_TOKEN
+        sync: false
