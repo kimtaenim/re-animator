@@ -105,14 +105,18 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
   const prompt =
     `이 대조표는 위→아래 웹툰에서 기계로 잘라낸 후보 컷 ${candidates.length}개다` +
     `(초록 숫자 1~${candidates.length}, 좌→우·위→아래 순서).\n` +
-    `기본 원칙: 대부분의 컷은 각각 독립된 장면이다. 함부로 합치지 마라.\n` +
-    `아래 두 경우에만 "앞 컷에 합칠 번호"를 mergeWithPrev 에 넣어라:\n` +
-    `  1) 그림이 거의 없는 조각 — 배경/바닥만 있거나, 작은 요소 몇 개(지폐·이펙트·소품)만 ` +
-    `떠 있는 컷. 앞 장면의 잔여물이다.\n` +
-    `  2) 앞 컷과 명백히 "같은 순간의 연속" — 같은 인물이 같은 구도에서 이어지는 바로 다음 프레임.\n` +
-    `구도·인물·상황·배경이 다른(=다른 장면인) 컷은 절대 합치지 마라.\n` +
-    `그림 없이 나레이션·대사 글자만 있는 컷의 번호는 textOnly 에 넣어라(앞 장면에 흡수).\n` +
-    `오직 JSON만: {"mergeWithPrev":[번호들], "textOnly":[번호들]}`;
+    `너의 유일한 일: "독립된 컷이 아닌 조각"만 골라 앞 컷에 흡수시키는 것이다.\n` +
+    `absorb 에 넣을 것 — 오직 아래에 해당하는 컷만:\n` +
+    `  (1) 그림 없이 배경/바닥만 있는 컷\n` +
+    `  (2) 그림 없이 나레이션·대사 글자만 있는 컷\n` +
+    `  (3) 텅 빈 배경에 아주 작은 요소 1~2개만(예: 검은 배경에 지폐 한두 장) 떠 있고 ` +
+    `그 외엔 인물도 장면도 없는 컷\n` +
+    `절대 넣지 마라:\n` +
+    `  - 인물·구도·상황이 있는 실제 컷은 절대 넣지 마라. 지폐·소품이 함께 보여도, ` +
+    `인물이나 장면이 있으면 그건 독립 컷이다.\n` +
+    `  - 서로 다른 컷을 "비슷한 요소가 보인다"는 이유로 묶지 마라.\n` +
+    `확실하지 않으면 넣지 마라(빼는 게 안전하다). 대부분의 컷은 그대로 둔다.\n` +
+    `오직 JSON만: {"absorb":[번호들]}`;
 
   try {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -143,11 +147,9 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
     const txt = d.choices?.[0]?.message?.content ?? "{}";
     await log?.(`VLM 응답: ${txt.slice(0, 220)}`);
     const parsed = JSON.parse(txt);
-    // 텍스트만 있는 컷도 앞 장면에 흡수(별도 컷 아님). 두 리스트 합쳐 병합.
-    const mergeSet = new Set(
-      [...(parsed.mergeWithPrev || []), ...(parsed.textOnly || [])].map((x) => Number(x))
-    );
-    const merged = mergeByList(candidates, mergeSet);
+    // "조각"으로 지목된 컷만 앞 컷에 흡수. 나머지 실제 컷은 그대로.
+    const absorbSet = new Set((parsed.absorb || []).map((x) => Number(x)));
+    const merged = mergeByList(candidates, absorbSet);
     const costUsd = vlmCostUsd(MODEL, d.usage);
     await recordCost({
       projectId,
