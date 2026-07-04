@@ -9,7 +9,6 @@
 
 import sharp from "sharp";
 import { extractRegion } from "./imaging.mjs";
-import { detectRegions } from "./detect.mjs";
 import { recordCost } from "./store.mjs";
 
 const MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
@@ -77,32 +76,87 @@ export async function buildContactSheet(canvas, fileBuffers, candidates, log) {
     .toBuffer();
 }
 
-// VLM 판정 적용(1-based 번호 집합):
-//  - absorb: 앞 컷에 흡수(조각).
-//  - split: 그 컷 y구간을 더 잘게 재검출(fineCfg) → 서브 컷으로 대체. (자르기는 공짜)
-//  - 나머지: 그대로.
-function applyDecision(candidates, absorbSet, splitSet, globalProfile, fineCfg) {
+// split 지목 컷을 VLM 에 "크게" 보여주고 패널 경계 위치(높이 대비 비율)를 받아 자른다.
+// 자를 위치를 알고리즘이 아니라 VLM 이 정함 → 붙은 패널은 정확히 자르고, 연속 그림
+// (흐르는 이펙트·한 동작)은 VLM 이 빈 배열을 줘서 안 잘린다. (panels vs 연속 구분)
+async function vlmSplitCut(canvas, fileBuffers, region, key, model, log) {
+  const png = await extractRegion(canvas, fileBuffers, region.yStart, region.yEnd);
+  const img = await sharp(png).resize({ width: 340 }).png().toBuffer();
+  const H = region.yEnd - region.yStart;
+  const prompt =
+    `이 이미지는 세로 웹툰에서 잘라낸 컷 하나다. 그 안에 서로 다른 패널(다른 인물·순간·구도)이 ` +
+    `세로로 여러 개 쌓여 있으면, 패널이 나뉘는 경계의 세로 위치를 이미지 높이 대비 비율(0~1)로 ` +
+    `모두 나열해라. 하나의 연속된 그림/장면이면(예: 흐르는 이펙트, 한 인물의 한 동작) 빈 배열. ` +
+    `오직 JSON: {"cuts":[비율들]}`;
+  try {
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              {
+                type: "image_url",
+                image_url: { url: `data:image/png;base64,${img.toString("base64")}` },
+              },
+            ],
+          },
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 300,
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!r.ok) throw new Error(`OpenAI ${r.status}`);
+    const d = await r.json();
+    const fr = (JSON.parse(d.choices?.[0]?.message?.content ?? "{}").cuts || [])
+      .map(Number)
+      .filter((f) => f > 0.03 && f < 0.97)
+      .sort((a, b) => a - b);
+    const cost = vlmCostUsd(model, d.usage);
+    if (!fr.length) return { subs: [region], cost };
+    const ys = [0, ...fr.map((f) => Math.round(f * H)), H];
+    const subs = [];
+    for (let i = 0; i < ys.length - 1; i++) {
+      if (ys[i + 1] - ys[i] >= 40) {
+        subs.push({ yStart: region.yStart + ys[i], yEnd: region.yStart + ys[i + 1] });
+      }
+    }
+    return { subs: subs.length ? subs : [region], cost };
+  } catch (e) {
+    await log?.(`컷 분할 VLM 실패(그대로): ${e?.message ?? e}`);
+    return { subs: [region], cost: 0 };
+  }
+}
+
+// VLM 판정 적용: absorb(앞 컷 흡수) / split(VLM 위치-분할) / 나머지 그대로.
+async function applyDecision(candidates, absorbSet, splitSet, ctx) {
+  const { canvas, fileBuffers, key, model, log } = ctx;
+  const splitTotal = [...splitSet].filter((n) => n >= 1 && n <= candidates.length).length;
   const out = [];
+  let splitCost = 0;
+  let done = 0;
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
     const n = i + 1;
     if (absorbSet.has(n) && out.length > 0) {
       out[out.length - 1].yEnd = c.yEnd;
-    } else if (splitSet.has(n) && globalProfile) {
-      const slice = globalProfile.subarray(c.yStart, c.yEnd);
-      const sub = detectRegions(slice, fineCfg); // slice 기준 0-base
-      if (sub.length > 1) {
-        for (const s of sub) {
-          out.push({ yStart: c.yStart + s.yStart, yEnd: c.yStart + s.yEnd });
-        }
-      } else {
-        out.push({ yStart: c.yStart, yEnd: c.yEnd }); // 못 쪼개면 그대로
-      }
+    } else if (splitSet.has(n)) {
+      done++;
+      await log?.(`컷 분할 판정 ${done}/${splitTotal}…`);
+      const { subs, cost } = await vlmSplitCut(canvas, fileBuffers, c, key, model, log);
+      splitCost += cost;
+      for (const s of subs) out.push({ yStart: s.yStart, yEnd: s.yEnd });
     } else {
       out.push({ yStart: c.yStart, yEnd: c.yEnd });
     }
   }
-  return out.length ? out : candidates;
+  return { regions: out.length ? out : candidates, splitCost };
 }
 
 export async function groupScenes(
@@ -169,14 +223,13 @@ export async function groupScenes(
     const parsed = JSON.parse(txt);
     const absorbSet = new Set((parsed.absorb || []).map((x) => Number(x)));
     const splitSet = new Set((parsed.split || []).map((x) => Number(x)));
-    // split 지목 컷은 더 잘게 재검출(민감하게: flatStd↑, minGap↓).
-    const fineCfg = {
-      flatStdThreshold: (cfg?.flatStdThreshold ?? 10) + 6,
-      minGapPx: 12,
-      minSceneHeightPx: 40,
-    };
-    const merged = applyDecision(candidates, absorbSet, splitSet, globalProfile, fineCfg);
-    const costUsd = vlmCostUsd(MODEL, d.usage);
+    const { regions: merged, splitCost } = await applyDecision(
+      candidates,
+      absorbSet,
+      splitSet,
+      { canvas, fileBuffers, key, model: MODEL, log }
+    );
+    const costUsd = vlmCostUsd(MODEL, d.usage) + splitCost;
     await recordCost({
       projectId,
       vendor: "openai",
