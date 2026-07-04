@@ -10,6 +10,7 @@
 import sharp from "sharp";
 import { extractRegion } from "./imaging.mjs";
 import { recordCost } from "./store.mjs";
+import { loadPrompts } from "./config.mjs";
 
 const MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
 
@@ -79,15 +80,11 @@ export async function buildContactSheet(canvas, fileBuffers, candidates, log) {
 // split 지목 컷을 VLM 에 "크게" 보여주고 패널 경계 위치(높이 대비 비율)를 받아 자른다.
 // 자를 위치를 알고리즘이 아니라 VLM 이 정함 → 붙은 패널은 정확히 자르고, 연속 그림
 // (흐르는 이펙트·한 동작)은 VLM 이 빈 배열을 줘서 안 잘린다. (panels vs 연속 구분)
-async function vlmSplitCut(canvas, fileBuffers, region, key, model, log) {
+async function vlmSplitCut(canvas, fileBuffers, region, key, model, log, splitPrompt) {
   const png = await extractRegion(canvas, fileBuffers, region.yStart, region.yEnd);
   const img = await sharp(png).resize({ width: 340 }).png().toBuffer();
   const H = region.yEnd - region.yStart;
-  const prompt =
-    `이 이미지는 세로 웹툰에서 잘라낸 컷 하나다. 그 안에 서로 다른 패널(다른 인물·순간·구도)이 ` +
-    `세로로 여러 개 쌓여 있으면, 패널이 나뉘는 경계의 세로 위치를 이미지 높이 대비 비율(0~1)로 ` +
-    `모두 나열해라. 하나의 연속된 그림/장면이면(예: 흐르는 이펙트, 한 인물의 한 동작) 빈 배열. ` +
-    `오직 JSON: {"cuts":[비율들]}`;
+  const prompt = splitPrompt;
   try {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -149,7 +146,15 @@ async function applyDecision(candidates, absorbSet, splitSet, ctx) {
     } else if (splitSet.has(n)) {
       done++;
       await log?.(`컷 분할 판정 ${done}/${splitTotal}…`);
-      const { subs, cost } = await vlmSplitCut(canvas, fileBuffers, c, key, model, log);
+      const { subs, cost } = await vlmSplitCut(
+        canvas,
+        fileBuffers,
+        c,
+        key,
+        model,
+        log,
+        ctx.splitPrompt
+      );
       splitCost += cost;
       for (const s of subs) out.push({ yStart: s.yStart, yEnd: s.yEnd });
     } else {
@@ -180,20 +185,11 @@ export async function groupScenes(
   }
   await log?.(`AI가 ${candidates.length}개 컷 장면 판정 중…`);
 
-  const prompt =
-    `이 대조표는 위→아래 웹툰에서 기계로 잘라낸 후보 컷 ${candidates.length}개다` +
-    `(초록 숫자 1~${candidates.length}, 좌→우·위→아래 순서).\n` +
-    `기계는 시각적 여백만 보고 잘라서, 어떤 컷은 조각으로 과분할됐고 어떤 컷은 여러 패널이 ` +
-    `한 덩어리로 뭉쳤다(과소분할). 두 가지를 판정해라.\n` +
-    `[absorb] — "독립 컷이 아닌 조각"의 번호. 오직: (1)배경/바닥만 있는 컷, (2)글자만 있는 컷, ` +
-    `(3)떠다니는 지폐·돈·이펙트만 보이고 인물이 없는 컷. 앞 컷에 흡수된다. ` +
-    `인물·구도·장면이 있으면(지폐가 함께 날려도) 절대 넣지 마라.\n` +
-    `★중요: 떠다니는 지폐/돈/이펙트는 "장면"이 아니라 여러 컷에 걸친 연출 요소일 뿐이다. ` +
-    `지폐만 있는 컷은 흡수하고, "지폐가 보인다"는 이유로 서로 다른 컷을 합치거나 나누지 마라 — ` +
-    `오직 인물과 구도로만 판단해라.\n` +
-    `[split] — "한 컷 안에 서로 다른 패널/순간이 2개 이상 세로로 쌓여 있어 나눠야 하는" 컷의 번호. ` +
-    `예: 인물의 선언 + 여러 인물의 반응 + 군중이 한 컷에 뭉친 경우. 이런 컷은 더 잘게 나눈다.\n` +
-    `확실하지 않으면 어느 쪽에도 넣지 마라. 오직 JSON만: {"absorb":[번호들], "split":[번호들]}`;
+  // 프롬프트는 config/prompts.json 에서(하드코딩 금지). cut_definition 을 공유.
+  const P = loadPrompts();
+  const cutDef = P.cut_definition;
+  const splitPrompt = `${cutDef}\n\n${P.split_task}`;
+  const prompt = `${cutDef}\n\n${P.group_task.replace(/\{n\}/g, String(candidates.length))}`;
 
   try {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -230,7 +226,7 @@ export async function groupScenes(
       candidates,
       absorbSet,
       splitSet,
-      { canvas, fileBuffers, key, model: MODEL, log }
+      { canvas, fileBuffers, key, model: MODEL, log, splitPrompt }
     );
     const costUsd = vlmCostUsd(MODEL, d.usage) + splitCost;
     await recordCost({

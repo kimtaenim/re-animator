@@ -16,3 +16,9 @@ export function loadSplitConfig() {
     minSceneHeightPx: raw.minSceneHeightPx ?? 60,
   };
 }
+
+// VLM 컷 검출 프롬프트(config/prompts.json). 하드코딩 금지 — 여기서만 튜닝.
+export function loadPrompts() {
+  const path = fileURLToPath(new URL("../config/prompts.json", import.meta.url));
+  return JSON.parse(readFileSync(path, "utf8"));
+}
