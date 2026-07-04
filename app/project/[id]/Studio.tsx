@@ -18,6 +18,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
+  const [uploadMsg, setUploadMsg] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const sourceStatus = project.steps.source.status;
@@ -64,10 +65,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       const registered: { url: string; width: number; height: number }[] = [];
       // 각 파일을 브라우저에서 Blob 로 "직접" 업로드(서버리스 4.5MB 본문 한계 우회).
       // 큰 웹툰 파일은 multipart 로 청크 전송. 크기는 여기서 재서 함께 등록.
-      for (const f of list) {
+      // 진행률(onUploadProgress)을 파일별로 중계 → 사용자가 멈춤/진행을 구분.
+      for (let i = 0; i < list.length; i++) {
+        const f = list[i];
         const bmp = await createImageBitmap(f);
         const dims = { width: bmp.width, height: bmp.height };
         bmp.close?.();
+        setUploadMsg(`업로드 중 ${i + 1}/${list.length} · ${f.name} · 0%`);
         const blob = await upload(
           `project/${project.id}/source-${Date.now()}-${f.name}`,
           f,
@@ -75,11 +79,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             access: "public",
             handleUploadUrl: "/api/source/blob-upload",
             multipart: true,
+            onUploadProgress: (p) =>
+              setUploadMsg(
+                `업로드 중 ${i + 1}/${list.length} · ${f.name} · ${Math.round(p.percentage)}%`
+              ),
           }
         );
         registered.push({ url: blob.url, width: dims.width, height: dims.height });
       }
       // 업로드된 URL·크기를 프로젝트에 등록(메타데이터만).
+      setUploadMsg(`등록 중… (${registered.length}장)`);
       const r = await fetch("/api/source/register", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -92,6 +101,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       setError(e instanceof Error ? e.message : "업로드 실패");
     } finally {
       setBusy(false);
+      setUploadMsg("");
       if (fileRef.current) fileRef.current.value = "";
     }
   }
@@ -207,6 +217,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           onChange={(e) => uploadFiles(e.target.files)}
           className="mb-3 block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-[var(--panel-2)] file:px-3 file:py-1.5 file:text-[var(--text)]"
         />
+
+        {busy && uploadMsg && (
+          <p className="mb-3 flex items-center gap-2 text-sm text-[var(--muted)]">
+            <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+            {uploadMsg}
+          </p>
+        )}
 
         {project.sourceFiles.length > 0 && (
           <div className="flex flex-wrap gap-2">
