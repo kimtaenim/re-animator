@@ -86,7 +86,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const list = Array.from(files);
+      // 파일명 순으로 정렬 = 세로 스크롤(컷) 순서. 숫자 인식(1,2,…,10,11).
+      const list = Array.from(files).sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
+      );
       const totalBytes = list.reduce((s, f) => s + f.size, 0) || 1;
       let completedBytes = 0;
       const registered: { url: string; width: number; height: number }[] = [];
