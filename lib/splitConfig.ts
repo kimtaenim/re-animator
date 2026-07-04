@@ -9,16 +9,14 @@ import raw from "../config/split.json";
 
 export interface SplitConfig {
   refWidthMode: "first" | "max" | number;
-  whiteThreshold: number;
-  whiteRatioThreshold: number;
+  flatStdThreshold: number;
   minGapPx: number;
   minSceneHeightPx: number;
 }
 
 export const SPLIT_CONFIG: SplitConfig = {
   refWidthMode: (raw.refWidthMode as SplitConfig["refWidthMode"]) ?? "first",
-  whiteThreshold: raw.whiteThreshold ?? 250,
-  whiteRatioThreshold: raw.whiteRatioThreshold ?? 0.98,
+  flatStdThreshold: raw.flatStdThreshold ?? 10,
   minGapPx: raw.minGapPx ?? 40,
   minSceneHeightPx: raw.minSceneHeightPx ?? 60,
 };

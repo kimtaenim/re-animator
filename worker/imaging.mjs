@@ -7,9 +7,11 @@
 
 import sharp from "sharp";
 
-// 한 파일 → refWidth 로 정규화 후 그레이스케일 raw 픽셀 → 행별 흰-비율 프로파일.
+// 한 파일 → refWidth 정규화 후 그레이스케일 → 행별 "표준편차(평탄도)" 프로파일.
+// std 가 낮으면 그 행은 거의 단색 → 흰/검/단색 배경 무관하게 거터 후보.
+// (흰-비율 방식은 검은 거터를 못 잡아 오분할됨 — 색무관 평탄도로 대체.)
 // 반환: { profile: Float32Array(정규화높이), normHeight }.
-export async function computeWhiteProfile(buf, refWidth, cfg) {
+export async function computeRowProfile(buf, refWidth) {
   const { data, info } = await sharp(buf)
     .resize({ width: refWidth }) // 폭 정규화(높이 비례). 기준폭 일치가 좌표계 통일의 핵심.
     .greyscale()
@@ -18,13 +20,18 @@ export async function computeWhiteProfile(buf, refWidth, cfg) {
 
   const W = info.width;
   const H = info.height;
-  const thr = cfg.whiteThreshold;
   const profile = new Float32Array(H);
   for (let y = 0; y < H; y++) {
     const row = y * W;
-    let count = 0;
-    for (let x = 0; x < W; x++) if (data[row + x] >= thr) count++;
-    profile[y] = count / W;
+    let sum = 0;
+    let sum2 = 0;
+    for (let x = 0; x < W; x++) {
+      const v = data[row + x];
+      sum += v;
+      sum2 += v * v;
+    }
+    const mean = sum / W;
+    profile[y] = Math.sqrt(Math.max(0, sum2 / W - mean * mean));
   }
   return { profile, normHeight: H };
 }

@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { put } from "@vercel/blob";
 import { getProject, saveProject, logProgress, resetProgress } from "./store.mjs";
-import { computeWhiteProfile, extractRegion } from "./imaging.mjs";
+import { computeRowProfile, extractRegion } from "./imaging.mjs";
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
 import { loadSplitConfig } from "./config.mjs";
@@ -44,7 +44,7 @@ export async function runSplit(projectId) {
   for (let i = 0; i < files.length; i++) {
     await log(`파일 ${i + 1}/${files.length} 프로파일…`);
     const buf = await download(files[i].url);
-    const { profile, normHeight } = await computeWhiteProfile(buf, refWidth, cfg);
+    const { profile, normHeight } = await computeRowProfile(buf, refWidth);
     profiles.push(profile);
     normHeights.push(normHeight);
   }

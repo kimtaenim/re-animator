@@ -1,17 +1,14 @@
 {
-  "$comment": "컷 분할 튜닝 파라미터. 코드 아닌 여기서 조정한다(앱·워커 공통). 샘플 웹툰 확보 후 worker/cli.mjs 로 값을 맞춘다.",
+  "$comment": "컷 분할 튜닝 파라미터. 코드 아닌 여기서 조정한다(앱·워커 공통). 색 무관 평탄도 방식.",
 
   "refWidthMode": "first",
   "$refWidthMode": "기준폭 결정: 'first'=첫 파일 폭 / 'max'=최대 폭 / 숫자면 그 값 고정",
 
-  "whiteThreshold": 250,
-  "$whiteThreshold": "픽셀을 '흰색'으로 볼 그레이스케일 밝기 하한 (0-255). 250=거의 순백만.",
-
-  "whiteRatioThreshold": 0.98,
-  "$whiteRatioThreshold": "한 행을 '여백 행'으로 판정할 흰 픽셀 비율 하한. 말풍선/글자 여백을 견디려면 0.98 권장.",
+  "flatStdThreshold": 10,
+  "$flatStdThreshold": "행의 그레이스케일 표준편차가 이보다 낮으면 '거터'(거의 단색). 흰색·검은색·단색 배경 모두 잡음. 높이면 더 많이 거터로 봄.",
 
   "minGapPx": 40,
-  "$minGapPx": "컷 사이 여백으로 인정할 연속 여백 행 최소 길이(정규화 픽셀). 짧은 문단 간격을 컷으로 오인하지 않게.",
+  "$minGapPx": "컷 사이 거터로 인정할 연속 평탄 행 최소 길이(정규화 픽셀).",
 
   "minSceneHeightPx": 60,
   "$minSceneHeightPx": "이보다 짧은 조각은 인접 컷에 흡수(자잘한 오분할 방지)."

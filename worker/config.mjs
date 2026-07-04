@@ -11,8 +11,7 @@ export function loadSplitConfig() {
   const raw = JSON.parse(readFileSync(path, "utf8"));
   return {
     refWidthMode: raw.refWidthMode ?? "first",
-    whiteThreshold: raw.whiteThreshold ?? 250,
-    whiteRatioThreshold: raw.whiteRatioThreshold ?? 0.98,
+    flatStdThreshold: raw.flatStdThreshold ?? 10,
     minGapPx: raw.minGapPx ?? 40,
     minSceneHeightPx: raw.minSceneHeightPx ?? 60,
   };

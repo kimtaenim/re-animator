@@ -11,7 +11,7 @@
 import { readdirSync, statSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, extname, basename } from "node:path";
 import sharp from "sharp";
-import { computeWhiteProfile, extractRegion } from "./imaging.mjs";
+import { computeRowProfile, extractRegion } from "./imaging.mjs";
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
 import { loadSplitConfig } from "./config.mjs";
@@ -63,7 +63,7 @@ async function main() {
   const profiles = [];
   const normHeights = [];
   for (let i = 0; i < buffers.length; i++) {
-    const { profile, normHeight } = await computeWhiteProfile(buffers[i], refWidth, cfg);
+    const { profile, normHeight } = await computeRowProfile(buffers[i], refWidth);
     profiles.push(profile);
     normHeights.push(normHeight);
   }
