@@ -299,7 +299,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           <button
             onClick={runSplit}
             disabled={busy || running}
-            className="mt-4 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium disabled:opacity-50"
+            className="mt-4 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {running ? "처리 중…" : hasCuts ? "다시 분할" : "컷 자동 분할"}
           </button>
@@ -327,7 +327,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             <button
               onClick={confirm}
               disabled={busy}
-              className="rounded-md bg-[var(--ok)] px-4 py-2 text-sm font-medium disabled:opacity-50"
+              className="rounded-md bg-[var(--ok)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
               경계 확정 · 컷 추출
             </button>

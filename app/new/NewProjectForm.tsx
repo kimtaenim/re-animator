@@ -80,7 +80,7 @@ export default function NewProjectForm() {
       <button
         onClick={submit}
         disabled={busy}
-        className="rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium disabled:opacity-50"
+        className="rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
       >
         {busy ? "만드는 중…" : "만들기"}
       </button>
