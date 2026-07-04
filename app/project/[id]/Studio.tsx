@@ -22,7 +22,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [elapsed, setElapsed] = useState(0);
   const elapsedTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const cancelledRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // 업로드 중지 — abort + UI 즉시 해제(SDK 가 늦게 반응해도 사용자는 바로 벗어남).
+  function cancelUpload() {
+    cancelledRef.current = true;
+    abortRef.current?.abort();
+    setBusy(false);
+    setUploadMsg("");
+    if (elapsedTimer.current) {
+      clearInterval(elapsedTimer.current);
+      elapsedTimer.current = null;
+    }
+  }
 
   const sourceStatus = project.steps.source.status;
   const running = sourceStatus === "running";
@@ -64,6 +77,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setBusy(true);
     setError("");
     setElapsed(0);
+    cancelledRef.current = false;
     const startedAt = Date.now();
     elapsedTimer.current = setInterval(
       () => setElapsed(Math.floor((Date.now() - startedAt) / 1000)),
@@ -85,7 +99,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         const dims = { width: bmp.width, height: bmp.height };
         bmp.close?.();
         setUploadMsg(
-          `업로드 중 · ${i + 1}/${list.length}장 · 전체 ${Math.round((completedBytes / totalBytes) * 100)}%`
+          `업로드 중 · ${i + 1}/${list.length} · ${f.name} · 전체 ${Math.round((completedBytes / totalBytes) * 100)}%`
         );
         const blob = await upload(
           `project/${project.id}/source-${Date.now()}-${f.name}`,
@@ -93,20 +107,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           {
             access: "public",
             handleUploadUrl: "/api/source/blob-upload",
-            multipart: true,
             abortSignal: controller.signal,
             onUploadProgress: (p) => {
               const overall = Math.min(
                 100,
                 Math.round(((completedBytes + p.loaded) / totalBytes) * 100)
               );
-              const tail = p.percentage >= 100 ? " · 서버 저장 마무리 중…" : "";
+              const tail = p.percentage >= 100 ? " · 저장 마무리 중…" : "";
               setUploadMsg(
-                `업로드 중 · ${i + 1}/${list.length}장 · 전체 ${overall}%${tail}`
+                `업로드 중 · ${i + 1}/${list.length} · ${f.name} · 전체 ${overall}%${tail}`
               );
             },
           }
         );
+        if (cancelledRef.current) return;
         completedBytes += f.size;
         registered.push({ url: blob.url, width: dims.width, height: dims.height });
       }
@@ -256,7 +270,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               {uploadMsg} · {elapsed}초
             </span>
             <button
-              onClick={() => abortRef.current?.abort()}
+              onClick={cancelUpload}
               className="ml-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:border-[var(--danger)] hover:text-[var(--danger)]"
             >
               중지
