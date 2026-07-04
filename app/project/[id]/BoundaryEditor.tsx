@@ -193,7 +193,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
             return (
             <div
               key={`reg-${i}`}
-              className="absolute border-2 border-[var(--accent)]"
+              className="glow-accent absolute border-2 border-[var(--accent)]"
               style={{
                 top: r.yStart * scale,
                 height: (r.yEnd - r.yStart) * scale,
