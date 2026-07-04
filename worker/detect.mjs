@@ -18,71 +18,32 @@
 export function detectRegions(profile, cfg) {
   const total = profile.length;
   const { flatStdThreshold, minGapPx, minSceneHeightPx } = cfg;
-  // 거터 = 행이 거의 단색(표준편차 낮음). 색과 무관.
+  // 거터 = 행이 거의 단색(표준편차 낮음). 색과 무관(흰/검/단색 배경).
   const isGutter = (y) => profile[y] < flatStdThreshold;
 
-  // 1) 콘텐츠 범위 — 상하단 바깥 여백(흰색이든 검은색이든)은 컷 대상이 아니다.
-  let contentStart = -1;
-  for (let y = 0; y < total; y++) {
-    if (!isGutter(y)) {
-      contentStart = y;
-      break;
-    }
-  }
-  if (contentStart === -1) return []; // 전부 평탄 = 콘텐츠 없음
-  let contentEnd = total;
-  for (let y = total - 1; y >= 0; y--) {
-    if (!isGutter(y)) {
-      contentEnd = y + 1;
-      break;
+  // 1) 거터 런(연속 평탄 행, minGapPx 이상) 수집.
+  const gutters = [];
+  let s = -1;
+  for (let y = 0; y <= total; y++) {
+    const g = y < total && isGutter(y);
+    if (g) {
+      if (s === -1) s = y;
+    } else if (s !== -1) {
+      if (y - s >= minGapPx) gutters.push([s, y]);
+      s = -1;
     }
   }
 
-  // 2) 콘텐츠 내부의 거터 런(연속 평탄 행) 중 minGapPx 이상 → 컷 사이 거터로 판정.
-  const boundaries = [];
-  let runStart = -1;
-  for (let y = contentStart; y <= contentEnd; y++) {
-    const gutter = y < contentEnd && isGutter(y);
-    if (gutter) {
-      if (runStart === -1) runStart = y;
-    } else if (runStart !== -1) {
-      const runLen = y - runStart;
-      // 콘텐츠 내부(양끝이 콘텐츠에 닿는) 런만 거터. 길이 충족 시 중앙을 경계로.
-      if (runLen >= minGapPx && runStart > contentStart && y < contentEnd) {
-        boundaries.push(Math.floor((runStart + y) / 2));
-      }
-      runStart = -1;
-    }
+  // 2) 거터 "사이"가 콘텐츠 구간 = 컷. 거터(위·아래 띠)는 컷에 포함하지 않는다
+  //    → 각 컷은 패널 내용만 깔끔하게. 상·하단 바깥 여백도 자연히 제외됨.
+  //    minSceneHeightPx 미만인 콘텐츠 조각(거터 노이즈)은 버린다.
+  const regions = [];
+  let cursor = 0;
+  for (const [gs, ge] of gutters) {
+    if (gs - cursor >= minSceneHeightPx) regions.push({ yStart: cursor, yEnd: gs });
+    cursor = ge;
   }
+  if (total - cursor >= minSceneHeightPx) regions.push({ yStart: cursor, yEnd: total });
 
-  // 3) 경계로 [contentStart, contentEnd] 를 조각낸다.
-  const cuts = [contentStart, ...boundaries, contentEnd];
-  let regions = [];
-  for (let i = 0; i < cuts.length - 1; i++) {
-    regions.push({ yStart: cuts[i], yEnd: cuts[i + 1] });
-  }
-
-  // 4) 너무 짧은 조각은 인접 컷에 흡수(자잘한 오분할 방지).
-  regions = absorbTiny(regions, minSceneHeightPx);
   return regions;
-}
-
-// minHeight 미만 조각을 이전(없으면 다음) 조각에 병합.
-function absorbTiny(regions, minHeight) {
-  if (regions.length <= 1) return regions;
-  const out = [];
-  for (const r of regions) {
-    const h = r.yEnd - r.yStart;
-    if (h < minHeight && out.length > 0) {
-      out[out.length - 1].yEnd = r.yEnd; // 이전에 흡수
-    } else {
-      out.push({ ...r });
-    }
-  }
-  // 첫 조각이 짧아 흡수 못 했으면 다음과 병합.
-  if (out.length >= 2 && out[0].yEnd - out[0].yStart < minHeight) {
-    out[1].yStart = out[0].yStart;
-    out.shift();
-  }
-  return out;
 }
