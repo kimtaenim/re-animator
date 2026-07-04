@@ -107,7 +107,9 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
     `(b) 지폐·이펙트·소품 같은 작은 요소 몇 개만 떠 있는 컷(예: 검은 배경에 지폐 한두 장), ` +
     `(c) 앞 컷과 같은 배경색·같은 인물이 이어지는 컷. 확실히 새로운 장면·인물·배경으로 ` +
     `바뀌는 컷만 빼라.\n` +
-    `오직 JSON만: {"mergeWithPrev":[번호들]}`;
+    `또한 그림 없이 나레이션·대사 텍스트만 있는 컷(예: 검은/흰 배경에 글자만 있는 컷)의 번호를 ` +
+    `textOnly 에 나열해라 — 이건 독립 컷이 아니라 앞 장면에 흡수된다.\n` +
+    `오직 JSON만: {"mergeWithPrev":[번호들], "textOnly":[번호들]}`;
 
   try {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -137,7 +139,10 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
     const txt = d.choices?.[0]?.message?.content ?? "{}";
     await log?.(`VLM 응답: ${txt.slice(0, 220)}`);
     const parsed = JSON.parse(txt);
-    const mergeSet = new Set((parsed.mergeWithPrev || []).map((x) => Number(x)));
+    // 텍스트만 있는 컷도 앞 장면에 흡수(별도 컷 아님). 두 리스트 합쳐 병합.
+    const mergeSet = new Set(
+      [...(parsed.mergeWithPrev || []), ...(parsed.textOnly || [])].map((x) => Number(x))
+    );
     const merged = mergeByList(candidates, mergeSet);
     const costUsd = vlmCostUsd(MODEL, d.usage);
     await recordCost({
