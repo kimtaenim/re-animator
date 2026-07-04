@@ -97,18 +97,15 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
   }
 
   const prompt =
-    `이 대조표는 위→아래로 흐르는 웹툰에서 기계로 잘라낸 후보 컷 ${candidates.length}개다` +
-    `(초록 숫자 1~${candidates.length}, 좌→우·위→아래 순서). 기계가 시각적 여백만 보고 잘라서, ` +
-    `한 장면(예: 돈이 흩날리는 장면, 같은 인물의 연속 동작, 같은 배경/맥락)이 여러 조각으로 ` +
-    `과분할돼 있다.\n` +
-    `각 컷 중 "바로 앞 컷과 같은 장면/맥락에 속하는" 컷의 번호만 나열해라. ` +
-    `나열된 컷은 앞 컷에 합쳐진다.\n` +
-    `특히 다음은 거의 항상 앞 장면의 연속이니 합쳐라: (a) 배경/바닥만 있고 인물·글자가 없는 컷, ` +
-    `(b) 지폐·이펙트·소품 같은 작은 요소 몇 개만 떠 있는 컷(예: 검은 배경에 지폐 한두 장), ` +
-    `(c) 앞 컷과 같은 배경색·같은 인물이 이어지는 컷. 확실히 새로운 장면·인물·배경으로 ` +
-    `바뀌는 컷만 빼라.\n` +
-    `또한 그림 없이 나레이션·대사 텍스트만 있는 컷(예: 검은/흰 배경에 글자만 있는 컷)의 번호를 ` +
-    `textOnly 에 나열해라 — 이건 독립 컷이 아니라 앞 장면에 흡수된다.\n` +
+    `이 대조표는 위→아래 웹툰에서 기계로 잘라낸 후보 컷 ${candidates.length}개다` +
+    `(초록 숫자 1~${candidates.length}, 좌→우·위→아래 순서).\n` +
+    `기본 원칙: 대부분의 컷은 각각 독립된 장면이다. 함부로 합치지 마라.\n` +
+    `아래 두 경우에만 "앞 컷에 합칠 번호"를 mergeWithPrev 에 넣어라:\n` +
+    `  1) 그림이 거의 없는 조각 — 배경/바닥만 있거나, 작은 요소 몇 개(지폐·이펙트·소품)만 ` +
+    `떠 있는 컷. 앞 장면의 잔여물이다.\n` +
+    `  2) 앞 컷과 명백히 "같은 순간의 연속" — 같은 인물이 같은 구도에서 이어지는 바로 다음 프레임.\n` +
+    `구도·인물·상황·배경이 다른(=다른 장면인) 컷은 절대 합치지 마라.\n` +
+    `그림 없이 나레이션·대사 글자만 있는 컷의 번호는 textOnly 에 넣어라(앞 장면에 흡수).\n` +
     `오직 JSON만: {"mergeWithPrev":[번호들], "textOnly":[번호들]}`;
 
   try {
@@ -117,6 +114,7 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
       headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
       body: JSON.stringify({
         model: MODEL,
+        temperature: 0, // 결정적 — 재분할마다 결과 흔들리지 않게
         messages: [
           {
             role: "user",
