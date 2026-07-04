@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node index.mjs",
+    "start:local": "node --env-file=../.env.local index.mjs",
     "cli": "node cli.mjs"
   },
   "dependencies": {
