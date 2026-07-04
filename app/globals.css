@@ -3,8 +3,8 @@
 @theme {
   /* === 액센트 한 곳에서 조정 — 웨지우드 블루(차분한 더스티 블루) =========== */
   /*   더 옅게 → #7AA3C4 / 더 진하게 → #3C6288                               */
-  --color-accent: #7d9bca; /* 웨지우드 블루 */
-  --color-accent-strong: #5e7eaf; /* hover/active */
+  --color-accent: #2962ff; /* 일렉트릭 블루 */
+  --color-accent-strong: #1e4fd8; /* hover/active */
   /* ===================================================================== */
 
   --font-sans: var(--font-geist-sans);
@@ -19,10 +19,10 @@
   --border: #e4e4e7; /* zinc-200 */
   --text: #18181b; /* zinc-900 */
   --muted: #71717a; /* zinc-500 */
-  --accent: #7d9bca; /* 웨지우드 블루 */
-  --accent-strong: #5e7eaf; /* hover/active */
+  --accent: #2962ff; /* 일렉트릭 블루 */
+  --accent-strong: #1e4fd8; /* hover/active */
   --danger: #ef4444; /* red-500 */
-  --ok: #7d9bca; /* 확정 액션(웨지우드 블루로 통일) */
+  --ok: #2962ff; /* 확정 액션(일렉트릭 블루로 통일) */
 }
 
 @media (prefers-color-scheme: dark) {
