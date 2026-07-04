@@ -9,6 +9,7 @@
 
 import sharp from "sharp";
 import { extractRegion } from "./imaging.mjs";
+import { detectRegions } from "./detect.mjs";
 import { recordCost } from "./store.mjs";
 
 const MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
@@ -76,20 +77,43 @@ export async function buildContactSheet(canvas, fileBuffers, candidates, log) {
     .toBuffer();
 }
 
-// "앞 컷에 합쳐라" 번호 집합(1-based) → 병합. 범위 밖·형식오류에 강함.
-function mergeByList(candidates, mergeSet) {
-  const merged = [];
+// VLM 판정 적용(1-based 번호 집합):
+//  - absorb: 앞 컷에 흡수(조각).
+//  - split: 그 컷 y구간을 더 잘게 재검출(fineCfg) → 서브 컷으로 대체. (자르기는 공짜)
+//  - 나머지: 그대로.
+function applyDecision(candidates, absorbSet, splitSet, globalProfile, fineCfg) {
+  const out = [];
   for (let i = 0; i < candidates.length; i++) {
-    if (i > 0 && mergeSet.has(i + 1) && merged.length > 0) {
-      merged[merged.length - 1].yEnd = candidates[i].yEnd; // 앞 장면에 흡수
+    const c = candidates[i];
+    const n = i + 1;
+    if (absorbSet.has(n) && out.length > 0) {
+      out[out.length - 1].yEnd = c.yEnd;
+    } else if (splitSet.has(n) && globalProfile) {
+      const slice = globalProfile.subarray(c.yStart, c.yEnd);
+      const sub = detectRegions(slice, fineCfg); // slice 기준 0-base
+      if (sub.length > 1) {
+        for (const s of sub) {
+          out.push({ yStart: c.yStart + s.yStart, yEnd: c.yStart + s.yEnd });
+        }
+      } else {
+        out.push({ yStart: c.yStart, yEnd: c.yEnd }); // 못 쪼개면 그대로
+      }
     } else {
-      merged.push({ yStart: candidates[i].yStart, yEnd: candidates[i].yEnd });
+      out.push({ yStart: c.yStart, yEnd: c.yEnd });
     }
   }
-  return merged.length ? merged : candidates;
+  return out.length ? out : candidates;
 }
 
-export async function groupScenes(canvas, fileBuffers, candidates, log, projectId) {
+export async function groupScenes(
+  canvas,
+  fileBuffers,
+  candidates,
+  log,
+  projectId,
+  globalProfile,
+  cfg
+) {
   const key = process.env.OPENAI_API_KEY;
   if (!key || candidates.length <= 1) return candidates; // 키 없거나 1개 → 폴백
 
@@ -105,18 +129,14 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
   const prompt =
     `이 대조표는 위→아래 웹툰에서 기계로 잘라낸 후보 컷 ${candidates.length}개다` +
     `(초록 숫자 1~${candidates.length}, 좌→우·위→아래 순서).\n` +
-    `너의 유일한 일: "독립된 컷이 아닌 조각"만 골라 앞 컷에 흡수시키는 것이다.\n` +
-    `absorb 에 넣을 것 — 오직 아래에 해당하는 컷만:\n` +
-    `  (1) 그림 없이 배경/바닥만 있는 컷\n` +
-    `  (2) 그림 없이 나레이션·대사 글자만 있는 컷\n` +
-    `  (3) 텅 빈 배경에 아주 작은 요소 1~2개만(예: 검은 배경에 지폐 한두 장) 떠 있고 ` +
-    `그 외엔 인물도 장면도 없는 컷\n` +
-    `절대 넣지 마라:\n` +
-    `  - 인물·구도·상황이 있는 실제 컷은 절대 넣지 마라. 지폐·소품이 함께 보여도, ` +
-    `인물이나 장면이 있으면 그건 독립 컷이다.\n` +
-    `  - 서로 다른 컷을 "비슷한 요소가 보인다"는 이유로 묶지 마라.\n` +
-    `확실하지 않으면 넣지 마라(빼는 게 안전하다). 대부분의 컷은 그대로 둔다.\n` +
-    `오직 JSON만: {"absorb":[번호들]}`;
+    `기계는 시각적 여백만 보고 잘라서, 어떤 컷은 조각으로 과분할됐고 어떤 컷은 여러 패널이 ` +
+    `한 덩어리로 뭉쳤다(과소분할). 두 가지를 판정해라.\n` +
+    `[absorb] — "독립 컷이 아닌 조각"의 번호. 오직: (1)배경/바닥만, (2)글자만, ` +
+    `(3)텅 빈 배경에 작은 요소 1~2개(예: 검은 배경 지폐 한두 장)만 있는 컷. 앞 컷에 흡수된다. ` +
+    `인물·장면이 있으면(지폐가 함께 보여도) 절대 넣지 마라.\n` +
+    `[split] — "한 컷 안에 서로 다른 패널/순간이 2개 이상 세로로 쌓여 있어 나눠야 하는" 컷의 번호. ` +
+    `예: 인물의 선언 + 여러 인물의 반응 + 군중이 한 컷에 뭉친 경우. 이런 컷은 더 잘게 나눈다.\n` +
+    `확실하지 않으면 어느 쪽에도 넣지 마라. 오직 JSON만: {"absorb":[번호들], "split":[번호들]}`;
 
   try {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -147,9 +167,15 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
     const txt = d.choices?.[0]?.message?.content ?? "{}";
     await log?.(`VLM 응답: ${txt.slice(0, 220)}`);
     const parsed = JSON.parse(txt);
-    // "조각"으로 지목된 컷만 앞 컷에 흡수. 나머지 실제 컷은 그대로.
     const absorbSet = new Set((parsed.absorb || []).map((x) => Number(x)));
-    const merged = mergeByList(candidates, absorbSet);
+    const splitSet = new Set((parsed.split || []).map((x) => Number(x)));
+    // split 지목 컷은 더 잘게 재검출(민감하게: flatStd↑, minGap↓).
+    const fineCfg = {
+      flatStdThreshold: (cfg?.flatStdThreshold ?? 10) + 6,
+      minGapPx: 12,
+      minSceneHeightPx: 40,
+    };
+    const merged = applyDecision(candidates, absorbSet, splitSet, globalProfile, fineCfg);
     const costUsd = vlmCostUsd(MODEL, d.usage);
     await recordCost({
       projectId,
@@ -159,9 +185,8 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
       meta: { kind: "scene-group", usage: d.usage, candidates: candidates.length },
     });
     await log?.(
-      `VLM 그룹핑: 후보 ${candidates.length} → 장면 ${merged.length} (병합 ${
-        candidates.length - merged.length
-      }개, ~$${costUsd.toFixed(4)})`
+      `VLM 판정: 후보 ${candidates.length} → 최종 ${merged.length} ` +
+        `(흡수 ${absorbSet.size}, 분할지목 ${splitSet.size}, ~$${costUsd.toFixed(4)})`
     );
     return merged;
   } catch (e) {

@@ -66,7 +66,7 @@ export async function runSplit(projectId) {
   const candidates = detectRegions(global, cfg);
   // 평탄도 후보를 VLM이 의미 장면으로 묶음(키 없으면 후보 그대로 폴백).
   await log(`후보 컷 ${candidates.length}개 — 장면 그룹핑…`);
-  const regions = await groupScenes(canvas, buffers, candidates, log, projectId);
+  const regions = await groupScenes(canvas, buffers, candidates, log, projectId, global, cfg);
   await log(`최종 컷 ${regions.length}개 — 좌우 크롭…`);
 
   // 각 컷의 좌우 여백 트림(패널만 남기게).
