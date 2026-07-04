@@ -19,6 +19,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
   const [uploadMsg, setUploadMsg] = useState("");
+  const [elapsed, setElapsed] = useState(0);
+  const elapsedTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const sourceStatus = project.steps.source.status;
@@ -60,6 +62,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     if (!files || files.length === 0) return;
     setBusy(true);
     setError("");
+    setElapsed(0);
+    const startedAt = Date.now();
+    elapsedTimer.current = setInterval(
+      () => setElapsed(Math.floor((Date.now() - startedAt) / 1000)),
+      500
+    );
     try {
       const list = Array.from(files);
       const registered: { url: string; width: number; height: number }[] = [];
@@ -78,11 +86,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           {
             access: "public",
             handleUploadUrl: "/api/source/blob-upload",
-            multipart: true,
-            onUploadProgress: (p) =>
-              setUploadMsg(
-                `업로드 중 ${i + 1}/${list.length} · ${f.name} · ${Math.round(p.percentage)}%`
-              ),
+            onUploadProgress: (p) => {
+              const pct = Number.isFinite(p.percentage) ? Math.round(p.percentage) : 0;
+              setUploadMsg(`업로드 중 ${i + 1}/${list.length} · ${f.name} · ${pct}%`);
+            },
           }
         );
         registered.push({ url: blob.url, width: dims.width, height: dims.height });
@@ -102,6 +109,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     } finally {
       setBusy(false);
       setUploadMsg("");
+      if (elapsedTimer.current) {
+        clearInterval(elapsedTimer.current);
+        elapsedTimer.current = null;
+      }
       if (fileRef.current) fileRef.current.value = "";
     }
   }
@@ -221,7 +232,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         {busy && uploadMsg && (
           <p className="mb-3 flex items-center gap-2 text-sm text-[var(--muted)]">
             <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-            {uploadMsg}
+            <span>
+              {uploadMsg} · {elapsed}초
+            </span>
           </p>
         )}
 
