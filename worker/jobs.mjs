@@ -9,6 +9,7 @@ import { getProject, saveProject, logProgress, resetProgress } from "./store.mjs
 import { computeRowProfile, extractRegion } from "./imaging.mjs";
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
+import { groupScenes } from "./group.mjs";
 import { loadSplitConfig } from "./config.mjs";
 
 async function download(url) {
@@ -38,12 +39,14 @@ export async function runSplit(projectId) {
   const refWidth = pickRefWidth(files.map((f) => f.width), cfg.refWidthMode);
   await log(`기준폭 ${refWidth}px, 파일 ${files.length}개 — 행 프로파일 계산…`);
 
-  // 파일을 하나씩만 열어 프로파일 계산(메모리 안전).
+  // 파일을 하나씩 열어 프로파일 계산. 버퍼는 VLM 그룹핑 썸네일용으로 보관.
   const profiles = [];
   const normHeights = [];
+  const buffers = [];
   for (let i = 0; i < files.length; i++) {
     await log(`파일 ${i + 1}/${files.length} 프로파일…`);
     const buf = await download(files[i].url);
+    buffers.push(buf);
     const { profile, normHeight } = await computeRowProfile(buf, refWidth);
     profiles.push(profile);
     normHeights.push(normHeight);
@@ -60,8 +63,11 @@ export async function runSplit(projectId) {
   }
 
   await log("경계 검출…");
-  const regions = detectRegions(global, cfg);
-  await log(`컷 ${regions.length}개 검출`);
+  const candidates = detectRegions(global, cfg);
+  // 평탄도 후보를 VLM이 의미 장면으로 묶음(키 없으면 후보 그대로 폴백).
+  await log(`후보 컷 ${candidates.length}개 — 장면 그룹핑…`);
+  const regions = await groupScenes(canvas, buffers, candidates, log);
+  await log(`최종 컷 ${regions.length}개`);
 
   const scenes = regions.map((r, idx) => ({
     id: randomUUID(),
