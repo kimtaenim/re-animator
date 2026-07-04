@@ -36,9 +36,37 @@ export async function computeRowProfile(buf, refWidth) {
   return { profile, normHeight: H };
 }
 
+// 각 열의 표준편차 → 좌우 균일 여백(검은/흰 옆 띠) 트림 범위 {xStart,xEnd}.
+// 세로 컷과 같은 원리(균일=여백)를 열에 적용. 패널만 남긴다.
+export async function computeSideCrop(regionPng, flatStd = 10) {
+  const { data, info } = await sharp(regionPng)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const W = info.width;
+  const H = info.height;
+  const colStd = (x) => {
+    let sum = 0;
+    let sum2 = 0;
+    for (let y = 0; y < H; y++) {
+      const v = data[y * W + x];
+      sum += v;
+      sum2 += v * v;
+    }
+    const m = sum / H;
+    return Math.sqrt(Math.max(0, sum2 / H - m * m));
+  };
+  let xStart = 0;
+  while (xStart < W && colStd(xStart) < flatStd) xStart++;
+  let xEnd = W;
+  while (xEnd > xStart && colStd(xEnd - 1) < flatStd) xEnd--;
+  if (xEnd - xStart < 20) return { xStart: 0, xEnd: W }; // 거의 다 균일 → 크롭 안 함
+  return { xStart, xEnd };
+}
+
 // 전역 정규화 [yStart, yEnd) 를 걸친 파일들에서 잘라 세로로 합쳐 PNG 버퍼로.
-// canvas: { refWidth, offsets, normHeights }. fileBuffers: 파일 순서대로.
-export async function extractRegion(canvas, fileBuffers, yStart, yEnd) {
+// xStart/xEnd 주면 좌우도 크롭. canvas: { refWidth, offsets, normHeights }.
+export async function extractRegion(canvas, fileBuffers, yStart, yEnd, xStart, xEnd) {
   const { refWidth, offsets, normHeights } = canvas;
   const height = Math.max(1, Math.round(yEnd - yStart));
   const pieces = [];
@@ -68,7 +96,7 @@ export async function extractRegion(canvas, fileBuffers, yStart, yEnd) {
     pieces.push({ input: slice, left: 0, top: Math.round(s - yStart) });
   }
 
-  return sharp({
+  const full = await sharp({
     create: {
       width: refWidth,
       height,
@@ -79,4 +107,17 @@ export async function extractRegion(canvas, fileBuffers, yStart, yEnd) {
     .composite(pieces)
     .png()
     .toBuffer();
+
+  // 좌우 크롭 적용(주어졌고 유효할 때만).
+  if (
+    xStart != null &&
+    xEnd != null &&
+    (xStart > 0 || xEnd < refWidth) &&
+    xEnd - xStart >= 1
+  ) {
+    const left = Math.max(0, Math.round(xStart));
+    const w = Math.min(refWidth - left, Math.max(1, Math.round(xEnd - xStart)));
+    return sharp(full).extract({ left, top: 0, width: w, height }).png().toBuffer();
+  }
+  return full;
 }

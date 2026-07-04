@@ -9,7 +9,10 @@ export const runtime = "nodejs";
 // PUT — G1 편집 결과 저장. regions(정렬된 {yStart,yEnd} 배열)로 씬을 재구성.
 //   경계 이동/추가/삭제는 클라에서 regions 배열로 반영해 통째로 보낸다.
 export async function PUT(req: NextRequest) {
-  let body: { projectId?: string; regions?: { yStart: number; yEnd: number }[] };
+  let body: {
+    projectId?: string;
+    regions?: { yStart: number; yEnd: number; xStart?: number; xEnd?: number }[];
+  };
   try {
     body = await req.json();
   } catch {
@@ -34,10 +37,17 @@ export async function PUT(req: NextRequest) {
   const total = project.virtualCanvas.totalHeight;
   // 정규화·검증: 범위 클램프 + yStart<yEnd 인 것만 + 순서 정렬.
   const clean = regions
-    .map((r) => ({
-      yStart: Math.max(0, Math.min(total, Math.round(r.yStart))),
-      yEnd: Math.max(0, Math.min(total, Math.round(r.yEnd))),
-    }))
+    .map((r) => {
+      const reg: { yStart: number; yEnd: number; xStart?: number; xEnd?: number } = {
+        yStart: Math.max(0, Math.min(total, Math.round(r.yStart))),
+        yEnd: Math.max(0, Math.min(total, Math.round(r.yEnd))),
+      };
+      if (r.xStart != null && r.xEnd != null && r.xEnd > r.xStart) {
+        reg.xStart = Math.round(r.xStart);
+        reg.xEnd = Math.round(r.xEnd);
+      }
+      return reg;
+    })
     .filter((r) => r.yEnd - r.yStart >= 1)
     .sort((a, b) => a.yStart - b.yStart);
   if (clean.length === 0) {

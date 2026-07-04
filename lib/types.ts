@@ -57,6 +57,8 @@ export interface VirtualCanvas {
 export interface SourceRegion {
   yStart: number; // 정규화 전역 y (포함)
   yEnd: number; // 정규화 전역 y (제외)
+  xStart?: number; // 좌우 크롭 — 옆 여백 제거(패널만). 없으면 전체 폭(0).
+  xEnd?: number; // 없으면 refWidth.
 }
 
 export interface Scene {

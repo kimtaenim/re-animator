@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { put } from "@vercel/blob";
 import { getProject, saveProject, logProgress, resetProgress } from "./store.mjs";
-import { computeRowProfile, extractRegion } from "./imaging.mjs";
+import { computeRowProfile, extractRegion, computeSideCrop } from "./imaging.mjs";
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
 import { groupScenes } from "./group.mjs";
@@ -67,12 +67,24 @@ export async function runSplit(projectId) {
   // 평탄도 후보를 VLM이 의미 장면으로 묶음(키 없으면 후보 그대로 폴백).
   await log(`후보 컷 ${candidates.length}개 — 장면 그룹핑…`);
   const regions = await groupScenes(canvas, buffers, candidates, log, projectId);
-  await log(`최종 컷 ${regions.length}개`);
+  await log(`최종 컷 ${regions.length}개 — 좌우 크롭…`);
+
+  // 각 컷의 좌우 여백 트림(패널만 남기게).
+  for (let i = 0; i < regions.length; i++) {
+    if (i % 3 === 0 || i === regions.length - 1) {
+      const pct = Math.round(((i + 1) / regions.length) * 100);
+      await log(`좌우 크롭 — 컷 ${i + 1}/${regions.length} (${pct}%)`);
+    }
+    const full = await extractRegion(canvas, buffers, regions[i].yStart, regions[i].yEnd);
+    const { xStart, xEnd } = await computeSideCrop(full, cfg.flatStdThreshold);
+    regions[i].xStart = xStart;
+    regions[i].xEnd = xEnd;
+  }
 
   const scenes = regions.map((r, idx) => ({
     id: randomUUID(),
     order: idx,
-    sourceRegion: { yStart: r.yStart, yEnd: r.yEnd },
+    sourceRegion: { yStart: r.yStart, yEnd: r.yEnd, xStart: r.xStart, xEnd: r.xEnd },
     status: "review",
   }));
 
@@ -117,7 +129,9 @@ export async function runExtract(projectId) {
       p.virtualCanvas,
       buffers,
       s.sourceRegion.yStart,
-      s.sourceRegion.yEnd
+      s.sourceRegion.yEnd,
+      s.sourceRegion.xStart,
+      s.sourceRegion.xEnd
     );
     const { url } = await put(
       `project/${projectId}/cut-${s.order}-${Date.now()}.png`,

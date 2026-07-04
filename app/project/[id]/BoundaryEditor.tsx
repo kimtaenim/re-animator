@@ -18,13 +18,18 @@ interface Props {
   onSave: (regions: { yStart: number; yEnd: number }[]) => Promise<void>;
 }
 
-type Region = { yStart: number; yEnd: number };
+type Region = { yStart: number; yEnd: number; xStart?: number; xEnd?: number };
 
-// scenes → 정렬된 region 배열.
+// scenes → 정렬된 region 배열(좌우 크롭 포함).
 function scenesToRegions(scenes: Scene[]): Region[] {
   return [...scenes]
     .sort((a, b) => a.order - b.order)
-    .map((s) => ({ yStart: s.sourceRegion.yStart, yEnd: s.sourceRegion.yEnd }));
+    .map((s) => ({
+      yStart: s.sourceRegion.yStart,
+      yEnd: s.sourceRegion.yEnd,
+      xStart: s.sourceRegion.xStart,
+      xEnd: s.sourceRegion.xEnd,
+    }));
 }
 
 const MIN_PX = 8; // 화면 픽셀 기준 최소 컷 높이
@@ -182,11 +187,19 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
           ))}
 
           {/* 컷 박스 */}
-          {regions.map((r, i) => (
+          {regions.map((r, i) => {
+            const xs = r.xStart ?? 0;
+            const xe = r.xEnd ?? canvas.refWidth;
+            return (
             <div
               key={`reg-${i}`}
-              className="absolute left-0 w-full border-2 border-[var(--accent)]"
-              style={{ top: r.yStart * scale, height: (r.yEnd - r.yStart) * scale }}
+              className="absolute border-2 border-[var(--accent)]"
+              style={{
+                top: r.yStart * scale,
+                height: (r.yEnd - r.yStart) * scale,
+                left: xs * scale,
+                width: (xe - xs) * scale,
+              }}
             >
               <div className="pointer-events-none absolute left-0.5 top-0.5 rounded bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-semibold text-white">
                 {i + 1}
@@ -213,7 +226,8 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
                 className="absolute bottom-[-3px] left-0 h-1.5 w-full cursor-ns-resize"
               />
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
