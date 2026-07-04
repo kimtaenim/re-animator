@@ -1,0 +1,15 @@
+{
+  "name": "re-animator-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.mjs",
+    "cli": "node cli.mjs"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.37.0",
+    "@vercel/blob": "^2.3.3",
+    "sharp": "^0.34.1"
+  }
+}

@@ -1,0 +1,288 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { type Project, type StepKind, STEP_ORDER } from "@/lib/types";
+import BoundaryEditor from "./BoundaryEditor";
+
+const STEP_LABEL: Record<StepKind, string> = {
+  source: "1. 소스 · 컷 분할",
+  cast: "2. 캐스팅",
+  regen: "3. 재생성",
+  scene: "4. 씬 · 더빙",
+  compose: "5. 합성",
+};
+
+export default function Studio({ initialProject }: { initialProject: Project }) {
+  const [project, setProject] = useState<Project>(initialProject);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [progress, setProgress] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const sourceStatus = project.steps.source.status;
+  const running = sourceStatus === "running";
+
+  // ── 분할/추출 진행 폴링 (워커 작업 중일 때만) ──────────────────────────────
+  const poll = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/split?projectId=${project.id}`, { cache: "no-store" });
+      const d = await r.json();
+      if (!d.ok) return;
+      setProgress(d.progress ?? "");
+      setProject((prev) => ({
+        ...prev,
+        virtualCanvas: d.virtualCanvas ?? prev.virtualCanvas,
+        scenes: d.scenes ?? prev.scenes,
+        steps: {
+          ...prev.steps,
+          source: { ...prev.steps.source, status: d.status, error: d.error },
+        },
+      }));
+    } catch {
+      /* 다음 틱 재시도 */
+    }
+  }, [project.id]);
+
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(poll, 2000);
+    const first = setTimeout(poll, 0); // 즉시 1회(effect 안 직접 setState 회피)
+    return () => {
+      clearInterval(t);
+      clearTimeout(first);
+    };
+  }, [running, poll]);
+
+  // ── 액션 ────────────────────────────────────────────────────────────────
+  async function upload(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setBusy(true);
+    setError("");
+    try {
+      const list = Array.from(files);
+      // 크기는 브라우저에서 재서 함께 보낸다(서버 이미지 디코딩 회피).
+      const dims = await Promise.all(
+        list.map(async (f) => {
+          const bmp = await createImageBitmap(f);
+          const d = { w: bmp.width, h: bmp.height };
+          bmp.close?.();
+          return d;
+        })
+      );
+      const form = new FormData();
+      form.append("projectId", project.id);
+      list.forEach((f) => form.append("files", f));
+      form.append("dims", JSON.stringify(dims));
+      const r = await fetch("/api/source/upload", { method: "POST", body: form });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "업로드 실패");
+      setProject(d.project);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "업로드 실패");
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function runSplit() {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await fetch("/api/split", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "분할 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, source: { ...prev.steps.source, status: "running" } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "분할 실패");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveRegions(regions: { yStart: number; yEnd: number }[]) {
+    const r = await fetch("/api/boundaries", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId: project.id, regions }),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error ?? "저장 실패");
+    setProject((prev) => ({ ...prev, scenes: d.scenes }));
+  }
+
+  async function confirm() {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await fetch("/api/boundaries", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "확정 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, source: { ...prev.steps.source, status: "running" } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "확정 실패");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const canvas = project.virtualCanvas;
+  const hasCuts = project.scenes.length > 0;
+  const approved = sourceStatus === "approved";
+
+  return (
+    <div>
+      {/* 헤더 */}
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-lg font-semibold">{project.name}</h1>
+        <span className="text-xs text-[var(--muted)]">{project.aspectRatio}</span>
+      </div>
+
+      {/* 단계 네비 (M1 은 1단계만 활성) */}
+      <nav className="mb-6 flex gap-1 text-xs">
+        {STEP_ORDER.map((k) => {
+          const active = k === "source";
+          return (
+            <span
+              key={k}
+              className={`rounded px-2.5 py-1 ${
+                active
+                  ? "bg-[var(--panel-2)] text-[var(--text)]"
+                  : "bg-transparent text-[var(--muted)] opacity-50"
+              }`}
+              title={active ? "" : "다음 마일스톤"}
+            >
+              {STEP_LABEL[k]}
+            </span>
+          );
+        })}
+      </nav>
+
+      {error && (
+        <p className="mb-4 rounded-md border border-[var(--danger)] bg-[var(--panel)] p-3 text-sm text-[var(--danger)]">
+          {error}
+        </p>
+      )}
+
+      {/* 1) 소스 업로드 */}
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">소스 이미지</h2>
+          <span className="text-xs text-[var(--muted)]">
+            업로드 순서 = 세로 스크롤 순서
+          </span>
+        </div>
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          multiple
+          disabled={busy || running}
+          onChange={(e) => upload(e.target.files)}
+          className="mb-3 block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-[var(--panel-2)] file:px-3 file:py-1.5 file:text-[var(--text)]"
+        />
+
+        {project.sourceFiles.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {project.sourceFiles.map((f) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={f.id}
+                src={f.url}
+                alt={`source ${f.order}`}
+                className="h-20 w-auto rounded border border-[var(--border)]"
+              />
+            ))}
+          </div>
+        )}
+
+        {project.sourceFiles.length > 0 && (
+          <button
+            onClick={runSplit}
+            disabled={busy || running}
+            className="mt-4 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium disabled:opacity-50"
+          >
+            {running ? "처리 중…" : hasCuts ? "다시 분할" : "컷 자동 분할"}
+          </button>
+        )}
+      </section>
+
+      {/* 진행 표시 */}
+      {running && (
+        <p className="mb-6 flex items-center gap-2 text-sm text-[var(--muted)]">
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+          워커 작업 중… {progress && <span className="opacity-70">{progress}</span>}
+        </p>
+      )}
+
+      {/* 2) G1 경계 편집 (검수 대기) */}
+      {!running && canvas && hasCuts && sourceStatus === "review" && (
+        <section className="mb-6">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">
+              G1 · 컷 경계 검수{" "}
+              <span className="font-normal text-[var(--muted)]">
+                ({project.scenes.length}컷)
+              </span>
+            </h2>
+            <button
+              onClick={confirm}
+              disabled={busy}
+              className="rounded-md bg-[var(--ok)] px-4 py-2 text-sm font-medium disabled:opacity-50"
+            >
+              경계 확정 · 컷 추출
+            </button>
+          </div>
+          <BoundaryEditor
+            sourceFiles={project.sourceFiles}
+            canvas={canvas}
+            scenes={project.scenes}
+            onSave={saveRegions}
+          />
+        </section>
+      )}
+
+      {/* 3) 추출 완료 */}
+      {approved && (
+        <section className="mb-6">
+          <h2 className="mb-3 text-sm font-semibold">
+            추출된 컷{" "}
+            <span className="font-normal text-[var(--muted)]">
+              ({project.scenes.length}컷) — 1단계 완료, 이후 캐스팅(M2)로
+            </span>
+          </h2>
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+            {project.scenes.map((s) => (
+              <div key={s.id} className="rounded border border-[var(--border)] bg-[var(--panel)] p-1">
+                {s.originalImage ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={s.originalImage} alt={`cut ${s.order}`} className="w-full rounded" />
+                ) : (
+                  <div className="grid h-24 place-items-center text-xs text-[var(--muted)]">
+                    #{s.order}
+                  </div>
+                )}
+                <p className="mt-1 text-center text-xs text-[var(--muted)]">컷 {s.order + 1}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}

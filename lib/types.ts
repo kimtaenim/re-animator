@@ -1,0 +1,93 @@
+// ============================================================================
+// re-animator — 도메인 타입 (M1 범위)
+// ----------------------------------------------------------------------------
+// 스펙 §4 데이터 모델의 M1 부분집합: 소스 파일 · 가상 캔버스 · 컷(Scene) 경계.
+// 이후 마일스톤(캐스팅·재생성·I2V·더빙·합성) 필드는 진행하며 확장한다. 각 필드는
+// optional 확장을 전제로 두어, 한 단계 추가가 기존 타입을 깨지 않게 한다.
+// ============================================================================
+
+// ── 파이프라인 단계 ──────────────────────────────────────────────────────────
+// M1 은 source(소스+분할) 하나만 구현. 나머지는 자리만 잡아둔다(문서/네비게이션용).
+export type StepKind =
+  | "source" // 1. 업로드 + 가상캔버스 + 컷 분할 + G1 경계 승인   ← M1
+  | "cast" // 2. 캐스팅 (G0)                                    (M2)
+  | "regen" // 3. 재생성 (G2)                                    (M3)
+  | "scene" // 4. 씬 생성 + 더빙 (G3)                            (M4-6)
+  | "compose"; // 5. 합성 + 시사                                  (M7)
+
+export const STEP_ORDER: StepKind[] = ["source", "cast", "regen", "scene", "compose"];
+
+export type StepStatus =
+  | "pending" // 아직 진행 안 됨 / 이전 단계 미승인
+  | "running" // 워커 작업 진행 중(분할 등)
+  | "review" // 산출물 나옴, 사람 검수 대기 (G0-G3)
+  | "approved" // 승인, 다음 단계 진입 가능
+  | "error";
+
+export interface StepState {
+  kind: StepKind;
+  status: StepStatus;
+  jobId?: string; // 워커 비동기 작업 id (split/extract 등)
+  error?: string;
+  updatedAt: number;
+}
+
+export type AspectRatio = "16:9" | "9:16" | "1:1";
+
+// ── 소스 파일 (업로드 순서 유지) ─────────────────────────────────────────────
+export interface SourceFile {
+  id: string;
+  url: string; // Blob 공개 URL
+  order: number; // 업로드 순서 (0-base)
+  width: number; // 원본 픽셀 폭
+  height: number; // 원본 픽셀 높이
+}
+
+// ── 가상 캔버스 ──────────────────────────────────────────────────────────────
+// 실제 스티칭 없이 오프셋 테이블만으로 "가상의 긴 파일"을 표현(스펙 §5.2).
+// 모든 좌표는 refWidth 기준으로 정규화된 전역 y. 워커가 분할 시 계산해 채운다.
+export interface VirtualCanvas {
+  refWidth: number; // 정규화 기준폭
+  totalHeight: number; // 정규화 전역 높이 (= normHeights 합)
+  offsets: number[]; // 파일별 시작 전역 y (누적합). offsets[i] = i번째 파일 시작
+  normHeights: number[]; // 파일별 정규화 높이 (refWidth 로 리사이즈했을 때)
+}
+
+// ── 컷(Scene) — M1 은 경계(source_region)만. 이후 단계가 나머지를 채운다. ───────
+export interface SourceRegion {
+  yStart: number; // 정규화 전역 y (포함)
+  yEnd: number; // 정규화 전역 y (제외)
+}
+
+export interface Scene {
+  id: string;
+  order: number;
+  sourceRegion: SourceRegion; // 가상 캔버스 전역 좌표
+  originalImage?: string; // 추출된 원본 컷 Blob URL (확정 후 워커가 채움)
+  status: StepStatus; // M1 에선 경계 확정 여부 관리에만 사용
+}
+
+// ── 프로젝트 ──────────────────────────────────────────────────────────────────
+export interface Project {
+  id: string;
+  name: string;
+  aspectRatio: AspectRatio;
+  stylePrompt: string; // 프로젝트층 프롬프트(화풍). M1 에선 설정만 보관.
+  negativePrompt: string; // 기본: 말풍선·글자·텍스트 금지
+
+  sourceFiles: SourceFile[];
+  virtualCanvas: VirtualCanvas | null; // 분할 전엔 null
+  scenes: Scene[]; // 순서 있는 배열. 분할 결과 → G1 편집 → 확정.
+
+  steps: Record<StepKind, StepState>;
+
+  createdAt: number;
+  updatedAt: number;
+}
+
+export const DEFAULT_NEGATIVE_PROMPT =
+  "speech bubbles, text, letters, captions, watermarks, sound-effect lettering";
+
+export function newStepState(kind: StepKind): StepState {
+  return { kind, status: "pending", updatedAt: Date.now() };
+}

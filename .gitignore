@@ -1,0 +1,18 @@
+/node_modules
+/worker/node_modules
+/.next
+/out
+/build
+next-env.d.ts
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+.env*.local
+
+# local scratch (샘플 웹툰·CLI 디버그 출력)
+/scratch
+/worker/scratch
+
+.DS_Store
