@@ -54,6 +54,19 @@ export async function getProgress(projectId) {
   }
 }
 
+// 비용 기록 — API 호출 후 USD 를 Redis 리스트에 적재. 앱이 합산해 ₩로 표시(§15).
+export async function recordCost(entry) {
+  try {
+    const e = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: Date.now(),
+      ...entry,
+    };
+    await redis.lpush("cost:entries", e);
+    await redis.ltrim("cost:entries", 0, 4999); // 폭주 방지
+  } catch {}
+}
+
 // 단계 실패 표시 — 오케스트레이터 밖(타임아웃 등)에서도 상태를 error 로.
 export async function failStep(projectId, error) {
   try {

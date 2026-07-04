@@ -9,8 +9,24 @@
 
 import sharp from "sharp";
 import { extractRegion } from "./imaging.mjs";
+import { recordCost } from "./store.mjs";
 
 const MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o-mini";
+
+// USD per 1M tokens (2026 기준 근사, 변동 가능). 한 곳에서 관리.
+const PRICING = {
+  "gpt-4o-mini": { input: 0.15, output: 0.6 },
+  "gpt-4o": { input: 2.5, output: 10 },
+  "gpt-4.1-mini": { input: 0.4, output: 1.6 },
+  "gpt-4.1": { input: 2.0, output: 8.0 },
+};
+
+function vlmCostUsd(model, usage) {
+  const p = PRICING[model] || PRICING["gpt-4o-mini"];
+  const it = usage?.prompt_tokens ?? 0;
+  const ot = usage?.completion_tokens ?? 0;
+  return (it * p.input + ot * p.output) / 1_000_000;
+}
 const CELL = 160;
 const THUMB = 150;
 const COLS = 6;
@@ -70,7 +86,7 @@ function mergeByLabels(candidates, labels) {
   return merged.length ? merged : candidates;
 }
 
-export async function groupScenes(canvas, fileBuffers, candidates, log) {
+export async function groupScenes(canvas, fileBuffers, candidates, log, projectId) {
   const key = process.env.OPENAI_API_KEY;
   if (!key || candidates.length <= 1) return candidates; // 키 없거나 1개 → 폴백
 
@@ -118,7 +134,17 @@ export async function groupScenes(canvas, fileBuffers, candidates, log) {
     const txt = d.choices?.[0]?.message?.content ?? "{}";
     const labels = JSON.parse(txt).labels;
     const merged = mergeByLabels(candidates, labels);
-    await log?.(`VLM 그룹핑: 후보 ${candidates.length} → 장면 ${merged.length}`);
+    const costUsd = vlmCostUsd(MODEL, d.usage);
+    await recordCost({
+      projectId,
+      vendor: "openai",
+      model: MODEL,
+      costUsd,
+      meta: { kind: "scene-group", usage: d.usage, candidates: candidates.length },
+    });
+    await log?.(
+      `VLM 그룹핑: 후보 ${candidates.length} → 장면 ${merged.length} (~$${costUsd.toFixed(4)})`
+    );
     return merged;
   } catch (e) {
     await log?.(`VLM 그룹핑 실패(알고리즘 컷 유지): ${e?.message ?? e}`);

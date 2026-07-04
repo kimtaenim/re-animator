@@ -18,6 +18,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
+  const [costKrw, setCostKrw] = useState<number | null>(null);
   const [uploadMsg, setUploadMsg] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const elapsedTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -70,6 +71,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       clearTimeout(first);
     };
   }, [running, poll]);
+
+  // 누적 API 비용(₩) — 마운트 + 단계 변화(분할 완료 등) 때 갱신.
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/cost?projectId=${project.id}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (alive && d.ok) setCostKrw(d.krw);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [project.id, sourceStatus]);
 
   // ── 액션 ────────────────────────────────────────────────────────────────
   async function uploadFiles(files: FileList | null) {
@@ -367,6 +382,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           </div>
         </section>
       )}
+
+      <footer className="mt-8 border-t border-[var(--border)] pt-3 text-xs text-[var(--muted)]">
+        누적 API 예상비용:{" "}
+        <span className="font-semibold text-[var(--text)]">
+          {costKrw === null ? "…" : `₩${costKrw.toLocaleString("ko-KR")}`}
+        </span>{" "}
+        <span className="opacity-60">(환율 1,500원 기준)</span>
+      </footer>
     </div>
   );
 }
