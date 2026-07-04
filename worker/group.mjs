@@ -11,7 +11,7 @@ import sharp from "sharp";
 import { extractRegion } from "./imaging.mjs";
 import { recordCost } from "./store.mjs";
 
-const MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o-mini";
+const MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
 
 // USD per 1M tokens (2026 기준 근사, 변동 가능). 한 곳에서 관리.
 const PRICING = {
@@ -27,9 +27,9 @@ function vlmCostUsd(model, usage) {
   const ot = usage?.completion_tokens ?? 0;
   return (it * p.input + ot * p.output) / 1_000_000;
 }
-const CELL = 160;
-const THUMB = 150;
-const COLS = 6;
+const CELL = 210;
+const THUMB = 200;
+const COLS = 4;
 
 // 후보 썸네일 대조표(번호 라벨 포함) 한 장 생성. (로컬 검증용으로도 export)
 export async function buildContactSheet(canvas, fileBuffers, candidates) {
