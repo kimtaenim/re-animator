@@ -32,9 +32,14 @@ const THUMB = 200;
 const COLS = 4;
 
 // 후보 썸네일 대조표(번호 라벨 포함) 한 장 생성. (로컬 검증용으로도 export)
-export async function buildContactSheet(canvas, fileBuffers, candidates) {
+export async function buildContactSheet(canvas, fileBuffers, candidates, log) {
   const cells = [];
-  for (let i = 0; i < candidates.length; i++) {
+  const total = candidates.length;
+  for (let i = 0; i < total; i++) {
+    if (log && (i % 3 === 0 || i === total - 1)) {
+      const pct = Math.round(((i + 1) / total) * 100);
+      await log(`장면 판정 준비 — 컷 ${i + 1}/${total} (${pct}%)`);
+    }
     const png = await extractRegion(
       canvas,
       fileBuffers,
@@ -90,11 +95,12 @@ export async function groupScenes(canvas, fileBuffers, candidates, log, projectI
 
   let sheet;
   try {
-    sheet = await buildContactSheet(canvas, fileBuffers, candidates);
+    sheet = await buildContactSheet(canvas, fileBuffers, candidates, log);
   } catch (e) {
     await log?.(`대조표 생성 실패(알고리즘 컷 유지): ${e?.message ?? e}`);
     return candidates;
   }
+  await log?.(`AI가 ${candidates.length}개 컷 장면 판정 중…`);
 
   const prompt =
     `이 대조표는 위→아래 웹툰에서 기계로 잘라낸 후보 컷 ${candidates.length}개다` +

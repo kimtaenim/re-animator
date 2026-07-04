@@ -323,10 +323,25 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
 
       {/* 진행 표시 */}
       {running && (
-        <p className="mb-6 flex items-center gap-2 text-sm text-[var(--muted)]">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-          워커 작업 중… {progress && <span className="opacity-70">{progress}</span>}
-        </p>
+        <div className="mb-6">
+          <p className="flex items-center gap-2 text-sm text-[var(--muted)]">
+            <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+            워커 작업 중… {progress && <span className="opacity-70">{progress}</span>}
+          </p>
+          {(() => {
+            const m = progress.match(/\((\d+)%\)/);
+            const pct = m ? Number(m[1]) : null;
+            if (pct === null) return null;
+            return (
+              <div className="mt-2 h-1.5 w-full max-w-md overflow-hidden rounded-full bg-[var(--panel-2)]">
+                <div
+                  className="h-full bg-[var(--accent)] transition-all duration-300"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            );
+          })()}
+        </div>
       )}
 
       {/* 2) G1 경계 편집 (검수 대기) */}
