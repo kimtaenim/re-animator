@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
 import { type Project, type StepKind, STEP_ORDER } from "@/lib/types";
 import BoundaryEditor from "./BoundaryEditor";
 
@@ -54,28 +55,38 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }, [running, poll]);
 
   // ── 액션 ────────────────────────────────────────────────────────────────
-  async function upload(files: FileList | null) {
+  async function uploadFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     setBusy(true);
     setError("");
     try {
       const list = Array.from(files);
-      // 크기는 브라우저에서 재서 함께 보낸다(서버 이미지 디코딩 회피).
-      const dims = await Promise.all(
-        list.map(async (f) => {
-          const bmp = await createImageBitmap(f);
-          const d = { w: bmp.width, h: bmp.height };
-          bmp.close?.();
-          return d;
-        })
-      );
-      const form = new FormData();
-      form.append("projectId", project.id);
-      list.forEach((f) => form.append("files", f));
-      form.append("dims", JSON.stringify(dims));
-      const r = await fetch("/api/source/upload", { method: "POST", body: form });
+      const registered: { url: string; width: number; height: number }[] = [];
+      // 각 파일을 브라우저에서 Blob 로 "직접" 업로드(서버리스 4.5MB 본문 한계 우회).
+      // 큰 웹툰 파일은 multipart 로 청크 전송. 크기는 여기서 재서 함께 등록.
+      for (const f of list) {
+        const bmp = await createImageBitmap(f);
+        const dims = { width: bmp.width, height: bmp.height };
+        bmp.close?.();
+        const blob = await upload(
+          `project/${project.id}/source-${Date.now()}-${f.name}`,
+          f,
+          {
+            access: "public",
+            handleUploadUrl: "/api/source/blob-upload",
+            multipart: true,
+          }
+        );
+        registered.push({ url: blob.url, width: dims.width, height: dims.height });
+      }
+      // 업로드된 URL·크기를 프로젝트에 등록(메타데이터만).
+      const r = await fetch("/api/source/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, files: registered }),
+      });
       const d = await r.json();
-      if (!d.ok) throw new Error(d.error ?? "업로드 실패");
+      if (!d.ok) throw new Error(d.error ?? "등록 실패");
       setProject(d.project);
     } catch (e) {
       setError(e instanceof Error ? e.message : "업로드 실패");
@@ -193,7 +204,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           accept="image/*"
           multiple
           disabled={busy || running}
-          onChange={(e) => upload(e.target.files)}
+          onChange={(e) => uploadFiles(e.target.files)}
           className="mb-3 block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-[var(--panel-2)] file:px-3 file:py-1.5 file:text-[var(--text)]"
         />
 

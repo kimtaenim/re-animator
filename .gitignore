@@ -16,3 +16,6 @@ next-env.d.ts
 /worker/scratch
 
 .DS_Store
+
+.vercel
+.env*
