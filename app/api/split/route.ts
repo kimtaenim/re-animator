@@ -58,9 +58,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "프로젝트 없음" }, { status: 404 });
   }
   let progress = "";
+  let progressLog: string[] = [];
   try {
-    const lines = await getRedis().lrange<string>(`split:progress:${projectId}`, -1, -1);
-    progress = lines?.[0] ?? "";
+    progressLog =
+      (await getRedis().lrange<string>(`split:progress:${projectId}`, -30, -1)) ?? [];
+    progress = progressLog[progressLog.length - 1] ?? "";
   } catch {
     /* best-effort */
   }
@@ -72,5 +74,6 @@ export async function GET(req: NextRequest) {
     virtualCanvas: project.virtualCanvas,
     scenes: project.scenes,
     progress,
+    progressLog,
   });
 }

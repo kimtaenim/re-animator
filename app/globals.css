@@ -1,10 +1,10 @@
 @import "tailwindcss";
 
 @theme {
-  /* === 액센트 한 곳에서 조정 (aninews 는 민트 teal-400, 여긴 에메랄드) ===== */
-  /*   더 옅게 → #34d399 (emerald-400) / 더 진하게 → #047857 (emerald-700)   */
-  --color-accent: #10b981; /* 에메랄드그린 (Tailwind emerald-500) */
-  --color-accent-strong: #059669; /* hover/active (emerald-600) */
+  /* === 액센트 한 곳에서 조정 — 웨지우드 블루(차분한 더스티 블루) =========== */
+  /*   더 옅게 → #7AA3C4 / 더 진하게 → #3C6288                               */
+  --color-accent: #7d9bca; /* 웨지우드 블루 */
+  --color-accent-strong: #5e7eaf; /* hover/active */
   /* ===================================================================== */
 
   --font-sans: var(--font-geist-sans);
@@ -19,10 +19,10 @@
   --border: #e4e4e7; /* zinc-200 */
   --text: #18181b; /* zinc-900 */
   --muted: #71717a; /* zinc-500 */
-  --accent: #10b981; /* emerald-500 */
-  --accent-strong: #059669; /* emerald-600 */
+  --accent: #7d9bca; /* 웨지우드 블루 */
+  --accent-strong: #5e7eaf; /* hover/active */
   --danger: #ef4444; /* red-500 */
-  --ok: #10b981; /* emerald-500 (초록 확정 액션) */
+  --ok: #7d9bca; /* 확정 액션(웨지우드 블루로 통일) */
 }
 
 @media (prefers-color-scheme: dark) {
