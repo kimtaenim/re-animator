@@ -641,18 +641,23 @@ export async function runRegen(projectId, payload) {
   return ok;
 }
 
-// 영상 길이(초) 추정 — 대사(말풍선+나레이션) 글자 수 기반(한국어 대략 5자/초).
-// 대사가 그 컷 위로 흐르는 시간에 맞춘다. 나중에 TTS 오디오 실제 길이로 대체.
+// 영상 길이(초) 추정. 우선순위: ①사람 지정(cut.durationSec) → ②대사 글자 수(한국어 ~5자/초)
+// → ③무대사 장면전환(transition)은 길게 → ④그 외 최소 비트. 나중에 TTS 오디오 길이가 마스터.
 function estimateVideoSeconds(cut) {
+  const MIN = Number(process.env.VIDEO_MIN_SEC || 2);
+  const MAX = Number(process.env.VIDEO_MAX_SEC || 8);
+  if (cut?.durationSec) return Math.max(1, Math.min(15, Math.round(cut.durationSec)));
   const parts = [];
   if (cut?.bubbles?.length) for (const b of cut.bubbles) parts.push(b.text || "");
   else if (cut?.dialogue) parts.push(cut.dialogue);
   if (cut?.narration) parts.push(cut.narration);
   const chars = parts.join(" ").replace(/\s+/g, "").length;
-  const CPS = Number(process.env.VIDEO_CHARS_PER_SEC || 5);
-  const MIN = Number(process.env.VIDEO_MIN_SEC || 2);
-  const MAX = Number(process.env.VIDEO_MAX_SEC || 6);
-  return Math.max(MIN, Math.min(MAX, Math.round(chars / CPS) || MIN));
+  if (chars > 0) {
+    const CPS = Number(process.env.VIDEO_CHARS_PER_SEC || 5);
+    return Math.max(MIN, Math.min(MAX, Math.round(chars / CPS)));
+  }
+  if (cut?.type === "transition") return Number(process.env.VIDEO_TRANSITION_SEC || 4);
+  return MIN;
 }
 
 // ── video(M4): 재생성 컷(generatedImage)을 Grok I2V 로 영상화 → Scene.videoUrl ─

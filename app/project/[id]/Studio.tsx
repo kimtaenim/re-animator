@@ -1255,15 +1255,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   ? spkChars.map((c) => c.label).join(", ")
                   : "나레이션/미상";
                 const voiceLabel = spkChars.map((c) => c.voiceName || c.voice).filter(Boolean).join(", ");
-                // 예상 영상 길이(초) — 대사(말풍선+나레이션) 글자 수 기반(한국어 대략 5자/초).
+                // 예상 영상 길이(초). 우선순위: 지정(durationSec) → 대사 글자수 → 무대사
+                // 장면전환 4s → 그 외 2s. (worker estimateVideoSeconds 와 동일 규칙)
                 const dubText =
                   (bubs.length ? bubs.map((b) => b.text).join(" ") : s.cut?.dialogue ?? "") +
                   " " +
                   (s.cut?.narration ?? "");
-                const estSec = Math.max(
-                  2,
-                  Math.min(6, Math.round(dubText.replace(/\s+/g, "").length / 5) || 2)
-                );
+                const dubChars = dubText.replace(/\s+/g, "").length;
+                const estSec = s.cut?.durationSec
+                  ? s.cut.durationSec
+                  : dubChars > 0
+                    ? Math.max(2, Math.min(8, Math.round(dubChars / 5)))
+                    : s.cut?.type === "transition"
+                      ? 4
+                      : 2;
                 return (
                   <div
                     key={s.id}
@@ -1306,8 +1311,25 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         >
                           {s.videoUrl ? "🎬 다시" : "🎬 동영상"}
                         </button>
+                        <label className="flex items-center gap-1 text-[var(--muted)]" title="이 컷 영상 길이(초). 비우면 자동(대사/타입 기준). 장면전환 등 무대사 컷은 여기서 늘리세요.">
+                          길이
+                          <input
+                            type="number"
+                            min={1}
+                            max={15}
+                            value={s.cut?.durationSec ?? ""}
+                            placeholder={String(estSec)}
+                            onChange={(e) =>
+                              updateCut(s.id, {
+                                durationSec: e.target.value ? Number(e.target.value) : undefined,
+                              })
+                            }
+                            className="w-12 rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
+                          />
+                          s{!s.cut?.durationSec && <span className="opacity-60"> (자동 ~{estSec})</span>}
+                        </label>
                         <span className="text-[var(--muted)]">
-                          ~{estSec}s · 화자: {speakerLabel}
+                          화자: {speakerLabel}
                           {voiceLabel ? ` · 목소리: ${voiceLabel}` : " · 목소리 미지정"}
                         </span>
                       </div>

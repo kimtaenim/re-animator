@@ -59,6 +59,9 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.description === "string") c.description = r.description.slice(0, 800);
   if (typeof r.promptDraft === "string") c.promptDraft = r.promptDraft.slice(0, 800);
   if (typeof r.motion === "string") c.motion = r.motion.slice(0, 200);
+  if (typeof r.durationSec === "number" && r.durationSec > 0) {
+    c.durationSec = Math.max(1, Math.min(15, Math.round(r.durationSec)));
+  }
   c.confirmed = r.confirmed === true;
   return c;
 }
