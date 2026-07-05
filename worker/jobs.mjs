@@ -20,6 +20,7 @@ import { splitTallRegions, forceSplit } from "./group.mjs";
 import { classifyScenes } from "./classify.mjs";
 import { classifyCast } from "./cast.mjs";
 import { regenScene, regenSceneMasked, REGEN_CONCURRENCY } from "./regen.mjs";
+import { regenSceneFal } from "./fal.mjs";
 import { readCutText } from "./ocr.mjs";
 
 const CHARACTER_TYPES = new Set(["person"]);
@@ -503,9 +504,17 @@ export async function runRegen(projectId, payload) {
     await logProgress(projectId, m);
   };
 
+  // 모델 선택: gpt-image-1 / gpt-image-2(있으면) → OpenAI, fal/flux → fal.ai Flux.
+  const sel = payload?.model || "gpt-image-1";
+  const useFal = sel === "fal" || sel.startsWith("flux");
   const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("OPENAI_API_KEY 없음");
-  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+  const falKey = process.env.FAL_KEY;
+  const openaiModel = sel.startsWith("gpt-image")
+    ? sel
+    : process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+  if (useFal && !falKey) throw new Error("FAL_KEY 없음(Render 워커 환경변수에 넣어주세요)");
+  if (!useFal && !key) throw new Error("OPENAI_API_KEY 없음");
+  const model = useFal ? "fal-flux" : openaiModel;
 
   const p = await getProject(projectId);
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
@@ -516,7 +525,7 @@ export async function runRegen(projectId, payload) {
     const set = new Set(payload.sceneIds);
     cand = cand.filter((s) => set.has(s.id));
   }
-  await log(`재생성 대상 ${cand.length}컷 (전체 ${scenes.length}), 동시 ${REGEN_CONCURRENCY}장`);
+  await log(`재생성 대상 ${cand.length}컷 · 모델 ${model} · 동시 ${REGEN_CONCURRENCY}`);
   if (cand.length === 0) throw new Error("재생성할 컷이 없어요(컷 추출 먼저)");
 
   const genById = new Map(); // sceneId → { url } | { error }
@@ -555,10 +564,15 @@ export async function runRegen(projectId, payload) {
     await Promise.all(
       chunk.map(async (s) => {
         try {
-          const imgBuf = await download(s.originalImage);
-          const mode = s.regenMode || p.regenMode || "mask";
-          const gen = mode === "mask" ? regenSceneMasked : regenScene;
-          const { buf, cost } = await gen(s, imgBuf, p, key, model);
+          let buf, cost;
+          if (useFal) {
+            ({ buf, cost } = await regenSceneFal(s, p, falKey));
+          } else {
+            const imgBuf = await download(s.originalImage);
+            const mode = s.regenMode || p.regenMode || "mask";
+            const gen = mode === "mask" ? regenSceneMasked : regenScene;
+            ({ buf, cost } = await gen(s, imgBuf, p, key, openaiModel));
+          }
           costTotal += cost;
           const { url } = await put(
             `project/${projectId}/gen-${s.order}-${Date.now()}.png`,

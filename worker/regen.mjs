@@ -49,16 +49,19 @@ export function buildRegenPrompt(scene, project) {
 }
 
 // 프로젝트 비율의 '정확한' 최종 크기(gpt-image-1 3종 크기와 별개 — 진짜 16:9 등).
-function exactSize(project) {
+export function exactSize(project) {
   const ar = project?.aspectRatio;
   if (ar === "9:16") return [864, 1536];
   if (ar === "1:1") return [1024, 1024];
   return [1536, 864]; // 16:9
 }
-// gpt-image-1 출력(3:2 등)을 목표 비율로 크롭(fit cover) → 모든 컷 정확히 같은 비율·크기.
-async function normalizeSize(b64, project) {
+// 아무 이미지 버퍼든 목표 비율·크기로 크롭(fit cover) → 모든 컷/모든 모델 출력 일관.
+export async function fitBuffer(buf, project) {
   const [TW, TH] = exactSize(project);
-  return sharp(Buffer.from(b64, "base64")).resize(TW, TH, { fit: "cover" }).png().toBuffer();
+  return sharp(buf).resize(TW, TH, { fit: "cover" }).png().toBuffer();
+}
+async function normalizeSize(b64, project) {
+  return fitBuffer(Buffer.from(b64, "base64"), project);
 }
 
 // 원본 컷 이미지 버퍼 + 씬 → 재생성 이미지 buf (+비용). 실패 시 throw.

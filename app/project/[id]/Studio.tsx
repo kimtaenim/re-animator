@@ -29,6 +29,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [progress, setProgress] = useState("");
   const [progressLog, setProgressLog] = useState<string[]>([]);
   const [srcOpen, setSrcOpen] = useState<boolean | null>(null); // null=기본(승인되면 접힘)
+  const [genModel, setGenModel] = useState("gpt-image-1"); // 재생성 모델(비교용)
   const [costKrw, setCostKrw] = useState<number | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [nameVal, setNameVal] = useState("");
@@ -301,7 +302,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       const r = await fetch("/api/regen", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id }),
+        body: JSON.stringify({ projectId: project.id, model: genModel }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "재생성 실패");
@@ -364,7 +365,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       const r = await fetch("/api/regen", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, sceneIds: [...selForRegen] }),
+        body: JSON.stringify({ projectId: project.id, sceneIds: [...selForRegen], model: genModel }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "생성 실패");
@@ -448,7 +449,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       const r = await fetch("/api/regen", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, sceneIds: [sceneId] }),
+        body: JSON.stringify({ projectId: project.id, sceneIds: [sceneId], model: genModel }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "생성 실패");
@@ -814,12 +815,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         <section className="mb-6">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <h2 className="text-sm font-semibold">
-                3. 재생성{" "}
-                <span className="font-normal text-[var(--muted)]">— gpt-image-1, 병렬</span>
-              </h2>
+              <h2 className="text-sm font-semibold">3. 재생성</h2>
               <div className="flex items-center gap-1 text-xs">
-                <span className="text-[var(--muted)]">출력 비율:</span>
+                <span className="text-[var(--muted)]">모델:</span>
+                <select
+                  value={genModel}
+                  onChange={(e) => setGenModel(e.target.value)}
+                  title="생성 모델(비교용). fal 은 FAL_KEY 필요."
+                  className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
+                >
+                  <option value="gpt-image-1">gpt-image-1</option>
+                  <option value="gpt-image-2">gpt-image-2</option>
+                  <option value="fal">Flux (fal.ai)</option>
+                </select>
+                <span className="ml-1 text-[var(--muted)]">비율:</span>
                 {(
                   [
                     { v: "9:16", t: "세로" },
