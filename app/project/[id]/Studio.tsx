@@ -335,6 +335,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const hasCuts = project.scenes.length > 0;
   const approved = sourceStatus === "approved";
   const typedCount = project.scenes.filter((s) => s.cut?.type).length;
+  const charCutCount = project.scenes.filter(
+    (s) => s.cut?.type === "lead" || s.cut?.type === "reaction" || s.cut?.type === "characters"
+  ).length;
 
   return (
     <div>
@@ -542,7 +545,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold">
               2. 캐스팅{" "}
-              <span className="font-normal text-[var(--muted)]">— 등장인물 구분 (누가 누군지)</span>
+              <span className="font-normal text-[var(--muted)]">
+                — 인물 컷 {charCutCount}개 · 캐릭터 {project.cast?.length ?? 0}명
+              </span>
             </h2>
             {castStatus === "pending" || castStatus === "error" ? (
               <button

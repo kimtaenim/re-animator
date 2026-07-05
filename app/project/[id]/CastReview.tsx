@@ -226,7 +226,9 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
 
         {cast.length === 0 && unassigned.length === 0 && (
           <p className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 text-sm text-[var(--muted)]">
-            인물 컷이 없거나 아직 캐스팅 전입니다.
+            인물(중심인물·반응인물·인물들) 타입 컷이 없습니다. 1단계 컷 카드에서 인물이 나온
+            컷의 타입을 인물로 지정한 뒤 다시 캐스팅하거나, 개인 인물이 crowd_space·사물로
+            잘못 분류됐는지 확인하세요.
           </p>
         )}
       </div>

@@ -5,7 +5,7 @@
     { "id": "lead",        "ko": "중심인물",     "regenerate": true,  "entityRole": "character", "desc": "한 인물이 이 순간의 서사 중심(주인공의 동작·결정). 그 인물이 머리~발끝 온전히." },
     { "id": "reaction",    "ko": "반응인물",     "regenerate": true,  "entityRole": "character", "desc": "대사(말풍선) 없이 인물의 얼굴만(주로 작게) 나와 반응·표정만 보여주는 인서트 컷. 무언가에 대한 반응 장면 — 대사가 있거나 인물이 동작의 주체면 이게 아니라 중심인물이다." },
     { "id": "characters",  "ko": "인물들",       "regenerate": true,  "entityRole": "character", "desc": "이름 있는 두셋 인물이 함께(대화·상호작용). 각 인물 온전히." },
-    { "id": "crowd_space", "ko": "군중 및 공간", "regenerate": true,  "entityRole": "context",   "desc": "실제 장소·배경·거리·건물·풍경·실내가 그려진 장면, 또는 익명 군중이 주체인 장면. 개별 얼굴 일관성 불필요. ★ 배경·장소·군중이 그려져 있으면 여기다 — 흐르는 효과(transition)나 글자(text)와 혼동하지 마라. 특정 개인 인물이 서사 중심이 아니면 대부분 여기." },
+    { "id": "crowd_space", "ko": "군중 및 공간", "regenerate": true,  "entityRole": "context",   "desc": "익명 다수(군중)가 주체이거나, 인물이 초점이 아닌 배경·장소·거리·건물·풍경·실내 장면. ★★ 단, 특정 개인 인물이 화면에 뚜렷이 있고 그 인물이 장면의 초점이면 여기가 아니라 인물 타입(lead/characters)이다 — 개인 인물을 crowd_space 로 빨아들이지 마라. crowd_space 는 '얼굴을 알아볼 개인이 초점이 아닐 때'만." },
     { "id": "object",      "ko": "사물",         "regenerate": true,  "entityRole": "prop",      "desc": "특정 사물이 초점(돈·기기·화면·소품)." },
     { "id": "action",      "ko": "액션",         "regenerate": true,  "entityRole": "context",   "desc": "움직임·충돌·역동 효과가 핵심인 컷." },
     { "id": "transition",  "ko": "장면 연결",    "regenerate": true,  "entityRole": "context",   "desc": "★ 오직 '흐르는 연출 효과·화면 전환 그 자체'가 컷의 전부일 때만. 예: 흩날리는 지폐·꽃잎·눈이 화면을 덮은 것, 속도선·집중선만, 빛번짐·반짝임 전환, 페이드 등. ★★ 실제 배경·장소·거리·건물·군중이 그려진 장면은 transition 이 아니다 → crowd_space. 인물이 그려져 있으면 인물 타입. transition 은 서사 장면이 아니라 '장면 사이를 잇는 효과' 자체일 때만 — 남발 금지." },
