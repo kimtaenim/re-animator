@@ -1553,13 +1553,17 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         </div>
                         <label
                           className="flex items-center gap-1 text-[var(--muted)]"
-                          title="이 컷과 다음 컷 사이 전환. 개별 컷엔 안 보이고 5단계 '영상 묶기' 결과에서 적용됩니다."
+                          title="이 컷 → 다음 컷 사이 전환(페이드/암전/디졸브). 개별 컷엔 안 보이고 5단계 '영상 묶기' 결과에 적용됩니다."
                         >
-                          뒤 전환
+                          🎞 전환
                           <select
                             value={s.cut?.transition ?? "none"}
                             onChange={(e) => updateCut(s.id, { transition: e.target.value })}
-                            className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
+                            className={`rounded border bg-[var(--panel-2)] px-1 py-0.5 ${
+                              s.cut?.transition && s.cut.transition !== "none"
+                                ? "border-[var(--accent)] font-medium text-[var(--accent)]"
+                                : "border-[var(--border)]"
+                            }`}
                           >
                             {TRANSITIONS.map(([v, t]) => (
                               <option key={v} value={v}>
