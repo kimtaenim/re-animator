@@ -643,10 +643,11 @@ export async function runRegen(projectId, payload) {
 
 // 영상 길이(초) 추정. 우선순위: ①사람 지정(cut.durationSec) → ②대사 글자 수(한국어 ~5자/초)
 // → ③무대사 장면전환(transition)은 길게 → ④그 외 최소 비트. 나중에 TTS 오디오 길이가 마스터.
+const half = (x) => Math.max(0.5, Math.min(15, Math.round(x * 2) / 2)); // 0.5초 단위로 스냅
 function estimateVideoSeconds(cut) {
   const MIN = Number(process.env.VIDEO_MIN_SEC || 2);
   const MAX = Number(process.env.VIDEO_MAX_SEC || 8);
-  if (cut?.durationSec) return Math.max(1, Math.min(15, Math.round(cut.durationSec)));
+  if (cut?.durationSec) return half(cut.durationSec);
   const parts = [];
   if (cut?.bubbles?.length) for (const b of cut.bubbles) parts.push(b.text || "");
   else if (cut?.dialogue) parts.push(cut.dialogue);
@@ -656,8 +657,18 @@ function estimateVideoSeconds(cut) {
     const CPS = Number(process.env.VIDEO_CHARS_PER_SEC || 5);
     return Math.max(MIN, Math.min(MAX, Math.round(chars / CPS)));
   }
-  if (cut?.type === "transition") return Number(process.env.VIDEO_TRANSITION_SEC || 4);
+  if (cut?.type === "transition") return Number(process.env.VIDEO_TRANSITION_SEC || 1.5);
   return MIN;
+}
+
+// 영상 모션 프롬프트 = 컷 모션(카메라 워크) + 가이드(스톱모션 느낌). aninews video_motion 계승.
+// 정지컷 내용은 이미지가 담고 있으니 프롬프트엔 '어떻게 움직일지'만 넣는다.
+const MOTION_GUIDANCE =
+  "Keep motion subtle and minimal — small, gentle movements and a slow, steady camera; " +
+  "keep the subject, art style and colors consistent with the still image. No new objects, no text, no morphing.";
+function buildVideoPrompt(cut) {
+  const motion = String(cut?.motion || "").trim();
+  return motion ? `${motion}. ${MOTION_GUIDANCE}` : MOTION_GUIDANCE;
 }
 
 // ── video(M4): 재생성 컷(generatedImage)을 Grok I2V 로 영상화 → Scene.videoUrl ─
@@ -715,11 +726,9 @@ export async function runVideo(projectId, payload) {
     await Promise.all(
       chunk.map(async (s) => {
         try {
-          const dur = estimateVideoSeconds(s.cut); // 대사 길이 기반 초
-          const prompt =
-            String(s.cut?.motion || s.cut?.description || "").trim() || undefined;
+          const dur = estimateVideoSeconds(s.cut); // 대사/타입/지정 기반 초
           const videoUrl = await grokVideoFromImage(
-            { imageUrl: s.generatedImage, prompt, duration: dur },
+            { imageUrl: s.generatedImage, prompt: buildVideoPrompt(s.cut), duration: dur },
             () => log(`컷 ${s.order + 1} 생성 중…(${dur}s)`)
           );
           const buf = await download(videoUrl);

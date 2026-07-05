@@ -21,6 +21,18 @@ const STEP_LABEL: Record<StepKind, string> = {
   compose: "5. 합성",
 };
 
+// 카메라 워크 프리셋 — 고르면 그 컷 모션 프롬프트(영문)를 이 문구로 채운다(aninews 계승).
+// 모두 '카메라만 움직이고 인물·오브젝트는 거의 정지'를 명시.
+const CAMERA_MOVES: [string, string, string][] = [
+  ["zoom-in", "＋ 줌인", "Slow zoom in (push-in) toward the subject — camera only; the subject barely moves."],
+  ["zoom-out", "－ 줌아웃", "Slow zoom out (pull-back) revealing more of the scene — camera only; the subject barely moves."],
+  ["pan-h", "↔ 수평 팬", "Slow horizontal pan across the scene — camera only; the subject stays mostly still."],
+  ["pan-v", "↕ 수직 팬", "Slow vertical pan/tilt across the scene — camera only; the subject stays mostly still."],
+  ["orbit", "⟳ 오비트", "Smooth 120-degree orbit around the subject — camera moves while the subject stays still."],
+  ["dolly-zoom", "🎥 달리 줌", "Dolly zoom (vertigo effect): dolly in while zooming out so the subject stays the same size while the background perspective stretches. Camera only; subject still."],
+  ["static", "■ 고정", "Locked-off static camera, no camera movement — only very subtle ambient motion; the subject stays still."],
+];
+
 export default function Studio({ initialProject }: { initialProject: Project }) {
   const [project, setProject] = useState<Project>(initialProject);
   const projectRef = useRef(project);
@@ -1267,8 +1279,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   : dubChars > 0
                     ? Math.max(2, Math.min(8, Math.round(dubChars / 5)))
                     : s.cut?.type === "transition"
-                      ? 4
+                      ? 1.5
                       : 2;
+                const curDur = s.cut?.durationSec ?? estSec;
+                const setDur = (v: number) =>
+                  updateCut(s.id, { durationSec: Math.max(0.5, Math.min(15, Math.round(v * 2) / 2)) });
                 return (
                   <div
                     key={s.id}
@@ -1311,23 +1326,37 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         >
                           {s.videoUrl ? "🎬 다시" : "🎬 동영상"}
                         </button>
-                        <label className="flex items-center gap-1 text-[var(--muted)]" title="이 컷 영상 길이(초). 비우면 자동(대사/타입 기준). 장면전환 등 무대사 컷은 여기서 늘리세요.">
+                        <div
+                          className="flex items-center gap-1 text-[var(--muted)]"
+                          title="영상 길이(초) · 0.5초 단위. 장면전환 등 무대사 컷은 여기서 늘리세요. '자동'=대사/타입 기준."
+                        >
                           길이
-                          <input
-                            type="number"
-                            min={1}
-                            max={15}
-                            value={s.cut?.durationSec ?? ""}
-                            placeholder={String(estSec)}
-                            onChange={(e) =>
-                              updateCut(s.id, {
-                                durationSec: e.target.value ? Number(e.target.value) : undefined,
-                              })
-                            }
-                            className="w-12 rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
-                          />
-                          s{!s.cut?.durationSec && <span className="opacity-60"> (자동 ~{estSec})</span>}
-                        </label>
+                          <button
+                            onClick={() => setDur(curDur - 0.5)}
+                            disabled={busy || sceneRunning}
+                            className="rounded border border-[var(--border)] px-1.5 leading-none disabled:opacity-30"
+                          >
+                            −
+                          </button>
+                          <span className="w-9 text-center tabular-nums text-[var(--text)]">{curDur}s</span>
+                          <button
+                            onClick={() => setDur(curDur + 0.5)}
+                            disabled={busy || sceneRunning}
+                            className="rounded border border-[var(--border)] px-1.5 leading-none disabled:opacity-30"
+                          >
+                            ＋
+                          </button>
+                          {s.cut?.durationSec ? (
+                            <button
+                              onClick={() => updateCut(s.id, { durationSec: undefined })}
+                              className="text-[10px] underline opacity-70"
+                            >
+                              자동
+                            </button>
+                          ) : (
+                            <span className="text-[10px] opacity-50">자동</span>
+                          )}
+                        </div>
                         <span className="text-[var(--muted)]">
                           화자: {speakerLabel}
                           {voiceLabel ? ` · 목소리: ${voiceLabel}` : " · 목소리 미지정"}
@@ -1339,6 +1368,39 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           {s.cut?.narration?.trim() ? ` (${s.cut.narration.trim()})` : ""}
                         </p>
                       )}
+                      {s.cut?.description?.trim() && (
+                        <p
+                          className="truncate text-[10px] text-[var(--muted)] opacity-70"
+                          title={s.cut.description}
+                        >
+                          컷: {s.cut.description.trim()}
+                        </p>
+                      )}
+                      {/* 카메라 워크 → 모션 프롬프트 채움. 영상 프롬프트 = 모션(+가이드), 정지컷 내용은 이미지가 담당. */}
+                      <div className="flex flex-wrap gap-1">
+                        {CAMERA_MOVES.map(([id, label, mprompt]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => updateCut(s.id, { motion: mprompt })}
+                            disabled={busy || sceneRunning}
+                            className={`rounded border px-1.5 py-0.5 text-[10px] disabled:opacity-40 ${
+                              s.cut?.motion === mprompt
+                                ? "border-[var(--accent)] text-[var(--accent)]"
+                                : "border-[var(--border)] hover:bg-[var(--panel-2)]"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <textarea
+                        value={s.cut?.motion ?? ""}
+                        onChange={(e) => updateCut(s.id, { motion: e.target.value })}
+                        rows={2}
+                        placeholder="비디오 모션 프롬프트(영문) — 예: slow camera push-in, gentle wind"
+                        className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 font-mono text-[10px]"
+                      />
                     </div>
                   </div>
                 );
