@@ -282,13 +282,21 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
         window.alert(d.error ?? "분할 실패");
         return;
       }
+      // 새 서브컷은 부모 컷의 분류(타입·textKind)를 물려받는다 → 미분류로 안 남음.
+      // 내용(대사·묘사 등)은 부분마다 다르므로 비우고, 타입만 상속. 다르면 사람이 조정.
+      const parent = r.cut ?? blankCut();
       const subs = (d.subs ?? []).map(
         (s: { yStart: number; yEnd: number; xStart?: number; xEnd?: number }) => ({
           yStart: s.yStart,
           yEnd: s.yEnd,
           xStart: s.xStart,
           xEnd: s.xEnd,
-          cut: blankCut(),
+          cut: {
+            ...blankCut(),
+            type: parent.type,
+            textKind: parent.textKind,
+            confirmed: parent.confirmed,
+          },
         })
       );
       if (subs.length < 2) {
