@@ -8,7 +8,7 @@
 // 같은 인물=같은 엔티티 → 이후 image-2 재생성에 같은 레퍼런스로 얼굴 일관성.
 // ============================================================================
 
-import { useState } from "react";
+import { useState, type DragEvent } from "react";
 import type { Character, Scene } from "@/lib/types";
 
 const CHARACTER_TYPES = new Set(["person"]);
@@ -121,6 +121,30 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
   };
   const repScene = (c: Character) => c.refSceneId ?? c.sceneIds[0];
 
+  // ── 드래그앤드롭 — 썸네일을 캐릭터 카드/드롭존으로 끌어 이동. 드롭다운은 폴백으로 유지. ──
+  const [overTarget, setOverTarget] = useState<string | null>(null);
+  const dragProps = (sid: string) => ({
+    draggable: true,
+    onDragStart: (e: DragEvent) => {
+      e.dataTransfer.setData("text/plain", sid);
+      e.dataTransfer.effectAllowed = "move";
+    },
+  });
+  const dropProps = (target: string) => ({
+    onDragOver: (e: DragEvent) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (overTarget !== target) setOverTarget(target);
+    },
+    onDragLeave: () => setOverTarget((t) => (t === target ? null : t)),
+    onDrop: (e: DragEvent) => {
+      e.preventDefault();
+      const id = e.dataTransfer.getData("text/plain");
+      if (id) moveScene(id, target);
+      setOverTarget(null);
+    },
+  });
+
   const moveOptions = (excludeId?: string) => [
     ...cast.filter((c) => c.id !== excludeId).map((c) => ({ v: c.id, t: `→ ${optLabel(c)}` })),
     { v: "new", t: "→ 새 캐릭터" },
@@ -161,9 +185,41 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
         </div>
       </div>
 
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+        <span>썸네일을 캐릭터 카드로 끌어다 놓으면 이동돼요 →</span>
+        <div
+          {...dropProps("new")}
+          className="rounded border border-dashed px-3 py-1.5"
+          style={{
+            borderColor: overTarget === "new" ? "var(--accent)" : "var(--border)",
+            color: overTarget === "new" ? "var(--accent)" : undefined,
+          }}
+        >
+          ＋ 새 캐릭터로
+        </div>
+        <div
+          {...dropProps("none")}
+          className="rounded border border-dashed px-3 py-1.5"
+          style={{
+            borderColor: overTarget === "none" ? "var(--danger)" : "var(--border)",
+            color: overTarget === "none" ? "var(--danger)" : undefined,
+          }}
+        >
+          ✕ 제외
+        </div>
+      </div>
+
       <div className="space-y-3">
         {cast.map((c) => (
-          <div key={c.id} className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3">
+          <div
+            key={c.id}
+            {...dropProps(c.id)}
+            className="rounded-lg border bg-[var(--panel)] p-3 transition-colors"
+            style={{
+              borderColor: overTarget === c.id ? "var(--accent)" : "var(--border)",
+              boxShadow: overTarget === c.id ? "0 0 0 2px var(--accent) inset" : undefined,
+            }}
+          >
             <div className="mb-2 flex items-center gap-3">
               <Thumb sceneId={repScene(c)} cls="h-14 w-14 shrink-0" />
               <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -187,8 +243,10 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
                 return (
                   <div
                     key={sid}
-                    className="flex flex-col items-center gap-0.5 rounded border p-1"
+                    {...dragProps(sid)}
+                    className="flex cursor-move flex-col items-center gap-0.5 rounded border p-1"
                     style={{ borderColor: isRef ? "var(--accent)" : "var(--border)" }}
+                    title="드래그해서 다른 캐릭터로 이동"
                   >
                     <Thumb sceneId={sid} />
                     <button
@@ -226,7 +284,12 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
             </h3>
             <div className="flex flex-wrap gap-2">
               {unassigned.map((s) => (
-                <div key={s.id} className="flex flex-col items-center gap-0.5 rounded border border-[var(--border)] p-1">
+                <div
+                  key={s.id}
+                  {...dragProps(s.id)}
+                  className="flex cursor-move flex-col items-center gap-0.5 rounded border border-[var(--border)] p-1"
+                  title="드래그해서 캐릭터로 배정"
+                >
                   <Thumb sceneId={s.id} />
                   <select
                     value=""
