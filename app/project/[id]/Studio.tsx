@@ -1302,10 +1302,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     {s.videoUrl ? (
                       <video
                         src={s.videoUrl}
-                        controls
+                        autoPlay
                         loop
                         muted
-                        className="h-28 w-auto shrink-0 rounded border border-[var(--ok)]"
+                        playsInline
+                        className="h-28 w-auto shrink-0 rounded border border-[var(--ok)] object-cover"
                       />
                     ) : (
                       <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] px-1 text-center text-[10px] text-[var(--muted)]">
