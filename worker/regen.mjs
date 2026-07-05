@@ -7,20 +7,24 @@
 
 import sharp from "sharp";
 
-// gpt-image-1 대략 단가(품질별, 장당 USD 근사). 예측 가능하게 flat.
+// gpt-image 대략 단가(품질별, 장당 USD 근사). 예측 가능하게 flat.
 const IMAGE_COST = { low: 0.016, medium: 0.042, high: 0.167 };
-const SIZE_WH = { "1024x1024": [1024, 1024], "1536x1024": [1536, 1024], "1024x1536": [1024, 1536] };
 export const REGEN_QUALITY = process.env.OPENAI_IMAGE_QUALITY || "medium";
 export const REGEN_CONCURRENCY = Number(process.env.REGEN_CONCURRENCY || 6);
 export const imageCostUsd = () => IMAGE_COST[REGEN_QUALITY] ?? 0.042;
 
-// ★ 출력 크기는 컷 모양이 아니라 '프로젝트 목표 비율'로 고정 — 모든 컷이 같은 크기.
-// 세로 긴 컷이 들어와도 가로(16:9)로 나온다. gpt-image-1 지원 크기 중 가장 가까운 것.
-function pickSize(project) {
-  const ar = project?.aspectRatio;
-  if (ar === "9:16") return "1024x1536";
-  if (ar === "1:1") return "1024x1024";
-  return "1536x1024"; // 16:9(기본) = 가로 프레임
+// ★ 요청 크기(px) — 모델 인식형. gpt-image-2 는 임의 해상도(가로·세로 16 배수)를 받으므로
+// '진짜' 목표 비율(exactSize) 그대로 요청 → 크롭 없이 정확한 비율. gpt-image-1 은 3종(1024/
+// 1536)만 지원하므로 가장 가까운 걸 요청하고, 출력은 fitBuffer 로 정확한 비율로 크롭한다.
+// 어느 쪽이든 최종 출력(normalizeSize/fitBuffer)은 exactSize 로 통일 → 모든 컷 같은 크기.
+export function reqSize(project, model) {
+  if (typeof model === "string" && model.startsWith("gpt-image-1")) {
+    const ar = project?.aspectRatio;
+    if (ar === "9:16") return [1024, 1536];
+    if (ar === "1:1") return [1024, 1024];
+    return [1536, 1024]; // 16:9
+  }
+  return exactSize(project); // gpt-image-2(기본) · fal: 진짜 비율(16 배수)
 }
 function frameDesc(project) {
   const ar = project?.aspectRatio;
@@ -66,12 +70,12 @@ async function normalizeSize(b64, project) {
 
 // 원본 컷 이미지 버퍼 + 씬 → 재생성 이미지 buf (+비용). 실패 시 throw.
 export async function regenScene(scene, imgBuf, project, key, model) {
-  const size = pickSize(project);
+  const [W, H] = reqSize(project, model);
   const form = new FormData();
   form.append("model", model);
   form.append("image", new Blob([imgBuf], { type: "image/png" }), "cut.png");
   form.append("prompt", buildRegenPrompt(scene, project));
-  form.append("size", size);
+  form.append("size", `${W}x${H}`);
   form.append("n", "1");
   form.append("quality", REGEN_QUALITY);
   const r = await fetch("https://api.openai.com/v1/images/edits", {
@@ -87,11 +91,12 @@ export async function regenScene(scene, imgBuf, project, key, model) {
   return { buf: await normalizeSize(b64, project), cost: imageCostUsd() };
 }
 
-// 마스크 재생성 — 원본 픽셀 보존 + [빈 공간 + 글씨 박스]만 채운다(원화 최대 충실).
-// 목표 비율 캔버스에 컷을 contain 배치, 마스크 alpha 0=채움/255=보존. gpt-image-1 edits.
-export async function regenSceneMasked(scene, imgBuf, project, key, model) {
-  const size = pickSize(project);
-  const [TW, TH] = SIZE_WH[size] || [1536, 1024];
+// 마스크 입력(합성 이미지 + 마스크 2종 + 프롬프트) 생성 — OpenAI edits · fal Fill 공용.
+// 목표 비율 캔버스에 컷을 contain 배치. 마스크는 두 관례가 반대라 각각 만든다:
+//   OpenAI(RGBA alpha): 0=채움, 255=보존.   fal Fill(그레이): 흰(255)=채움, 검정(0)=보존.
+// 채움 영역 = [컷 밖 여백] + [글씨 박스].  보존 영역 = 컷 그림(글씨 제외).
+export async function buildMaskInputs(scene, imgBuf, project, model) {
+  const [TW, TH] = reqSize(project, model);
   const meta = await sharp(imgBuf).metadata();
   const cw = meta.width || 1;
   const ch = meta.height || 1;
@@ -110,34 +115,47 @@ export async function regenSceneMasked(scene, imgBuf, project, key, model) {
     .png()
     .toBuffer();
 
-  // 마스크(RGBA): alpha 0=채움, 255=보존. 기본 채움 → 컷영역 보존 → 글씨박스만 다시 채움.
-  const mask = Buffer.alloc(TW * TH * 4, 0);
-  const setAlpha = (x0, y0, x1, y1, a) => {
+  const rgba = Buffer.alloc(TW * TH * 4, 0); // OpenAI: 기본 alpha 0(=채움)
+  const gray = Buffer.alloc(TW * TH * 3, 255); // fal: 기본 흰(=채움)
+  const setBox = (x0, y0, x1, y1, keep) => {
     const xa = Math.max(0, Math.floor(x0));
     const ya = Math.max(0, Math.floor(y0));
     const xb = Math.min(TW, Math.ceil(x1));
     const yb = Math.min(TH, Math.ceil(y1));
+    const g = keep ? 0 : 255;
     for (let y = ya; y < yb; y++) {
       const row = y * TW;
-      for (let x = xa; x < xb; x++) mask[(row + x) * 4 + 3] = a;
+      for (let x = xa; x < xb; x++) {
+        rgba[(row + x) * 4 + 3] = keep ? 255 : 0;
+        gray[(row + x) * 3] = g;
+        gray[(row + x) * 3 + 1] = g;
+        gray[(row + x) * 3 + 2] = g;
+      }
     }
   };
-  setAlpha(px, py, px + pw, py + ph, 255); // 컷 영역 보존
+  setBox(px, py, px + pw, py + ph, true); // 컷 영역 보존
   for (const b of scene.cut?.textBoxes ?? []) {
-    setAlpha(px + b.left * pw, py + b.top * ph, px + b.right * pw, py + b.bottom * ph, 0); // 글씨 지움
+    setBox(px + b.left * pw, py + b.top * ph, px + b.right * pw, py + b.bottom * ph, false); // 글씨 채움
   }
-  const maskPng = await sharp(mask, { raw: { width: TW, height: TH, channels: 4 } }).png().toBuffer();
+  const openaiMask = await sharp(rgba, { raw: { width: TW, height: TH, channels: 4 } }).png().toBuffer();
+  const falMask = await sharp(gray, { raw: { width: TW, height: TH, channels: 3 } }).png().toBuffer();
 
   const prompt =
-    `Fill only the transparent (empty) areas of this image so the whole ${frameDesc(project)} is completely filled — naturally extend the background and setting to seamlessly match the surrounding artwork (no blank or black area). ` +
-    "Where speech bubbles or lettering were, remove the text and fill with plausible background continuation. Keep all visible (opaque) artwork exactly as-is, faithful and unchanged. No text, letters, or watermark in the output.";
+    `Fill only the empty (masked) areas of this image so the whole ${frameDesc(project)} is completely filled — naturally extend the background and setting to seamlessly match the surrounding artwork (no blank or black area). ` +
+    "Where speech bubbles or lettering were, remove the text and fill with plausible background continuation. Keep all other artwork exactly as-is, faithful and unchanged. No text, letters, or watermark in the output.";
 
+  return { composed, openaiMask, falMask, prompt, TW, TH };
+}
+
+// 마스크 재생성(OpenAI images/edits) — 원본 픽셀 보존 + [빈 공간 + 글씨 박스]만 채움.
+export async function regenSceneMasked(scene, imgBuf, project, key, model) {
+  const { composed, openaiMask, prompt, TW, TH } = await buildMaskInputs(scene, imgBuf, project, model);
   const form = new FormData();
   form.append("model", model);
   form.append("image", new Blob([composed], { type: "image/png" }), "cut.png");
-  form.append("mask", new Blob([maskPng], { type: "image/png" }), "mask.png");
+  form.append("mask", new Blob([openaiMask], { type: "image/png" }), "mask.png");
   form.append("prompt", prompt);
-  form.append("size", size);
+  form.append("size", `${TW}x${TH}`);
   form.append("n", "1");
   form.append("quality", REGEN_QUALITY);
   const r = await fetch("https://api.openai.com/v1/images/edits", {

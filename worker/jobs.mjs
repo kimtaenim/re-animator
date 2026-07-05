@@ -20,7 +20,7 @@ import { splitTallRegions, forceSplit } from "./group.mjs";
 import { classifyScenes } from "./classify.mjs";
 import { classifyCast } from "./cast.mjs";
 import { regenScene, regenSceneMasked, REGEN_CONCURRENCY } from "./regen.mjs";
-import { regenSceneFal } from "./fal.mjs";
+import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { readCutText } from "./ocr.mjs";
 
 const CHARACTER_TYPES = new Set(["person"]);
@@ -504,14 +504,14 @@ export async function runRegen(projectId, payload) {
     await logProgress(projectId, m);
   };
 
-  // 모델 선택: gpt-image-1 / gpt-image-2(있으면) → OpenAI, fal/flux → fal.ai Flux.
-  const sel = payload?.model || "gpt-image-1";
+  // 모델 선택: gpt-image-2(기본)/gpt-image-1 → OpenAI, fal/flux → fal.ai Flux.
+  const sel = payload?.model || "gpt-image-2";
   const useFal = sel === "fal" || sel.startsWith("flux");
   const key = process.env.OPENAI_API_KEY;
   const falKey = process.env.FAL_KEY;
   const openaiModel = sel.startsWith("gpt-image")
     ? sel
-    : process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+    : process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
   if (useFal && !falKey) throw new Error("FAL_KEY 없음(Render 워커 환경변수에 넣어주세요)");
   if (!useFal && !key) throw new Error("OPENAI_API_KEY 없음");
   const model = useFal ? "fal-flux" : openaiModel;
@@ -565,11 +565,16 @@ export async function runRegen(projectId, payload) {
       chunk.map(async (s) => {
         try {
           let buf, cost;
+          const mode = s.regenMode || p.regenMode || "mask";
           if (useFal) {
-            ({ buf, cost } = await regenSceneFal(s, p, falKey));
+            if (mode === "mask") {
+              const imgBuf = await download(s.originalImage);
+              ({ buf, cost } = await regenSceneMaskedFal(s, imgBuf, p, falKey));
+            } else {
+              ({ buf, cost } = await regenSceneFal(s, p, falKey));
+            }
           } else {
             const imgBuf = await download(s.originalImage);
-            const mode = s.regenMode || p.regenMode || "mask";
             const gen = mode === "mask" ? regenSceneMasked : regenScene;
             ({ buf, cost } = await gen(s, imgBuf, p, key, openaiModel));
           }

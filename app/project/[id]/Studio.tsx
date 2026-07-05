@@ -29,7 +29,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [progress, setProgress] = useState("");
   const [progressLog, setProgressLog] = useState<string[]>([]);
   const [srcOpen, setSrcOpen] = useState<boolean | null>(null); // null=기본(승인되면 접힘)
-  const [genModel, setGenModel] = useState("gpt-image-1"); // 재생성 모델(비교용)
+  const [genModel, setGenModel] = useState("gpt-image-2"); // 재생성 모델(비교용)
   const [costKrw, setCostKrw] = useState<number | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [nameVal, setNameVal] = useState("");
@@ -832,8 +832,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   title="생성 모델(비교용). fal 은 FAL_KEY 필요."
                   className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
                 >
-                  <option value="gpt-image-1">gpt-image-1</option>
                   <option value="gpt-image-2">gpt-image-2</option>
+                  <option value="gpt-image-1">gpt-image-1</option>
                   <option value="fal">Flux (fal.ai)</option>
                 </select>
                 <span className="ml-1 text-[var(--muted)]">비율:</span>
