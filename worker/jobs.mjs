@@ -225,6 +225,32 @@ export async function runCast(projectId) {
   const p2 = await getProject(projectId);
   if (!p2) throw new Error("프로젝트가 사라졌어요");
   p2.cast = cast;
+
+  // 화자 자동 귀속: 대사 있는 컷에 배정된 캐릭터가 정확히 1명이면 그 사람이 화자.
+  const charsBySceneId = new Map();
+  for (const c of cast) {
+    for (const sid of c.sceneIds) {
+      if (!charsBySceneId.has(sid)) charsBySceneId.set(sid, []);
+      charsBySceneId.get(sid).push(c.id);
+    }
+  }
+  let attributed = 0;
+  for (const s of p2.scenes ?? []) {
+    if (!s.cut) continue;
+    const hasDialogue =
+      (s.cut.dialogue && s.cut.dialogue.trim()) ||
+      (s.cut.type === "text" && s.cut.textKind === "dialogue");
+    if (!hasDialogue) continue;
+    const chars = charsBySceneId.get(s.id) ?? [];
+    if (chars.length === 1) {
+      s.cut.speakerId = chars[0];
+      attributed++;
+    } else if (s.cut.speakerId === undefined) {
+      s.cut.speakerId = null; // 애매(0명·여러명) → 사람이 지정
+    }
+  }
+  await log(`화자 자동 귀속 ${attributed}건`);
+
   p2.steps.cast = {
     ...p2.steps.cast,
     kind: "cast",

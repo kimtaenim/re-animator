@@ -82,6 +82,7 @@ export interface CutOntology {
   setting: string; // 장소/배경 한 줄
   objects: string[]; // 핵심 사물
   dialogue: string; // 말풍선 텍스트(재생성 제외 → 자막/더빙)
+  speakerId?: string | null; // 이 대사를 말하는 캐릭터 id(M2 화자 귀속). null=나레이션/미상
   sfx: string; // 의성어/효과음
   description: string; // VLM 자유 서술(인물·배경·구도·분위기) → image-2 로 그대로 전달
   promptDraft: string; // image-2 재생성용 프롬프트 초안(영문)

@@ -16,7 +16,21 @@ const CHARACTER_TYPES = new Set(["lead", "reaction", "characters"]);
 interface Props {
   scenes: Scene[];
   cast: Character[];
-  onSave: (cast: Character[], approve: boolean) => Promise<void>;
+  onSave: (
+    cast: Character[],
+    speakers: Record<string, string>,
+    approve: boolean
+  ) => Promise<void>;
+}
+
+function hasDialogue(s: Scene): boolean {
+  const c = s.cut;
+  return !!c && (!!c.dialogue?.trim() || (c.type === "text" && c.textKind === "dialogue"));
+}
+function initSpeakers(scenes: Scene[]): Record<string, string> {
+  const m: Record<string, string> = {};
+  for (const s of scenes) if (hasDialogue(s)) m[s.id] = s.cut?.speakerId ?? "";
+  return m;
 }
 
 // 자동 라벨(캐릭터 N)만 순서대로 다시 매김 — 사람이 바꾼 이름은 보존.
@@ -40,6 +54,16 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
     setLast(initial);
     setCast(initial);
   }
+
+  const [speakers, setSpeakers] = useState<Record<string, string>>(() => initSpeakers(scenes));
+  const [lastScenes, setLastScenes] = useState(scenes);
+  if (scenes !== lastScenes) {
+    setLastScenes(scenes);
+    setSpeakers(initSpeakers(scenes));
+  }
+  const dialogueScenes = scenes.filter(hasDialogue);
+  const setSpeaker = (sceneId: string, charId: string) =>
+    setSpeakers((prev) => ({ ...prev, [sceneId]: charId }));
 
   const sceneById = new Map(scenes.map((s) => [s.id, s]));
   const assigned = new Set(cast.flatMap((c) => c.sceneIds));
@@ -75,7 +99,7 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
   async function doSave(approve: boolean) {
     setSaving(approve ? "approve" : "save");
     try {
-      await onSave(cast, approve);
+      await onSave(cast, speakers, approve);
     } finally {
       setSaving(null);
     }
@@ -206,6 +230,41 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
           </p>
         )}
       </div>
+
+      {/* 대사 · 화자 — 각 대사를 어느 캐릭터가 말하는지(더빙 목소리 매핑) */}
+      {dialogueScenes.length > 0 && (
+        <div className="mt-4">
+          <h3 className="mb-2 text-sm font-semibold">
+            대사 · 화자{" "}
+            <span className="font-normal text-[var(--muted)]">— 누가 말하는지 (더빙용)</span>
+          </h3>
+          <div className="max-h-[40vh] space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2">
+            {dialogueScenes.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center gap-2 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-xs"
+              >
+                <span className="shrink-0 text-[var(--muted)]">컷 {s.order + 1}</span>
+                <select
+                  value={speakers[s.id] ?? ""}
+                  onChange={(e) => setSpeaker(s.id, e.target.value)}
+                  className="shrink-0 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5"
+                >
+                  <option value="">나레이션/미상</option>
+                  {cast.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="truncate" title={s.cut?.dialogue}>
+                  “{s.cut?.dialogue}”
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

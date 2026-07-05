@@ -291,17 +291,22 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
-  async function saveCast(cast: Character[], approve: boolean) {
+  async function saveCast(
+    cast: Character[],
+    speakers: Record<string, string>,
+    approve: boolean
+  ) {
     const r = await fetch("/api/cast", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ projectId: project.id, cast, approve }),
+      body: JSON.stringify({ projectId: project.id, cast, speakers, approve }),
     });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error ?? "저장 실패");
     setProject((prev) => ({
       ...prev,
       cast: d.cast,
+      scenes: d.scenes ?? prev.scenes,
       steps: { ...prev.steps, cast: { ...prev.steps.cast, status: d.status } },
     }));
   }

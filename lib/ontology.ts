@@ -42,6 +42,7 @@ export function blankCut(): CutOntology {
     setting: "",
     objects: [],
     dialogue: "",
+    speakerId: null,
     sfx: "",
     description: "",
     promptDraft: "",

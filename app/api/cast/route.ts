@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
 
 // PUT — 사람이 편집한 캐스트 저장(+ approve 시 확정). 최소 검증.
 export async function PUT(req: NextRequest) {
-  let body: { projectId?: string; cast?: unknown; approve?: boolean };
+  let body: { projectId?: string; cast?: unknown; speakers?: unknown; approve?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -104,10 +104,27 @@ export async function PUT(req: NextRequest) {
   }
 
   project.cast = clean;
+
+  // 화자 귀속 적용: { sceneId: charId | "" }. 유효 charId 만, 아니면 null(나레이션/미상).
+  if (body.speakers && typeof body.speakers === "object") {
+    const castIds = new Set(clean.map((c) => c.id));
+    const sp = body.speakers as Record<string, unknown>;
+    for (const s of project.scenes) {
+      if (!s.cut || !Object.prototype.hasOwnProperty.call(sp, s.id)) continue;
+      const v = sp[s.id];
+      s.cut.speakerId = typeof v === "string" && castIds.has(v) ? v : null;
+    }
+  }
+
   setStep(project, "cast", {
     status: body.approve ? "approved" : "review",
     error: undefined,
   });
   await saveProject(project);
-  return NextResponse.json({ ok: true, cast: clean, status: project.steps.cast.status });
+  return NextResponse.json({
+    ok: true,
+    cast: clean,
+    scenes: project.scenes,
+    status: project.steps.cast.status,
+  });
 }

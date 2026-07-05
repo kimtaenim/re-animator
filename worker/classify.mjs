@@ -31,6 +31,7 @@ function blankCut() {
     setting: "",
     objects: [],
     dialogue: "",
+    speakerId: null,
     sfx: "",
     description: "",
     promptDraft: "",
