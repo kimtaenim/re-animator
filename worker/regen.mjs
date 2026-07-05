@@ -54,7 +54,7 @@ export async function regenScene(scene, imgBuf, project, key, model) {
   form.append("model", model);
   form.append("image", new Blob([imgBuf], { type: "image/png" }), "cut.png");
   form.append("prompt", buildRegenPrompt(scene, project));
-  form.append("size", pickSize(scene.sourceRegion));
+  form.append("size", pickSize(project));
   form.append("n", "1");
   form.append("quality", REGEN_QUALITY);
   const r = await fetch("https://api.openai.com/v1/images/edits", {
