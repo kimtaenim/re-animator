@@ -102,60 +102,54 @@ export async function trimBox(png) {
   return { top, bottom, left, right };
 }
 
-// 전역 정규화 [yStart, yEnd) 를 걸친 파일들에서 잘라 세로로 합쳐 PNG 버퍼로.
-// xStart/xEnd 주면 좌우도 크롭. canvas: { refWidth, offsets, normHeights }.
-export async function extractRegion(canvas, fileBuffers, yStart, yEnd, xStart, xEnd) {
-  const { refWidth, offsets, normHeights } = canvas;
-  const height = Math.max(1, Math.round(yEnd - yStart));
-  const pieces = [];
-
+// 소스들을 refWidth 로 정규화한 '가상 캔버스'의 RGB 원시 픽셀로 1회만 펼쳐 캐시.
+// 컷 추출은 이 버퍼에서 잘라내는 memcpy — 컷마다 원본을 재디코드/인코드하지 않는다
+// (수십~수백 컷에서 sharp 재처리가 병목이었음). fileBuffers 배열이 GC 되면 캐시도 해제.
+const _rawCanvas = new WeakMap();
+async function rawCanvasFor(canvas, fileBuffers) {
+  const cached = _rawCanvas.get(fileBuffers);
+  if (cached && cached.refWidth === canvas.refWidth) return cached;
+  const { refWidth, totalHeight, offsets } = canvas;
+  const data = Buffer.alloc(refWidth * totalHeight * 3, 255); // 빈 곳(파일 사이 등)은 흰색
+  const rowBytes = refWidth * 3;
   for (let i = 0; i < fileBuffers.length; i++) {
-    const top = offsets[i];
-    const bottom = offsets[i] + normHeights[i];
-    const s = Math.max(yStart, top);
-    const e = Math.min(yEnd, bottom);
-    if (e <= s) continue; // 이 파일은 구간에 안 걸침
-
-    // refWidth 로 정규화한 실제 버퍼(높이 반올림 오차 흡수를 위해 info 로 클램프).
-    const { data, info } = await sharp(fileBuffers[i])
+    const { data: raw, info } = await sharp(fileBuffers[i])
       .resize({ width: refWidth })
-      .png()
+      .removeAlpha()
+      .raw()
       .toBuffer({ resolveWithObject: true });
-
-    const localTop = Math.min(Math.round(s - top), Math.max(0, info.height - 1));
-    const sliceH = Math.min(Math.round(e - s), info.height - localTop);
-    if (sliceH <= 0) continue;
-
-    const slice = await sharp(data)
-      .extract({ left: 0, top: localTop, width: info.width, height: sliceH })
-      .png()
-      .toBuffer();
-
-    pieces.push({ input: slice, left: 0, top: Math.round(s - yStart) });
+    const startRow = Math.round(offsets[i]);
+    const maxRows = Math.min(info.height, totalHeight - startRow);
+    for (let r = 0; r < maxRows; r++) {
+      raw.copy(data, (startRow + r) * rowBytes, r * rowBytes, r * rowBytes + rowBytes);
+    }
   }
+  const rc = { data, refWidth, totalHeight };
+  _rawCanvas.set(fileBuffers, rc);
+  return rc;
+}
 
-  const full = await sharp({
-    create: {
-      width: refWidth,
-      height,
-      channels: 3,
-      background: { r: 255, g: 255, b: 255 },
-    },
-  })
-    .composite(pieces)
+// 전역 정규화 [yStart, yEnd) × [xStart, xEnd) 를 잘라 PNG 버퍼로. 원시 캔버스에서 memcpy.
+export async function extractRegion(canvas, fileBuffers, yStart, yEnd, xStart, xEnd) {
+  const { refWidth, totalHeight } = canvas;
+  const y0 = Math.max(0, Math.min(totalHeight, Math.round(yStart)));
+  const y1 = Math.max(y0 + 1, Math.min(totalHeight, Math.round(yEnd)));
+  const h = y1 - y0;
+  const hasX =
+    xStart != null && xEnd != null && (xStart > 0 || xEnd < refWidth) && xEnd - xStart >= 1;
+  const x0 = hasX ? Math.max(0, Math.round(xStart)) : 0;
+  const x1 = hasX ? Math.min(refWidth, Math.round(xEnd)) : refWidth;
+  const w = Math.max(1, x1 - x0);
+
+  const rc = await rawCanvasFor(canvas, fileBuffers);
+  const srcRow = refWidth * 3;
+  const outRow = w * 3;
+  const out = Buffer.alloc(outRow * h);
+  for (let r = 0; r < h; r++) {
+    const srcOff = (y0 + r) * srcRow + x0 * 3;
+    rc.data.copy(out, r * outRow, srcOff, srcOff + outRow);
+  }
+  return sharp(out, { raw: { width: w, height: h, channels: 3 } })
     .png()
     .toBuffer();
-
-  // 좌우 크롭 적용(주어졌고 유효할 때만).
-  if (
-    xStart != null &&
-    xEnd != null &&
-    (xStart > 0 || xEnd < refWidth) &&
-    xEnd - xStart >= 1
-  ) {
-    const left = Math.max(0, Math.round(xStart));
-    const w = Math.min(refWidth - left, Math.max(1, Math.round(xEnd - xStart)));
-    return sharp(full).extract({ left, top: 0, width: w, height }).png().toBuffer();
-  }
-  return full;
 }
