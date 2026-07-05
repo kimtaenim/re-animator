@@ -17,7 +17,7 @@ const STEP_LABEL: Record<StepKind, string> = {
   source: "1. 소스 · 컷 분할",
   cast: "2. 캐스팅",
   regen: "3. 재생성",
-  scene: "4. 씬 · 더빙",
+  scene: "4. 동영상 생성 및 더빙",
   compose: "5. 합성",
 };
 
@@ -537,14 +537,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
-  // 컷 하나만 Grok 영상(I2V) — 재생성 이미지가 있어야. 되나 확인용 테스트.
-  async function videoOne(sceneId: string) {
+  // Grok 영상(I2V) 잡 적재. sceneIds 없으면 재생성된 컷 전체.
+  async function runVideoJob(sceneIds?: string[]) {
     setError("");
     try {
       const r = await fetch("/api/video", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, sceneIds: [sceneId] }),
+        body: JSON.stringify({ projectId: project.id, ...(sceneIds ? { sceneIds } : {}) }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "영상 실패");
@@ -556,9 +556,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       setError(e instanceof Error ? e.message : "영상 실패");
     }
   }
+  const videoOne = (sceneId: string) => runVideoJob([sceneId]);
 
   // 워커 작업 중지 — 워커 프로세스는 못 죽이지만 UI 가 '진행 중'에 갇히지 않게 단계를 되돌림.
-  async function cancelJob(step: "source" | "cast" | "regen") {
+  async function cancelJob(step: "source" | "cast" | "regen" | "scene") {
     try {
       const r = await fetch("/api/cancel", {
         method: "POST",
@@ -1095,28 +1096,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                               : "미생성"}
                         </div>
                       )}
-                      {s.generatedImage && (
-                        <>
-                          <span className="shrink-0 pt-11 text-[var(--muted)]">▶</span>
-                          {s.videoUrl ? (
-                            <video
-                              src={s.videoUrl}
-                              controls
-                              loop
-                              muted
-                              className="h-28 w-auto shrink-0 rounded border border-[var(--ok)]"
-                            />
-                          ) : (
-                            <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] px-1 text-center text-[10px] text-[var(--muted)]">
-                              {s.videoError
-                                ? `영상 실패: ${s.videoError}`
-                                : sceneRunning
-                                  ? "영상 대기…"
-                                  : "영상 없음"}
-                            </div>
-                          )}
-                        </>
-                      )}
                       <div className="flex min-w-0 flex-1 flex-col gap-1">
                         <textarea
                           value={s.cut?.description ?? ""}
@@ -1194,14 +1173,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             >
                               {s.generatedImage ? "다시 생성" : "생성"}
                             </button>
-                            <button
-                              onClick={() => videoOne(s.id)}
-                              disabled={busy || sceneRunning || !s.generatedImage}
-                              className="rounded border border-[var(--border)] px-2 py-0.5 disabled:opacity-30"
-                              title="이 컷 이미지로 Grok 영상 생성(테스트)"
-                            >
-                              {s.videoUrl ? "🎬 다시" : "🎬 영상"}
-                            </button>
                           </div>
                         </div>
                       </div>
@@ -1210,6 +1181,113 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 })}
             </div>
           )}
+        </section>
+      )}
+
+      {/* ── 4단계: 동영상 생성(Grok I2V) + 더빙 정보 ── */}
+      {approved && project.scenes.some((s) => s.generatedImage) && (
+        <section className="mb-6">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold">{STEP_LABEL.scene}</h2>
+            <span className="text-xs text-[var(--muted)]">
+              — 재생성 컷 {project.scenes.filter((s) => s.generatedImage).length}개 · Grok I2V(초당 $0.05)
+            </span>
+            <button
+              onClick={() => runVideoJob()}
+              disabled={busy || sceneRunning}
+              className="ml-auto rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50"
+            >
+              {sceneRunning ? "생성 중…" : "전체 동영상 생성"}
+            </button>
+          </div>
+
+          {sceneRunning && (
+            <p className="mb-3 flex items-center gap-2 text-sm text-[var(--muted)]">
+              <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+              동영상 생성 중… {progress && <span className="opacity-70">{progress}</span>}
+              <button
+                onClick={() => cancelJob("scene")}
+                className="ml-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:border-[var(--danger)] hover:text-[var(--danger)]"
+              >
+                작업 중지
+              </button>
+            </p>
+          )}
+          {sceneRunning && progressLog.length > 0 && (
+            <pre className="mb-3 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
+              {progressLog.slice(-14).join("\n")}
+            </pre>
+          )}
+          {sceneStatus === "error" && (
+            <p className="mb-3 rounded-md border border-[var(--danger)] bg-[var(--panel)] p-3 text-sm text-[var(--danger)]">
+              {project.steps.scene.error ?? "동영상 오류"}
+            </p>
+          )}
+
+          <div className="space-y-2">
+            {project.scenes
+              .filter((s) => s.generatedImage)
+              .map((s) => {
+                const speaker = project.cast?.find((c) => c.id === s.cut?.speakerId);
+                const voiceName = speaker?.voiceName || speaker?.voice;
+                return (
+                  <div
+                    key={s.id}
+                    className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2"
+                  >
+                    <span className="w-6 shrink-0 pt-11 text-center text-xs text-[var(--muted)]">
+                      {s.order + 1}
+                    </span>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={s.generatedImage}
+                      alt="생성"
+                      className="h-28 w-auto shrink-0 rounded border border-[var(--border)]"
+                    />
+                    <span className="shrink-0 pt-11 text-[var(--muted)]">▶</span>
+                    {s.videoUrl ? (
+                      <video
+                        src={s.videoUrl}
+                        controls
+                        loop
+                        muted
+                        className="h-28 w-auto shrink-0 rounded border border-[var(--ok)]"
+                      />
+                    ) : (
+                      <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] px-1 text-center text-[10px] text-[var(--muted)]">
+                        {s.videoError
+                          ? `실패: ${s.videoError}`
+                          : sceneRunning
+                            ? "생성 대기…"
+                            : "미생성"}
+                      </div>
+                    )}
+                    <div className="flex min-w-0 flex-1 flex-col gap-1 text-[11px]">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => videoOne(s.id)}
+                          disabled={busy || sceneRunning}
+                          className="rounded bg-[var(--accent)] px-3 py-0.5 font-medium text-white disabled:opacity-40"
+                          title="이 컷 이미지로 Grok 동영상 생성"
+                        >
+                          {s.videoUrl ? "🎬 다시" : "🎬 동영상"}
+                        </button>
+                        <span className="text-[var(--muted)]">
+                          {speaker ? `화자: ${speaker.label}` : "화자: 나레이션/미상"}
+                          {voiceName ? ` · 목소리: ${voiceName}` : " · 목소리 미지정"}
+                        </span>
+                      </div>
+                      {(s.cut?.dialogue?.trim() || s.cut?.narration?.trim()) && (
+                        <p className="truncate text-[var(--muted)]">
+                          {s.cut?.dialogue?.trim() ? `“${s.cut.dialogue.trim()}”` : ""}
+                          {s.cut?.narration?.trim() ? ` (${s.cut.narration.trim()})` : ""}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
         </section>
       )}
 
