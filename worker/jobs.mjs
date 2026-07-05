@@ -505,17 +505,14 @@ export async function runRegen(projectId, payload) {
     await logProgress(projectId, m);
   };
 
-  // 모델 선택: gpt-image-2(기본)/gpt-image-1 → OpenAI, fal/flux → fal.ai Flux.
-  const sel = payload?.model || "gpt-image-2";
-  const useFal = sel === "fal" || sel.startsWith("flux");
+  // 모델 선택 — 컷별(payload.models[sceneId]) 우선 → payload.model → gpt-image-2.
+  // gpt-image* → OpenAI, fal/flux → fal.ai Flux. 컷마다 달라도 워커 메모리엔 영향 없음
+  // (모델은 라우팅 문자열일 뿐, 피크 메모리는 REGEN_CONCURRENCY 개 이미지 버퍼로 결정).
   const key = process.env.OPENAI_API_KEY;
   const falKey = process.env.FAL_KEY;
-  const openaiModel = sel.startsWith("gpt-image")
-    ? sel
-    : process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
-  if (useFal && !falKey) throw new Error("FAL_KEY 없음(Render 워커 환경변수에 넣어주세요)");
-  if (!useFal && !key) throw new Error("OPENAI_API_KEY 없음");
-  const model = useFal ? "fal-flux" : openaiModel;
+  const models = payload?.models && typeof payload.models === "object" ? payload.models : null;
+  const defModel = payload?.model || "gpt-image-2";
+  const resolveModel = (id) => (models && models[id]) || defModel;
 
   const p = await getProject(projectId);
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
@@ -526,7 +523,7 @@ export async function runRegen(projectId, payload) {
     const set = new Set(payload.sceneIds);
     cand = cand.filter((s) => set.has(s.id));
   }
-  await log(`재생성 대상 ${cand.length}컷 · 모델 ${model} · 동시 ${REGEN_CONCURRENCY}`);
+  await log(`재생성 대상 ${cand.length}컷 · 모델 ${models ? "컷별" : defModel} · 동시 ${REGEN_CONCURRENCY}`);
   if (cand.length === 0) throw new Error("재생성할 컷이 없어요(컷 추출 먼저)");
 
   const genById = new Map(); // sceneId → { url } | { error }
@@ -566,6 +563,13 @@ export async function runRegen(projectId, payload) {
       chunk.map(async (s) => {
         try {
           let buf, cost;
+          const sel = resolveModel(s.id);
+          const useFal = sel === "fal" || sel.startsWith("flux");
+          const openaiModel = sel.startsWith("gpt-image")
+            ? sel
+            : process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
+          if (useFal && !falKey) throw new Error("FAL_KEY 없음(Render 워커 환경변수)");
+          if (!useFal && !key) throw new Error("OPENAI_API_KEY 없음");
           const mode = s.regenMode || p.regenMode || "mask";
           if (useFal) {
             if (mode === "mask") {

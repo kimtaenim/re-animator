@@ -8,7 +8,12 @@ export const runtime = "nodejs";
 
 // POST — M3 이미지 재생성 잡 적재. 1단계(컷 추출) 완료 후 가능.
 export async function POST(req: NextRequest) {
-  let body: { projectId?: string; sceneIds?: string[]; model?: string };
+  let body: {
+    projectId?: string;
+    sceneIds?: string[];
+    model?: string;
+    models?: Record<string, string>;
+  };
   try {
     body = await req.json();
   } catch {
@@ -29,9 +34,19 @@ export async function POST(req: NextRequest) {
     ? body.sceneIds.filter((id) => typeof id === "string")
     : undefined;
   const model = typeof body.model === "string" ? body.model : undefined;
+  // 컷별 모델 { sceneId: model } — 문자열 값만 통과.
+  let models: Record<string, string> | undefined;
+  if (body.models && typeof body.models === "object") {
+    const m: Record<string, string> = {};
+    for (const [k, v] of Object.entries(body.models)) {
+      if (typeof v === "string") m[k] = v;
+    }
+    if (Object.keys(m).length) models = m;
+  }
   const payload: Record<string, unknown> = {};
   if (sceneIds && sceneIds.length) payload.sceneIds = sceneIds;
   if (model) payload.model = model;
+  if (models) payload.models = models;
   const now = Date.now();
   const job: Job = {
     id: randomUUID(),

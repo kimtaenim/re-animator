@@ -348,6 +348,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }).catch(() => {});
   }
 
+  // 컷별 모델 — 그때그때 컷마다 다른 모델 선택. 미지정 컷은 헤더 기본 모델(genModel) 사용.
+  // (짧은 문자열 하나라 메모리 부담 없음. 워커도 라우팅 문자열로만 씀.)
+  const [modelBySceneId, setModelBySceneId] = useState<Record<string, string>>({});
+  const modelFor = (id: string) => modelBySceneId[id] ?? genModel;
+  const setModelFor = (id: string, m: string) =>
+    setModelBySceneId((prev) => ({ ...prev, [id]: m }));
+
   // 다중 선택 재생성 — 여러 컷 골라 한 번에(병렬 청크로 워커가 처리).
   const [selForRegen, setSelForRegen] = useState<Set<string>>(() => new Set());
   function toggleSel(id: string) {
@@ -369,11 +376,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   async function regenSelected() {
     if (selForRegen.size === 0) return;
     setError("");
+    const ids = [...selForRegen];
+    const models: Record<string, string> = {};
+    for (const id of ids) models[id] = modelFor(id); // 컷별 선택 반영
     try {
       const r = await fetch("/api/regen", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, sceneIds: [...selForRegen], model: genModel }),
+        body: JSON.stringify({ projectId: project.id, sceneIds: ids, models }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "생성 실패");
@@ -457,7 +467,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       const r = await fetch("/api/regen", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, sceneIds: [sceneId], model: genModel }),
+        body: JSON.stringify({ projectId: project.id, sceneIds: [sceneId], model: modelFor(sceneId) }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "생성 실패");
@@ -825,11 +835,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             <div className="flex items-center gap-3">
               <h2 className="text-sm font-semibold">3. 재생성</h2>
               <div className="flex items-center gap-1 text-xs">
-                <span className="text-[var(--muted)]">모델:</span>
+                <span className="text-[var(--muted)]">기본 모델:</span>
                 <select
                   value={genModel}
                   onChange={(e) => setGenModel(e.target.value)}
-                  title="생성 모델(비교용). fal 은 FAL_KEY 필요."
+                  title="컷별로 따로 안 고른 컷의 기본 모델. 각 컷 오른쪽에서 그때그때 바꿀 수 있어요. fal 은 FAL_KEY 필요."
                   className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
                 >
                   <option value="gpt-image-2">gpt-image-2</option>
@@ -1047,6 +1057,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             >
                               삭제
                             </button>
+                            <select
+                              value={modelFor(s.id)}
+                              onChange={(e) => setModelFor(s.id, e.target.value)}
+                              disabled={busy || regenRunning}
+                              title="이 컷 생성 모델"
+                              className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 disabled:opacity-40"
+                            >
+                              <option value="gpt-image-2">gpt-image-2</option>
+                              <option value="fal">Flux</option>
+                            </select>
                             <button
                               onClick={() => regenOne(s.id)}
                               disabled={busy || regenRunning}
