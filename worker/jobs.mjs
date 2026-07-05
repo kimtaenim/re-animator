@@ -9,7 +9,7 @@ import { getProject, saveProject, logProgress, resetProgress } from "./store.mjs
 import { computeRowProfile, extractRegion, computeSideCrop } from "./imaging.mjs";
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
-import { groupScenes } from "./group.mjs";
+import { detectScenesVLM } from "./detect-vlm.mjs";
 import { loadSplitConfig } from "./config.mjs";
 
 async function download(url) {
@@ -62,24 +62,29 @@ export async function runSplit(projectId) {
     acc += pr.length;
   }
 
-  await log("경계 검출…");
-  const candidates = detectRegions(global, cfg);
-  // 평탄도 후보를 VLM이 의미 장면으로 묶음(키 없으면 후보 그대로 폴백).
-  await log(`후보 컷 ${candidates.length}개 — 장면 그룹핑…`);
-  const regions = await groupScenes(canvas, buffers, candidates, log, projectId, global, cfg);
-  await log(`최종 컷 ${regions.length}개 — 좌우 크롭…`);
-
-  // 각 컷의 좌우 여백 트림(패널만 남기게).
-  for (let i = 0; i < regions.length; i++) {
-    if (i % 3 === 0 || i === regions.length - 1) {
-      const pct = Math.round(((i + 1) / regions.length) * 100);
-      await log(`좌우 크롭 — 컷 ${i + 1}/${regions.length} (${pct}%)`);
+  // VLM 이 장면 영역(박스)을 직접 판정. 키 없거나 실패 시 알고리즘 폴백.
+  const key = process.env.OPENAI_API_KEY;
+  const VLM_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
+  let regions = null;
+  if (key) {
+    await log("VLM 장면 영역 검출…");
+    try {
+      regions = await detectScenesVLM(canvas, buffers, key, VLM_MODEL, log, projectId);
+    } catch (e) {
+      await log(`VLM 검출 실패(알고리즘 폴백): ${e?.message ?? e}`);
     }
-    const full = await extractRegion(canvas, buffers, regions[i].yStart, regions[i].yEnd);
-    const { xStart, xEnd } = await computeSideCrop(full, cfg.flatStdThreshold);
-    regions[i].xStart = xStart;
-    regions[i].xEnd = xEnd;
   }
+  if (!regions || !regions.length) {
+    await log("경계 검출(알고리즘)…");
+    const candidates = detectRegions(global, cfg);
+    regions = [];
+    for (let i = 0; i < candidates.length; i++) {
+      const full = await extractRegion(canvas, buffers, candidates[i].yStart, candidates[i].yEnd);
+      const { xStart, xEnd } = await computeSideCrop(full, cfg.flatStdThreshold);
+      regions.push({ ...candidates[i], xStart, xEnd });
+    }
+  }
+  await log(`최종 장면 ${regions.length}개`);
 
   const scenes = regions.map((r, idx) => ({
     id: randomUUID(),
