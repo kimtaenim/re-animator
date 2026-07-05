@@ -27,6 +27,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
+  const [progressLog, setProgressLog] = useState<string[]>([]);
   const [costKrw, setCostKrw] = useState<number | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [nameVal, setNameVal] = useState("");
@@ -63,6 +64,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       const d = await r.json();
       if (!d.ok) return;
       setProgress(d.progress ?? "");
+      setProgressLog(d.progressLog ?? []);
       setProject((prev) => ({
         ...prev,
         virtualCanvas: d.virtualCanvas ?? prev.virtualCanvas,
@@ -94,6 +96,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       const d = await r.json();
       if (!d.ok) return;
       setProgress(d.progress ?? "");
+      setProgressLog(d.progressLog ?? []);
       setProject((prev) => ({
         ...prev,
         cast: d.cast ?? prev.cast,
@@ -122,6 +125,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       const d = await r.json();
       if (!d.ok) return;
       setProgress(d.progress ?? "");
+      setProgressLog(d.progressLog ?? []);
       setProject((prev) => ({
         ...prev,
         scenes: d.scenes ?? prev.scenes,
@@ -658,6 +662,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </div>
             );
           })()}
+          {progressLog.length > 0 && (
+            <pre className="mt-2 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
+              {progressLog.slice(-14).join("\n")}
+            </pre>
+          )}
         </div>
       )}
 
@@ -757,6 +766,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
             </p>
           )}
+          {castRunning && progressLog.length > 0 && (
+            <pre className="mb-3 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
+              {progressLog.slice(-14).join("\n")}
+            </pre>
+          )}
 
           {castStatus === "error" && (
             <p className="rounded-md border border-[var(--danger)] bg-[var(--panel)] p-3 text-sm text-[var(--danger)]">
@@ -850,6 +864,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 작업 중지
               </button>
             </p>
+          )}
+          {regenRunning && progressLog.length > 0 && (
+            <pre className="mb-3 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
+              {progressLog.slice(-14).join("\n")}
+            </pre>
           )}
 
           {regenStatus === "error" && (
