@@ -342,6 +342,37 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }).catch(() => {});
   }
 
+  // 다중 선택 재생성 — 여러 컷 골라 한 번에(병렬 청크로 워커가 처리).
+  const [selForRegen, setSelForRegen] = useState<Set<string>>(() => new Set());
+  function toggleSel(id: string) {
+    setSelForRegen((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+  async function regenSelected() {
+    if (selForRegen.size === 0) return;
+    setError("");
+    try {
+      const r = await fetch("/api/regen", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneIds: [...selForRegen] }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "생성 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, regen: { ...prev.steps.regen, status: "running" } },
+      }));
+      setSelForRegen(new Set());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "생성 실패");
+    }
+  }
+
   // 씬별 재생성 방식(마스크=원본보존+빈공간/글씨만, full=통째 재생성).
   function setRegenMode(sceneId: string, mode: "mask" | "full") {
     setProject((prev) => ({
@@ -758,23 +789,34 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 ))}
               </div>
             </div>
-            {regenStatus === "pending" || regenStatus === "error" ? (
-              <button
-                onClick={runRegenJob}
-                disabled={busy || regenRunning}
-                className="rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {regenRunning ? "생성 중…" : "이미지 생성"}
-              </button>
-            ) : (
-              <button
-                onClick={runRegenJob}
-                disabled={busy || regenRunning}
-                className="rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50"
-              >
-                다시 생성
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {selForRegen.size > 0 && (
+                <button
+                  onClick={regenSelected}
+                  disabled={busy || regenRunning}
+                  className="rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  선택 {selForRegen.size}개 생성
+                </button>
+              )}
+              {regenStatus === "pending" || regenStatus === "error" ? (
+                <button
+                  onClick={runRegenJob}
+                  disabled={busy || regenRunning}
+                  className="rounded-md border border-[var(--border)] px-4 py-2 text-sm font-medium disabled:opacity-50"
+                >
+                  {regenRunning ? "생성 중…" : "전체 생성"}
+                </button>
+              ) : (
+                <button
+                  onClick={runRegenJob}
+                  disabled={busy || regenRunning}
+                  className="rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50"
+                >
+                  전체 다시
+                </button>
+              )}
+            </div>
           </div>
 
           {regenRunning && (
@@ -807,9 +849,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       key={s.id}
                       className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2"
                     >
-                      <span className="w-7 shrink-0 pt-10 text-center text-xs text-[var(--muted)]">
-                        {s.order + 1}
-                      </span>
+                      <div className="flex w-7 shrink-0 flex-col items-center gap-1 pt-8">
+                        <input
+                          type="checkbox"
+                          checked={selForRegen.has(s.id)}
+                          onChange={() => toggleSel(s.id)}
+                          title="다중 선택 생성용"
+                        />
+                        <span className="text-xs text-[var(--muted)]">{s.order + 1}</span>
+                      </div>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={s.originalImage}

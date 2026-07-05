@@ -551,11 +551,11 @@ export async function runRegen(projectId, payload) {
           const imgBuf = await download(s.originalImage);
           const mode = s.regenMode || "mask";
           const gen = mode === "mask" ? regenSceneMasked : regenScene;
-          const { b64, cost } = await gen(s, imgBuf, p, key, model);
+          const { buf, cost } = await gen(s, imgBuf, p, key, model);
           costTotal += cost;
           const { url } = await put(
             `project/${projectId}/gen-${s.order}-${Date.now()}.png`,
-            Buffer.from(b64, "base64"),
+            buf,
             { access: "public", contentType: "image/png", addRandomSuffix: false }
           );
           genById.set(s.id, { url });

@@ -48,13 +48,20 @@ export function buildRegenPrompt(scene, project) {
   return p.slice(0, 1400);
 }
 
-// 원본 컷 이미지 버퍼 + 씬 → 재생성 이미지 b64 (+비용). 실패 시 throw.
+// gpt-image-1 이 size 를 안 지킬 수 있어, 출력을 무조건 목표 크기로 리사이즈 → 일관 보장.
+async function normalizeSize(b64, size) {
+  const [TW, TH] = SIZE_WH[size] || [1536, 1024];
+  return sharp(Buffer.from(b64, "base64")).resize(TW, TH, { fit: "cover" }).png().toBuffer();
+}
+
+// 원본 컷 이미지 버퍼 + 씬 → 재생성 이미지 buf (+비용). 실패 시 throw.
 export async function regenScene(scene, imgBuf, project, key, model) {
+  const size = pickSize(project);
   const form = new FormData();
   form.append("model", model);
   form.append("image", new Blob([imgBuf], { type: "image/png" }), "cut.png");
   form.append("prompt", buildRegenPrompt(scene, project));
-  form.append("size", pickSize(project));
+  form.append("size", size);
   form.append("n", "1");
   form.append("quality", REGEN_QUALITY);
   const r = await fetch("https://api.openai.com/v1/images/edits", {
@@ -67,7 +74,7 @@ export async function regenScene(scene, imgBuf, project, key, model) {
   const d = await r.json();
   const b64 = d.data?.[0]?.b64_json;
   if (!b64) throw new Error("빈 이미지 응답");
-  return { b64, cost: imageCostUsd() };
+  return { buf: await normalizeSize(b64, size), cost: imageCostUsd() };
 }
 
 // 마스크 재생성 — 원본 픽셀 보존 + [빈 공간 + 글씨 박스]만 채운다(원화 최대 충실).
@@ -133,5 +140,5 @@ export async function regenSceneMasked(scene, imgBuf, project, key, model) {
   const d = await r.json();
   const b64 = d.data?.[0]?.b64_json;
   if (!b64) throw new Error("빈 이미지 응답");
-  return { b64, cost: imageCostUsd() };
+  return { buf: await normalizeSize(b64, size), cost: imageCostUsd() };
 }
