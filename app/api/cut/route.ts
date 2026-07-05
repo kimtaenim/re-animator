@@ -24,6 +24,26 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.dialogue === "string") c.dialogue = r.dialogue.slice(0, 500);
   if (typeof r.narration === "string") c.narration = r.narration.slice(0, 500);
   if (typeof r.speakerId === "string") c.speakerId = r.speakerId;
+  if (Array.isArray(r.bubbles)) {
+    c.bubbles = r.bubbles
+      .filter((b): b is Record<string, unknown> => !!b && typeof b === "object")
+      .map((b) => {
+        const box = b.box && typeof b.box === "object" ? (b.box as Record<string, unknown>) : null;
+        return {
+          text: typeof b.text === "string" ? b.text.slice(0, 400) : "",
+          speakerId: typeof b.speakerId === "string" ? b.speakerId : b.speakerId === null ? null : undefined,
+          box: box
+            ? {
+                left: Number(box.left) || 0,
+                top: Number(box.top) || 0,
+                right: Number(box.right) || 0,
+                bottom: Number(box.bottom) || 0,
+              }
+            : undefined,
+        };
+      })
+      .slice(0, 12);
+  }
   if (Array.isArray(r.textBoxes)) {
     c.textBoxes = r.textBoxes
       .filter((b): b is Record<string, number> => !!b && typeof b === "object")

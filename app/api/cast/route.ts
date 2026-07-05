@@ -66,7 +66,13 @@ export async function GET(req: NextRequest) {
 
 // PUT — 사람이 편집한 캐스트 저장(+ approve 시 확정). 최소 검증.
 export async function PUT(req: NextRequest) {
-  let body: { projectId?: string; cast?: unknown; speakers?: unknown; approve?: boolean };
+  let body: {
+    projectId?: string;
+    cast?: unknown;
+    speakers?: unknown;
+    bubbleSpeakers?: unknown;
+    approve?: boolean;
+  };
   try {
     body = await req.json();
   } catch {
@@ -107,14 +113,36 @@ export async function PUT(req: NextRequest) {
 
   project.cast = clean;
 
-  // 화자 귀속 적용: { sceneId: charId | "" }. 유효 charId 만, 아니면 null(나레이션/미상).
+  const castIds = new Set(clean.map((c) => c.id));
+
+  // 컷 단위 화자(레거시/폴백): { sceneId: charId | "" } → cut.speakerId.
   if (body.speakers && typeof body.speakers === "object") {
-    const castIds = new Set(clean.map((c) => c.id));
     const sp = body.speakers as Record<string, unknown>;
     for (const s of project.scenes) {
       if (!s.cut || !Object.prototype.hasOwnProperty.call(sp, s.id)) continue;
       const v = sp[s.id];
       s.cut.speakerId = typeof v === "string" && castIds.has(v) ? v : null;
+    }
+  }
+
+  // 풍선별 화자: { "sceneId#bubbleIdx": charId | "" } → cut.bubbles[idx].speakerId.
+  if (body.bubbleSpeakers && typeof body.bubbleSpeakers === "object") {
+    const bs = body.bubbleSpeakers as Record<string, unknown>;
+    const bySceneIdx = new Map<string, Map<number, string | null>>();
+    for (const [k, v] of Object.entries(bs)) {
+      const hash = k.lastIndexOf("#");
+      if (hash < 0) continue;
+      const sid = k.slice(0, hash);
+      const idx = Number(k.slice(hash + 1));
+      if (!Number.isInteger(idx)) continue;
+      const cid = typeof v === "string" && castIds.has(v) ? v : null;
+      if (!bySceneIdx.has(sid)) bySceneIdx.set(sid, new Map());
+      bySceneIdx.get(sid)!.set(idx, cid);
+    }
+    for (const s of project.scenes) {
+      const m = bySceneIdx.get(s.id);
+      if (!m || !s.cut?.bubbles) continue;
+      s.cut.bubbles = s.cut.bubbles.map((b, i) => (m.has(i) ? { ...b, speakerId: m.get(i) } : b));
     }
   }
 

@@ -82,15 +82,23 @@ export interface TextBox {
   bottom: number;
 }
 
+// 말풍선(대사) 단위 — OCR 이 풍선별로 뽑고, 화자를 풍선마다 귀속(더빙 목소리 매핑).
+export interface DialogueBubble {
+  text: string; // 그 풍선 글자(OCR 보이는 그대로)
+  speakerId?: string | null; // 이 풍선을 말하는 캐릭터 id. null=나레이션/미상
+  box?: TextBox; // 풍선 영역(0~1)
+}
+
 export interface CutOntology {
   type: CutType | null; // null = 미분류(사람이 채움)
   textKind: TextKind | null; // type=text 일 때만
   characters: string[]; // 초점 인물 서술 → M2 캐스팅이 엔티티로 해소
   setting: string; // 장소/배경 한 줄
   objects: string[]; // 핵심 사물
-  dialogue: string; // 이 컷의 말풍선 대사(풀해상도 OCR이 유일 정답 = 덮어씀)
+  dialogue: string; // 이 컷 대사 합침(하위호환·표시용). 풍선별은 bubbles 가 정답.
+  bubbles?: DialogueBubble[]; // 말풍선 단위 대사+화자. OCR 이 풍선별로 채움.
   narration?: string; // 흡수된 위·아래 나레이션/자막(별도 — OCR 이 안 건드림)
-  speakerId?: string | null; // 이 대사를 말하는 캐릭터 id(M2 화자 귀속). null=나레이션/미상
+  speakerId?: string | null; // (레거시) 컷 단위 화자. bubbles 있으면 풍선별 speakerId 우선.
   textBoxes?: TextBox[]; // 글씨(말풍선·자막·효과음) 영역들(0~1 정규화) — 마스크 재생성용
   sfx: string; // 의성어/효과음
   description: string; // VLM 자유 서술(인물·배경·구도·분위기) → image-2 로 그대로 전달

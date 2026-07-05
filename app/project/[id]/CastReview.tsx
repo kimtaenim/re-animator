@@ -22,18 +22,47 @@ interface Props {
   onSave: (
     cast: Character[],
     speakers: Record<string, string>,
+    bubbleSpeakers: Record<string, string>,
     approve: boolean
   ) => Promise<void>;
 }
 
-function hasDialogue(s: Scene): boolean {
-  const c = s.cut;
-  return !!c && (!!c.dialogue?.trim() || (c.type === "text" && c.textKind === "dialogue"));
+// 컷의 대사 단위 목록 — bubbles 있으면 풍선별(idx≥0), 없으면 레거시 통대사(idx=-1).
+function bubblesOf(s: Scene): { idx: number; text: string }[] {
+  const bs = s.cut?.bubbles;
+  if (bs && bs.length) {
+    return bs.map((b, i) => ({ idx: i, text: b.text ?? "" })).filter((b) => b.text.trim() !== "");
+  }
+  const legacy = s.cut?.dialogue?.trim();
+  return legacy ? [{ idx: -1, text: legacy }] : [];
 }
-function initSpeakers(scenes: Scene[]): Record<string, string> {
+// 화자 맵 키: `${sceneId}#${idx}` (idx=-1 = 레거시 컷단위). 초기값 = 기존 speakerId.
+function initSpeakerMap(scenes: Scene[]): Record<string, string> {
   const m: Record<string, string> = {};
-  for (const s of scenes) if (hasDialogue(s)) m[s.id] = s.cut?.speakerId ?? "";
+  for (const s of scenes) {
+    const bs = s.cut?.bubbles;
+    if (bs && bs.length) {
+      bs.forEach((b, i) => {
+        if (b.text?.trim()) m[`${s.id}#${i}`] = b.speakerId ?? "";
+      });
+    } else if (s.cut?.dialogue?.trim()) {
+      m[`${s.id}#-1`] = s.cut.speakerId ?? "";
+    }
+  }
   return m;
+}
+// 저장용 분리: idx=-1 → speakers[sceneId], idx≥0 → bubbleSpeakers["sceneId#idx"].
+function splitSpeakerMap(map: Record<string, string>) {
+  const speakers: Record<string, string> = {};
+  const bubbleSpeakers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(map)) {
+    const hash = k.lastIndexOf("#");
+    const sid = k.slice(0, hash);
+    const idx = Number(k.slice(hash + 1));
+    if (idx === -1) speakers[sid] = v;
+    else bubbleSpeakers[k] = v;
+  }
+  return { speakers, bubbleSpeakers };
 }
 
 // 자동 라벨(캐릭터 N)만 순서대로 다시 매김 — 사람이 바꾼 이름은 보존.
@@ -58,13 +87,13 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
     setCast(initial);
   }
 
-  const [speakers, setSpeakers] = useState<Record<string, string>>(() => initSpeakers(scenes));
+  const [speakerMap, setSpeakerMap] = useState<Record<string, string>>(() => initSpeakerMap(scenes));
   const [lastScenes, setLastScenes] = useState(scenes);
   if (scenes !== lastScenes) {
     setLastScenes(scenes);
-    setSpeakers(initSpeakers(scenes));
+    setSpeakerMap(initSpeakerMap(scenes));
   }
-  const dialogueScenes = scenes.filter(hasDialogue);
+  const dialogueScenes = scenes.filter((s) => bubblesOf(s).length > 0);
 
   // 목소리 목록(Typecast) — 캐릭터별 더빙 목소리 선택용. 키 없으면 빈 목록(수동 입력 폴백).
   const [voices, setVoices] = useState<VoiceOpt[]>([]);
@@ -88,17 +117,18 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
   useEffect(() => {
     if (!dirty) return;
     const t = setTimeout(() => {
-      onSave(cast, speakers, false)
+      const { speakers, bubbleSpeakers } = splitSpeakerMap(speakerMap);
+      onSave(cast, speakers, bubbleSpeakers, false)
         .then(() => setAutoSavedAt(Date.now()))
         .catch(() => {});
       setDirty(false);
     }, 1200);
     return () => clearTimeout(t);
-  }, [dirty, cast, speakers, onSave]);
+  }, [dirty, cast, speakerMap, onSave]);
   const scheduleSave = () => setDirty(true);
 
-  const setSpeaker = (sceneId: string, charId: string) => {
-    setSpeakers((prev) => ({ ...prev, [sceneId]: charId }));
+  const setSpeaker = (key: string, charId: string) => {
+    setSpeakerMap((prev) => ({ ...prev, [key]: charId }));
     scheduleSave();
   };
   const setVoice = (charId: string, voice: string, voiceName: string) => {
@@ -154,7 +184,8 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
   async function doSave(approve: boolean) {
     setSaving(approve ? "approve" : "save");
     try {
-      await onSave(cast, speakers, approve);
+      const { speakers, bubbleSpeakers } = splitSpeakerMap(speakerMap);
+      await onSave(cast, speakers, bubbleSpeakers, approve);
     } finally {
       setSaving(null);
     }
@@ -397,41 +428,58 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
         )}
       </div>
 
-      {/* 대사 · 화자 — 각 대사를 어느 캐릭터가 말하는지(더빙 목소리 매핑) */}
+      {/* 대사 · 화자 — 말풍선별로 어느 캐릭터가 말하는지(더빙 목소리 매핑) */}
       {dialogueScenes.length > 0 && (
         <div className="mt-4">
           <h3 className="mb-2 text-sm font-semibold">
             대사 · 화자{" "}
-            <span className="font-normal text-[var(--muted)]">— 누가 말하는지 (더빙용)</span>
+            <span className="font-normal text-[var(--muted)]">— 말풍선마다 누가 말하는지 (더빙용)</span>
           </h3>
-          <div className="max-h-[40vh] space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2">
-            {dialogueScenes.map((s) => (
-              <div
-                key={s.id}
-                className="flex items-center gap-2 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-xs"
-              >
-                <span className="shrink-0 text-[var(--muted)]">컷 {s.order + 1}</span>
-                {(() => {
-                  const sc = cast.find((c) => c.id === speakers[s.id]);
-                  return sc ? <Thumb sceneId={repScene(sc)} cls="h-6 w-6 shrink-0" /> : null;
-                })()}
-                <select
-                  value={speakers[s.id] ?? ""}
-                  onChange={(e) => setSpeaker(s.id, e.target.value)}
-                  className="shrink-0 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5"
+          <div className="max-h-[45vh] space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2">
+            {dialogueScenes.map((s) => {
+              const rows = bubblesOf(s);
+              return (
+                <div
+                  key={s.id}
+                  className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1"
                 >
-                  <option value="">나레이션/미상</option>
-                  {cast.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {optLabel(c)}
-                    </option>
-                  ))}
-                </select>
-                <span className="truncate" title={s.cut?.dialogue}>
-                  “{s.cut?.dialogue}”
-                </span>
-              </div>
-            ))}
+                  <div className="mb-0.5 text-[10px] text-[var(--muted)]">
+                    컷 {s.order + 1}
+                    {rows.length > 1 ? ` · 말풍선 ${rows.length}개` : ""}
+                  </div>
+                  <div className="space-y-1">
+                    {rows.map(({ idx, text }) => {
+                      const key = `${s.id}#${idx}`;
+                      const sc = cast.find((c) => c.id === speakerMap[key]);
+                      return (
+                        <div key={key} className="flex items-center gap-2 text-xs">
+                          {sc ? (
+                            <Thumb sceneId={repScene(sc)} cls="h-6 w-6 shrink-0" />
+                          ) : (
+                            <span className="h-6 w-6 shrink-0" />
+                          )}
+                          <select
+                            value={speakerMap[key] ?? ""}
+                            onChange={(e) => setSpeaker(key, e.target.value)}
+                            className="shrink-0 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5"
+                          >
+                            <option value="">나레이션/미상</option>
+                            {cast.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {optLabel(c)}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="truncate" title={text}>
+                            “{text}”
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

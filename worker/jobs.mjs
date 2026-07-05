@@ -64,6 +64,22 @@ function absorbTextCuts(scenes) {
   }
   return reals;
 }
+
+// 재추출/분할/합병 시 풍선별 화자(speakerId) 보존 — 새 OCR 풍선을 옛 풍선과 글자로 매칭해
+// 화자를 옮긴다. 옛 풍선이 없고 컷 단위 레거시 화자만 있으면 풍선 1개일 때 그걸 물려준다.
+function mergeBubbleSpeakers(newBubbles, oldBubbles, legacySpeakerId) {
+  const bubbles = (newBubbles || []).map((b) => ({ text: b.text, box: b.box }));
+  const old = oldBubbles || [];
+  const norm = (t) => String(t || "").replace(/\s+/g, "").trim();
+  for (const nb of bubbles) {
+    const match = old.find((ob) => ob.speakerId && norm(ob.text) === norm(nb.text));
+    if (match) nb.speakerId = match.speakerId;
+  }
+  if (!old.some((o) => o.speakerId) && legacySpeakerId && bubbles.length === 1 && !bubbles[0].speakerId) {
+    bubbles[0].speakerId = legacySpeakerId;
+  }
+  return bubbles;
+}
 import { loadSplitConfig } from "./config.mjs";
 
 async function download(url) {
@@ -258,9 +274,11 @@ export async function runExtract(projectId) {
       await Promise.all(
         chunk.map(async (s) => {
           try {
-            const { dialogue, sfx, boxes } = await readCutText(pngById.get(s.id), key, OCR_MODEL);
+            const { bubbles, dialogue, sfx, boxes } = await readCutText(pngById.get(s.id), key, OCR_MODEL);
             if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
             // ★ OCR(풀해상도)이 이 컷 대사의 유일 정답 — 저해상도 분류 대사를 깨끗이 덮어씀.
+            // 풍선별 speakerId 는 기존 값(있으면 텍스트 매칭) 보존해 화자 귀속이 안 날아가게.
+            s.cut.bubbles = mergeBubbleSpeakers(bubbles, s.cut.bubbles, s.cut.speakerId);
             s.cut.dialogue = (dialogue || "").trim();
             if (sfx) s.cut.sfx = sfx;
             s.cut.textBoxes = boxes;
@@ -835,6 +853,7 @@ export async function runSplitCut(projectId, payload) {
     if (key) {
       try {
         const ocr = await readCutText(png, key, VLM_MODEL);
+        cut.bubbles = mergeBubbleSpeakers(ocr.bubbles, cut.bubbles, cut.speakerId);
         cut.dialogue = ocr.dialogue;
         if (ocr.sfx) cut.sfx = ocr.sfx;
         cut.textBoxes = ocr.boxes;
@@ -928,6 +947,12 @@ export async function runMergeCut(projectId, payload) {
   cut.dialogue = [...new Set(lines)].join("\n");
   cut.sfx = ocr?.sfx || a.cut?.sfx || b.cut?.sfx || "";
   cut.textBoxes = ocr?.boxes ?? [];
+  // 풍선별 화자: 합친 이미지 OCR 풍선에, 두 원본 컷의 풍선 화자를 글자 매칭으로 보존.
+  cut.bubbles = mergeBubbleSpeakers(
+    ocr?.bubbles ?? [],
+    [...(a.cut?.bubbles ?? []), ...(b.cut?.bubbles ?? [])],
+    a.cut?.speakerId ?? b.cut?.speakerId
+  );
 
   const merged = {
     id: randomUUID(),

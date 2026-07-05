@@ -625,12 +625,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   async function saveCast(
     cast: Character[],
     speakers: Record<string, string>,
+    bubbleSpeakers: Record<string, string>,
     approve: boolean
   ) {
     const r = await fetch("/api/cast", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ projectId: project.id, cast, speakers, approve }),
+      body: JSON.stringify({ projectId: project.id, cast, speakers, bubbleSpeakers, approve }),
     });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error ?? "저장 실패");
@@ -1228,8 +1229,19 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             {project.scenes
               .filter((s) => s.generatedImage)
               .map((s) => {
-                const speaker = project.cast?.find((c) => c.id === s.cut?.speakerId);
-                const voiceName = speaker?.voiceName || speaker?.voice;
+                const bubs = s.cut?.bubbles ?? [];
+                const spkIds = bubs.length
+                  ? [...new Set(bubs.map((b) => b.speakerId).filter((x): x is string => !!x))]
+                  : s.cut?.speakerId
+                    ? [s.cut.speakerId]
+                    : [];
+                const spkChars = spkIds
+                  .map((id) => project.cast?.find((c) => c.id === id))
+                  .filter((c): c is NonNullable<typeof c> => !!c);
+                const speakerLabel = spkChars.length
+                  ? spkChars.map((c) => c.label).join(", ")
+                  : "나레이션/미상";
+                const voiceLabel = spkChars.map((c) => c.voiceName || c.voice).filter(Boolean).join(", ");
                 return (
                   <div
                     key={s.id}
@@ -1273,8 +1285,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           {s.videoUrl ? "🎬 다시" : "🎬 동영상"}
                         </button>
                         <span className="text-[var(--muted)]">
-                          {speaker ? `화자: ${speaker.label}` : "화자: 나레이션/미상"}
-                          {voiceName ? ` · 목소리: ${voiceName}` : " · 목소리 미지정"}
+                          화자: {speakerLabel}
+                          {voiceLabel ? ` · 목소리: ${voiceLabel}` : " · 목소리 미지정"}
                         </span>
                       </div>
                       {(s.cut?.dialogue?.trim() || s.cut?.narration?.trim()) && (
