@@ -58,6 +58,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const castRunning = castStatus === "running";
   const regenStatus = project.steps.regen.status;
   const regenRunning = regenStatus === "running";
+  const sceneStatus = project.steps.scene.status; // M4 영상(I2V)
+  const sceneRunning = sceneStatus === "running";
 
   // ── 분할/추출 진행 폴링 (워커 작업 중일 때만) ──────────────────────────────
   const poll = useCallback(async () => {
@@ -147,6 +149,34 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       clearTimeout(first);
     };
   }, [regenRunning, pollRegen]);
+
+  // ── 영상(M4·I2V) 진행 폴링 ───────────────────────────────────────────────────
+  const pollScene = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/video?projectId=${project.id}`, { cache: "no-store" });
+      const d = await r.json();
+      if (!d.ok) return;
+      setProgress(d.progress ?? "");
+      setProgressLog(d.progressLog ?? []);
+      setProject((prev) => ({
+        ...prev,
+        scenes: d.scenes ?? prev.scenes,
+        steps: { ...prev.steps, scene: { ...prev.steps.scene, status: d.status, error: d.error } },
+      }));
+    } catch {
+      /* 다음 틱 재시도 */
+    }
+  }, [project.id]);
+
+  useEffect(() => {
+    if (!sceneRunning) return;
+    const t = setInterval(pollScene, 3000);
+    const first = setTimeout(pollScene, 0);
+    return () => {
+      clearInterval(t);
+      clearTimeout(first);
+    };
+  }, [sceneRunning, pollScene]);
 
   // projectRef 를 최신 project 로 동기화(자동저장 디바운스에서 최신 cut 읽기용).
   useEffect(() => {
@@ -504,6 +534,26 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "생성 실패");
+    }
+  }
+
+  // 컷 하나만 Grok 영상(I2V) — 재생성 이미지가 있어야. 되나 확인용 테스트.
+  async function videoOne(sceneId: string) {
+    setError("");
+    try {
+      const r = await fetch("/api/video", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneIds: [sceneId] }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "영상 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, scene: { ...prev.steps.scene, status: "running" } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "영상 실패");
     }
   }
 
@@ -1045,6 +1095,28 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                               : "미생성"}
                         </div>
                       )}
+                      {s.generatedImage && (
+                        <>
+                          <span className="shrink-0 pt-11 text-[var(--muted)]">▶</span>
+                          {s.videoUrl ? (
+                            <video
+                              src={s.videoUrl}
+                              controls
+                              loop
+                              muted
+                              className="h-28 w-auto shrink-0 rounded border border-[var(--ok)]"
+                            />
+                          ) : (
+                            <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] px-1 text-center text-[10px] text-[var(--muted)]">
+                              {s.videoError
+                                ? `영상 실패: ${s.videoError}`
+                                : sceneRunning
+                                  ? "영상 대기…"
+                                  : "영상 없음"}
+                            </div>
+                          )}
+                        </>
+                      )}
                       <div className="flex min-w-0 flex-1 flex-col gap-1">
                         <textarea
                           value={s.cut?.description ?? ""}
@@ -1121,6 +1193,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                               title="이 컷만 생성(테스트·재생성)"
                             >
                               {s.generatedImage ? "다시 생성" : "생성"}
+                            </button>
+                            <button
+                              onClick={() => videoOne(s.id)}
+                              disabled={busy || sceneRunning || !s.generatedImage}
+                              className="rounded border border-[var(--border)] px-2 py-0.5 disabled:opacity-30"
+                              title="이 컷 이미지로 Grok 영상 생성(테스트)"
+                            >
+                              {s.videoUrl ? "🎬 다시" : "🎬 영상"}
                             </button>
                           </div>
                         </div>

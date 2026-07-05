@@ -108,6 +108,8 @@ export interface Scene {
   regenMode?: "mask" | "full"; // 재생성 방식: mask=원본보존+빈공간/글씨만, full=통째 재생성
   generatedImage?: string; // M3 재생성 이미지 Blob URL (image-2)
   regenError?: string; // 재생성 실패 사유(있으면)
+  videoUrl?: string; // M4 I2V 영상 Blob URL (Grok image-to-video)
+  videoError?: string; // 영상 생성 실패 사유(있으면)
   status: StepStatus; // M1 에선 경계 확정 여부 관리에만 사용
 }
 

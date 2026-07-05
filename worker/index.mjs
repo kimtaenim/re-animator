@@ -10,12 +10,13 @@ import {
   runRegen,
   runSplitCut,
   runMergeCut,
+  runVideo,
 } from "./jobs.mjs";
 
 const POLL_MS = 3000;
 const JOB_TIMEOUT_MS = 12 * 60 * 1000; // 12분(재생성 배치 여유)
 
-const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen"];
+const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen", "video"];
 const JOB_FN = {
   split: runSplit,
   resplit: runResplit,
@@ -24,6 +25,7 @@ const JOB_FN = {
   extract: runExtract,
   cast: runCast,
   regen: runRegen,
+  video: runVideo,
 };
 const JOB_STEP = {
   split: "source",
@@ -33,6 +35,7 @@ const JOB_STEP = {
   extract: "source",
   cast: "cast",
   regen: "regen",
+  video: "scene",
 };
 
 async function runJob(job) {

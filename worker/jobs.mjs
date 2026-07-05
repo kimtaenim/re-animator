@@ -21,7 +21,11 @@ import { classifyScenes } from "./classify.mjs";
 import { classifyCast } from "./cast.mjs";
 import { regenScene, regenSceneMasked, REGEN_CONCURRENCY } from "./regen.mjs";
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
+import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { readCutText } from "./ocr.mjs";
+
+// 영상(I2V)은 submit→poll 로 컷당 수십 초~수 분 → 동시성 낮게(잡 하나가 그 동안 점유).
+const VIDEO_CONCURRENCY = Number(process.env.VIDEO_CONCURRENCY || 2);
 
 // 캐스팅 대상 = 인물이 담긴 컷. person(정지·반응) + action(동작 중 인물) 모두 포함.
 const CHARACTER_TYPES = new Set(["person", "action"]);
@@ -616,6 +620,103 @@ export async function runRegen(projectId, payload) {
 
   await flush(true); // 마지막 반영 + 단계 review
   await log(`재생성 완료: ${ok}/${cand.length} (~$${costTotal.toFixed(3)})`);
+  return ok;
+}
+
+// ── video(M4): 재생성 컷(generatedImage)을 Grok I2V 로 영상화 → Scene.videoUrl ─
+//    scene 단계로 진행 표시. payload.sceneIds 있으면 그 컷만.
+export async function runVideo(projectId, payload) {
+  await resetProgress(projectId);
+  const log = async (m) => {
+    console.error("[video]", m);
+    await logProgress(projectId, m);
+  };
+
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  const scenes = (p.scenes ?? []).slice().sort((a, b) => a.order - b.order);
+  let cand = scenes.filter((s) => s.generatedImage); // 재생성된 컷만 I2V 대상
+  if (Array.isArray(payload?.sceneIds) && payload.sceneIds.length) {
+    const set = new Set(payload.sceneIds);
+    cand = cand.filter((s) => set.has(s.id));
+  }
+  if (cand.length === 0) throw new Error("영상 만들 컷이 없어요(먼저 3단계 재생성)");
+  await log(`영상 생성 대상 ${cand.length}컷 · Grok · 동시 ${VIDEO_CONCURRENCY}`);
+
+  const byId = new Map(); // sceneId → { url } | { error }
+  let costTotal = 0;
+  let ok = 0;
+
+  const flush = async (finalStep) => {
+    const pp = await getProject(projectId);
+    if (!pp) return;
+    for (const s of pp.scenes ?? []) {
+      const g = byId.get(s.id);
+      if (!g) continue;
+      if (g.url) {
+        s.videoUrl = g.url;
+        s.videoError = undefined;
+      } else {
+        s.videoError = g.error || "영상 실패";
+      }
+    }
+    if (finalStep) {
+      pp.steps.scene = {
+        ...pp.steps.scene,
+        kind: "scene",
+        status: "review",
+        error: undefined,
+        updatedAt: Date.now(),
+      };
+    }
+    await saveProject(pp);
+  };
+
+  for (let i = 0; i < cand.length; i += VIDEO_CONCURRENCY) {
+    const chunk = cand.slice(i, i + VIDEO_CONCURRENCY);
+    await log(`영상 ${i + 1}~${i + chunk.length}/${cand.length}…`);
+    await Promise.all(
+      chunk.map(async (s) => {
+        try {
+          const prompt =
+            String(s.cut?.motion || s.cut?.description || "").trim() || undefined;
+          const videoUrl = await grokVideoFromImage(
+            { imageUrl: s.generatedImage, prompt },
+            () => log(`컷 ${s.order + 1} 생성 중…`)
+          );
+          const buf = await download(videoUrl);
+          const { url } = await put(
+            `project/${projectId}/vid-${s.order}-${Date.now()}.mp4`,
+            buf,
+            { access: "public", contentType: "video/mp4", addRandomSuffix: false }
+          );
+          byId.set(s.id, { url });
+          costTotal += GROK_VIDEO_COST;
+          ok++;
+          await log(`컷 ${s.order + 1} 영상 완료`);
+        } catch (e) {
+          byId.set(s.id, { error: String(e?.message ?? e) });
+          await log(`컷 ${s.order + 1} 영상 실패: ${String(e?.message ?? e).slice(0, 120)}`);
+        }
+        await flush(false);
+      })
+    );
+    const doneN = Math.min(i + chunk.length, cand.length);
+    await log(`진행 ${doneN}/${cand.length} (${Math.round((doneN / cand.length) * 100)}%)`);
+  }
+
+  try {
+    await recordCost({
+      projectId,
+      vendor: "xai",
+      model: "grok-imagine-video",
+      costUsd: costTotal,
+      meta: { kind: "video", clips: cand.length, ok },
+    });
+  } catch {}
+
+  await flush(true);
+  await log(`영상 완료: ${ok}/${cand.length} (~$${costTotal.toFixed(3)})`);
   return ok;
 }
 
