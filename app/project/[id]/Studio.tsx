@@ -28,6 +28,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
   const [progressLog, setProgressLog] = useState<string[]>([]);
+  const [srcOpen, setSrcOpen] = useState<boolean | null>(null); // null=기본(승인되면 접힘)
   const [costKrw, setCostKrw] = useState<number | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [nameVal, setNameVal] = useState("");
@@ -518,6 +519,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const hasCuts = project.scenes.length > 0;
   const approved = sourceStatus === "approved";
   const typedCount = project.scenes.filter((s) => s.cut?.type).length;
+  const showSrc = srcOpen ?? !approved; // 1단계 완료(승인)되면 소스 섹션 기본 접힘
   const charCutCount = project.scenes.filter((s) => s.cut?.type === "person").length;
 
   return (
@@ -579,13 +581,24 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
 
       {/* 1) 소스 업로드 */}
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">소스 이미지</h2>
-          <span className="text-xs text-[var(--muted)]">
-            업로드 순서 = 세로 스크롤 순서
-          </span>
-        </div>
+        <button
+          type="button"
+          onClick={() => setSrcOpen(!showSrc)}
+          className="mb-3 flex w-full items-center justify-between text-left"
+        >
+          <h2 className="text-sm font-semibold">
+            {showSrc ? "▾" : "▸"} 소스 이미지{" "}
+            {project.sourceFiles.length > 0 && (
+              <span className="font-normal text-[var(--muted)]">
+                ({project.sourceFiles.length}장)
+              </span>
+            )}
+          </h2>
+          <span className="text-xs text-[var(--muted)]">업로드 순서 = 세로 스크롤 순서</span>
+        </button>
 
+        {showSrc && (
+          <>
         <input
           ref={fileRef}
           type="file"
@@ -633,6 +646,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           >
             {running ? "처리 중…" : hasCuts ? "다시 분할" : "컷 자동 분할"}
           </button>
+        )}
+          </>
         )}
       </section>
 

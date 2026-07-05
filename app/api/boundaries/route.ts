@@ -95,14 +95,24 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "유효한 컷이 없어요" }, { status: 400 });
   }
 
-  // 기존 originalImage 는 경계가 바뀌면 무효 → 재추출 필요하므로 비운다.
-  const scenes: Scene[] = clean.map(({ cut, ...region }, i) => ({
-    id: randomUUID(),
-    order: i,
-    sourceRegion: region,
-    cut,
-    status: "review",
-  }));
+  // 지오메트리(경계)가 그대로인 컷은 기존 id·원본이미지·생성이미지를 보존한다 →
+  // 재추출·재OCR 불필요(안 바뀐 컷은 건너뜀). 경계가 바뀐 컷만 새로 처리된다.
+  const geoKey = (r: { yStart: number; yEnd: number; xStart?: number; xEnd?: number }) =>
+    `${Math.round(r.yStart)}:${Math.round(r.yEnd)}:${Math.round(r.xStart ?? -1)}:${Math.round(r.xEnd ?? -1)}`;
+  const oldByGeo = new Map(project.scenes.map((s) => [geoKey(s.sourceRegion), s]));
+  const scenes: Scene[] = clean.map(({ cut, ...region }, i) => {
+    const old = oldByGeo.get(geoKey(region));
+    return {
+      id: old?.id ?? randomUUID(),
+      order: i,
+      sourceRegion: region,
+      cut,
+      originalImage: old?.originalImage,
+      regenMode: old?.regenMode,
+      generatedImage: old?.generatedImage,
+      status: "review",
+    };
+  });
   project.scenes = scenes;
   setStep(project, "source", { status: "review", error: undefined });
   await saveProject(project);

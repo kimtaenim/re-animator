@@ -213,10 +213,15 @@ export async function runExtract(projectId) {
   const buffers = [];
   for (const f of files) buffers.push(await download(f.url));
 
-  const pngById = new Map(); // 풀해상도 컷 png (OCR 재사용)
-  for (let i = 0; i < scenes.length; i++) {
-    const s = scenes[i];
-    await log(`컷 ${i + 1}/${scenes.length} 추출·업로드…`);
+  // ★ 증분: 이미 추출된 컷(originalImage 있음 = 경계 안 바뀜)은 건너뛴다. 새/바뀐 컷만.
+  const todo = scenes.filter((s) => !s.originalImage);
+  await log(`추출 대상 ${todo.length}컷 (전체 ${scenes.length}, 기존 유지 ${scenes.length - todo.length})`);
+  for (const s of scenes) if (s.originalImage) s.status = "approved";
+
+  const pngById = new Map(); // 이번에 새로 추출한 풀해상도 컷 png (OCR 재사용)
+  for (let i = 0; i < todo.length; i++) {
+    const s = todo[i];
+    await log(`컷 추출·업로드 ${i + 1}/${todo.length}…`);
     const png = await extractRegion(
       p.virtualCanvas,
       buffers,
@@ -235,14 +240,14 @@ export async function runExtract(projectId) {
     s.status = "approved";
   }
 
-  // 글씨 읽기(OCR) — 썸네일 아니라 풀해상도 컷으로 정확히. 대사·효과음·글씨박스.
+  // 글씨 읽기(OCR) — 이번에 새로 추출한 컷만. 풀해상도 컷으로 정확히.
   const key = process.env.OPENAI_API_KEY;
-  if (key) {
+  if (key && todo.length > 0) {
     const OCR_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
     const C = 4;
     let done = 0;
-    for (let i = 0; i < scenes.length; i += C) {
-      const chunk = scenes.slice(i, i + C);
+    for (let i = 0; i < todo.length; i += C) {
+      const chunk = todo.slice(i, i + C);
       await Promise.all(
         chunk.map(async (s) => {
           try {
@@ -256,8 +261,8 @@ export async function runExtract(projectId) {
           }
         })
       );
-      done = Math.min(i + C, scenes.length);
-      await log(`글씨 읽기 ${done}/${scenes.length}`);
+      done = Math.min(i + C, todo.length);
+      await log(`글씨 읽기 ${done}/${todo.length}`);
     }
   }
 
