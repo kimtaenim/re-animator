@@ -112,7 +112,9 @@ function CutThumb({
 export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave, onResplit }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const leftScrollRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
   const [displayW, setDisplayW] = useState(220);
+  const [selected, setSelected] = useState<number | null>(null);
   // regions 는 항상 yStart 오름차순 유지(렌더 인덱스=드래그 인덱스 일치).
   const [regions, setRegions] = useState<Region[]>(() => scenesToRegions(scenes));
   const [drag, setDrag] = useState<{ index: number; edge: "top" | "bottom" } | null>(null);
@@ -251,6 +253,16 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave, on
     leftScrollRef.current?.scrollTo({ top: Math.max(0, r.yStart * scale - 40), behavior: "smooth" });
   }
 
+  // 양방향 선택: 한쪽에서 고르면 반대쪽으로 스크롤 + 양쪽 하이라이트.
+  function selectFromLeft(i: number) {
+    setSelected(i);
+    cardRefs.current[i]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+  function selectFromRight(i: number) {
+    setSelected(i);
+    scrollToCut(regions[i]);
+  }
+
   async function save() {
     setSaving(true);
     try {
@@ -321,14 +333,15 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave, on
               return (
                 <div
                   key={`reg-${i}`}
-                  className="absolute border-2"
+                  onClick={() => selectFromLeft(i)}
+                  className="absolute cursor-pointer border-2"
                   style={{
                     top: r.yStart * scale,
                     height: (r.yEnd - r.yStart) * scale,
                     left: xs * scale,
                     width: (xe - xs) * scale,
-                    borderColor: color,
-                    boxShadow: `0 0 5px ${color}`,
+                    borderColor: selected === i ? "#fff" : color,
+                    boxShadow: selected === i ? `0 0 0 2px #fff, 0 0 10px ${color}` : `0 0 5px ${color}`,
                   }}
                 >
                   <div
@@ -379,8 +392,15 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave, on
               return (
                 <div
                   key={`card-${i}`}
+                  ref={(el) => {
+                    cardRefs.current[i] = el;
+                  }}
                   className="flex flex-col overflow-hidden rounded-lg border bg-[var(--panel-2)]"
-                  style={{ borderColor: cut.type ? color : "var(--border)" }}
+                  style={{
+                    borderColor: cut.type ? color : "var(--border)",
+                    outline: selected === i ? "2px solid #fff" : undefined,
+                    outlineOffset: "1px",
+                  }}
                 >
                   <div
                     className="relative flex items-center justify-center bg-black/40"
@@ -388,7 +408,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave, on
                   >
                     <button
                       type="button"
-                      onClick={() => scrollToCut(r)}
+                      onClick={() => selectFromRight(i)}
                       title="왼쪽 스트립에서 이 컷 위치로 이동"
                       className="cursor-pointer"
                     >
