@@ -358,6 +358,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       return n;
     });
   }
+  // 전체 선택 ↔ 해제(토글). 전체 선택 후 개별 체크 해제로 몇 개만 빼기 가능.
+  function toggleSelectAllRegen() {
+    const ids = project.scenes
+      .filter((s) => s.originalImage && s.cut?.type !== "text")
+      .map((s) => s.id);
+    const all = ids.length > 0 && ids.every((id) => selForRegen.has(id));
+    setSelForRegen(all ? new Set() : new Set(ids));
+  }
   async function regenSelected() {
     if (selForRegen.size === 0) return;
     setError("");
@@ -871,6 +879,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {(() => {
+                const cands = project.scenes.filter(
+                  (s) => s.originalImage && s.cut?.type !== "text"
+                );
+                const all = cands.length > 0 && cands.every((s) => selForRegen.has(s.id));
+                return (
+                  <button
+                    onClick={toggleSelectAllRegen}
+                    className="rounded border border-[var(--border)] px-2 py-2 text-sm"
+                  >
+                    {all ? "선택 해제" : "전체 선택"}
+                  </button>
+                );
+              })()}
               {selForRegen.size > 0 && (
                 <button
                   onClick={regenSelected}
