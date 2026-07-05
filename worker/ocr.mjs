@@ -5,7 +5,27 @@
 // 박스(0~1)는 마스크 재생성에서 '글씨 지울 곳'으로 재사용.
 // ============================================================================
 
+import sharp from "sharp";
+
 const PRICING = { "gpt-4o": { input: 2.5, output: 10 } };
+
+// OCR 전 컷을 확대 — 작은 말풍선 글자를 키워 gpt-4o 타일링에서 더 잘 읽히게.
+// 폭이 좁으면 최대 1600px까지 업스케일(정보는 안 늘지만 타일당 디테일↑).
+async function upscaleForOcr(pngBuf) {
+  try {
+    const m = await sharp(pngBuf).metadata();
+    const w = m.width || 0;
+    if (w > 0 && w < 1600) {
+      return await sharp(pngBuf)
+        .resize({ width: 1600, withoutEnlargement: false, kernel: "lanczos3" })
+        .png()
+        .toBuffer();
+    }
+  } catch {
+    /* 원본 그대로 */
+  }
+  return pngBuf;
+}
 function costUsd(model, usage) {
   const p = PRICING[model] || PRICING["gpt-4o"];
   return ((usage?.prompt_tokens ?? 0) * p.input + (usage?.completion_tokens ?? 0) * p.output) / 1e6;
@@ -48,6 +68,7 @@ const PROMPT =
 
 // pngBuf(풀해상도 컷) → { dialogue, sfx, boxes, cost }. 실패 시 throw.
 export async function readCutText(pngBuf, key, model = "gpt-4o") {
+  const img = await upscaleForOcr(pngBuf);
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
@@ -62,7 +83,7 @@ export async function readCutText(pngBuf, key, model = "gpt-4o") {
             {
               type: "image_url",
               image_url: {
-                url: `data:image/png;base64,${pngBuf.toString("base64")}`,
+                url: `data:image/png;base64,${img.toString("base64")}`,
                 detail: "high",
               },
             },

@@ -11,7 +11,7 @@ import sharp from "sharp";
 const IMAGE_COST = { low: 0.016, medium: 0.042, high: 0.167 };
 const SIZE_WH = { "1024x1024": [1024, 1024], "1536x1024": [1536, 1024], "1024x1536": [1024, 1536] };
 export const REGEN_QUALITY = process.env.OPENAI_IMAGE_QUALITY || "medium";
-export const REGEN_CONCURRENCY = Number(process.env.REGEN_CONCURRENCY || 4);
+export const REGEN_CONCURRENCY = Number(process.env.REGEN_CONCURRENCY || 6);
 export const imageCostUsd = () => IMAGE_COST[REGEN_QUALITY] ?? 0.042;
 
 // ★ 출력 크기는 컷 모양이 아니라 '프로젝트 목표 비율'로 고정 — 모든 컷이 같은 크기.
