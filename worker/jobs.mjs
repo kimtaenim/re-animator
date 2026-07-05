@@ -607,7 +607,7 @@ export async function runRegen(projectId, payload) {
     await recordCost({
       projectId,
       vendor: "openai",
-      model,
+      model: models ? "mixed" : defModel,
       costUsd: costTotal,
       meta: { kind: "regen", images: cand.length, ok },
     });
