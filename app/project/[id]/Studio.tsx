@@ -1602,7 +1602,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         className="flex flex-wrap items-center gap-1"
                         title="이 컷 → 다음 컷 사이 전환. 5단계 '영상 묶기' 결과에 적용됩니다."
                       >
-                        <span className="text-[var(--muted)]">🎞 전환</span>
+                        <span className="text-[var(--muted)]">🎞</span>
                         {TRANSITIONS.map(([v, t]) => (
                           <button
                             key={v}
