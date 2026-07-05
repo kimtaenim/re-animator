@@ -105,19 +105,27 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
     }
   }
 
+  // 드롭다운·라벨에 붙일 외모 힌트 — "캐릭터 N" 만으론 누군지 몰라서 특징 앞부분을 덧붙인다.
+  const hintOf = (c: Character) => (c.description || "").trim().replace(/\s+/g, " ").slice(0, 16);
+  const optLabel = (c: Character) => {
+    const h = hintOf(c);
+    return h ? `${c.label} · ${h}` : c.label;
+  };
+  const repScene = (c: Character) => c.refSceneId ?? c.sceneIds[0];
+
   const moveOptions = (excludeId?: string) => [
-    ...cast.filter((c) => c.id !== excludeId).map((c) => ({ v: c.id, t: `→ ${c.label}` })),
+    ...cast.filter((c) => c.id !== excludeId).map((c) => ({ v: c.id, t: `→ ${optLabel(c)}` })),
     { v: "new", t: "→ 새 캐릭터" },
     { v: "none", t: "제외" },
   ];
 
-  function Thumb({ sceneId }: { sceneId: string }) {
+  function Thumb({ sceneId, cls = "h-16 w-16" }: { sceneId: string; cls?: string }) {
     const s = sceneById.get(sceneId);
     if (!s?.originalImage) {
-      return <div className="grid h-16 w-16 place-items-center rounded bg-black/40 text-[9px] text-[var(--muted)]">?</div>;
+      return <div className={`grid ${cls} place-items-center rounded bg-black/40 text-[9px] text-[var(--muted)]`}>?</div>;
     }
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={s.originalImage} alt="" className="h-16 w-16 rounded object-cover" />;
+    return <img src={s.originalImage} alt="" className={`${cls} rounded object-cover`} />;
   }
 
   return (
@@ -148,15 +156,18 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
       <div className="space-y-3">
         {cast.map((c) => (
           <div key={c.id} className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3">
-            <div className="mb-2 flex items-center gap-2">
-              <input
-                value={c.label}
-                onChange={(e) => rename(c.id, e.target.value)}
-                className="w-32 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-sm font-semibold"
-              />
-              <span className="truncate text-xs text-[var(--muted)]" title={c.description}>
-                {c.description || "외모 미상"}
-              </span>
+            <div className="mb-2 flex items-center gap-3">
+              <Thumb sceneId={repScene(c)} cls="h-14 w-14 shrink-0" />
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <input
+                  value={c.label}
+                  onChange={(e) => rename(c.id, e.target.value)}
+                  className="w-40 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-sm font-semibold"
+                />
+                <span className="truncate text-xs text-[var(--muted)]" title={c.description}>
+                  {c.description || "외모 미상"}
+                </span>
+              </div>
               <span className="ml-auto shrink-0 text-xs text-[var(--muted)]">{c.sceneIds.length}컷</span>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -247,6 +258,10 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
                 className="flex items-center gap-2 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-xs"
               >
                 <span className="shrink-0 text-[var(--muted)]">컷 {s.order + 1}</span>
+                {(() => {
+                  const sc = cast.find((c) => c.id === speakers[s.id]);
+                  return sc ? <Thumb sceneId={repScene(sc)} cls="h-6 w-6 shrink-0" /> : null;
+                })()}
                 <select
                   value={speakers[s.id] ?? ""}
                   onChange={(e) => setSpeaker(s.id, e.target.value)}
@@ -255,7 +270,7 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
                   <option value="">나레이션/미상</option>
                   {cast.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.label}
+                      {optLabel(c)}
                     </option>
                   ))}
                 </select>
