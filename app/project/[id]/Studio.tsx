@@ -833,7 +833,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
                 >
                   <option value="gpt-image-2">gpt-image-2</option>
-                  <option value="gpt-image-1">gpt-image-1</option>
                   <option value="fal">Flux (fal.ai)</option>
                 </select>
                 <span className="ml-1 text-[var(--muted)]">비율:</span>

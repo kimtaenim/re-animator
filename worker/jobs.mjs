@@ -495,7 +495,8 @@ export async function runCast(projectId) {
   return cast.length;
 }
 
-// ── regen(M3): 각 컷을 gpt-image-1(i2i)로 재생성 → 청크 병렬 → Scene.generatedImage ─
+// ── regen(M3): 각 컷을 이미지 모델(gpt-image-2 기본 · fal Flux)로 재생성 → 청크 병렬
+//    → Scene.generatedImage ─
 // payload.sceneIds 주면 그 컷들만(컷 하나씩 테스트/다시생성). 청크마다 저장 → 진행 표시.
 export async function runRegen(projectId, payload) {
   await resetProgress(projectId);
