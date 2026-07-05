@@ -98,6 +98,16 @@ export interface Scene {
   status: StepStatus; // M1 에선 경계 확정 여부 관리에만 사용
 }
 
+// ── 캐스트(등장인물) — M2. 캐릭터 타입 컷을 VLM 이 인물별로 묶고 사람이 확정. ──
+// 같은 인물 = 같은 엔티티 → 이후 image-2 재생성에 같은 레퍼런스 이미지를 물려 일관성.
+export interface Character {
+  id: string;
+  label: string; // "캐릭터 1" … (순서대로 번호)
+  description: string; // 외모(머리·옷·특징) — VLM 서술
+  refSceneId?: string; // 대표 컷(가장 선명한 등장) → 레퍼런스 이미지
+  sceneIds: string[]; // 이 인물이 나오는 컷 id 들
+}
+
 // ── 프로젝트 ──────────────────────────────────────────────────────────────────
 export interface Project {
   id: string;
@@ -109,6 +119,7 @@ export interface Project {
   sourceFiles: SourceFile[];
   virtualCanvas: VirtualCanvas | null; // 분할 전엔 null
   scenes: Scene[]; // 순서 있는 배열. 분할 결과 → G1 편집 → 확정.
+  cast?: Character[]; // M2 캐스팅 결과(등장인물). 확정 전엔 미정.
 
   steps: Record<StepKind, StepState>;
 

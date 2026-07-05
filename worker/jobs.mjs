@@ -11,6 +11,9 @@ import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
 import { splitTallRegions } from "./group.mjs";
 import { classifyScenes } from "./classify.mjs";
+import { classifyCast } from "./cast.mjs";
+
+const CHARACTER_TYPES = new Set(["lead", "reaction", "characters"]);
 import { loadSplitConfig } from "./config.mjs";
 
 async function download(url) {
@@ -190,4 +193,45 @@ export async function runExtract(projectId) {
   };
   await saveProject(p2);
   return scenes.length;
+}
+
+// ── cast(M2): 캐릭터 타입 컷을 VLM 이 인물별로 묶어 캐스트 생성 → G0 검수 ────────
+export async function runCast(projectId) {
+  await resetProgress(projectId);
+  const log = async (m) => {
+    console.error("[cast]", m);
+    await logProgress(projectId, m);
+  };
+
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  if (!p.virtualCanvas) throw new Error("가상 캔버스가 없어요(분할 먼저)");
+  const scenes = (p.scenes ?? []).slice().sort((a, b) => a.order - b.order);
+  const charScenes = scenes.filter((s) => s.cut?.type && CHARACTER_TYPES.has(s.cut.type));
+  await log(`인물 컷 ${charScenes.length}개 (전체 ${scenes.length})`);
+
+  let cast = [];
+  if (charScenes.length > 0) {
+    const files = sortedFiles(p);
+    await log(`소스 ${files.length}개 다운로드…`);
+    const buffers = [];
+    for (const f of files) buffers.push(await download(f.url));
+
+    const key = process.env.OPENAI_API_KEY;
+    const VLM_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
+    cast = await classifyCast(p.virtualCanvas, buffers, charScenes, key, VLM_MODEL, log, projectId);
+  }
+
+  const p2 = await getProject(projectId);
+  if (!p2) throw new Error("프로젝트가 사라졌어요");
+  p2.cast = cast;
+  p2.steps.cast = {
+    ...p2.steps.cast,
+    kind: "cast",
+    status: "review", // G0 캐스트 검수 대기
+    error: undefined,
+    updatedAt: Date.now(),
+  };
+  await saveProject(p2);
+  return cast.length;
 }

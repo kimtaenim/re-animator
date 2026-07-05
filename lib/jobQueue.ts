@@ -7,7 +7,7 @@
 
 import { getRedis } from "./redis";
 
-export type JobType = "split" | "extract";
+export type JobType = "split" | "extract" | "cast";
 export type JobStatus = "queued" | "running" | "done" | "error";
 
 export interface Job {

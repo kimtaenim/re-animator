@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
-import { type Project, type StepKind, STEP_ORDER } from "@/lib/types";
+import { type Project, type StepKind, type Character, STEP_ORDER } from "@/lib/types";
 import BoundaryEditor, { type SavedRegion } from "./BoundaryEditor";
+import CastReview from "./CastReview";
 
 const STEP_LABEL: Record<StepKind, string> = {
   source: "1. 소스 · 컷 분할",
@@ -42,6 +43,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
 
   const sourceStatus = project.steps.source.status;
   const running = sourceStatus === "running";
+  const castStatus = project.steps.cast.status;
+  const castRunning = castStatus === "running";
 
   // ── 분할/추출 진행 폴링 (워커 작업 중일 때만) ──────────────────────────────
   const poll = useCallback(async () => {
@@ -73,6 +76,34 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       clearTimeout(first);
     };
   }, [running, poll]);
+
+  // ── 캐스팅(M2) 진행 폴링 ──────────────────────────────────────────────────
+  const pollCast = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/cast?projectId=${project.id}`, { cache: "no-store" });
+      const d = await r.json();
+      if (!d.ok) return;
+      setProgress(d.progress ?? "");
+      setProject((prev) => ({
+        ...prev,
+        cast: d.cast ?? prev.cast,
+        scenes: d.scenes ?? prev.scenes,
+        steps: { ...prev.steps, cast: { ...prev.steps.cast, status: d.status, error: d.error } },
+      }));
+    } catch {
+      /* 다음 틱 재시도 */
+    }
+  }, [project.id]);
+
+  useEffect(() => {
+    if (!castRunning) return;
+    const t = setInterval(pollCast, 2000);
+    const first = setTimeout(pollCast, 0);
+    return () => {
+      clearInterval(t);
+      clearTimeout(first);
+    };
+  }, [castRunning, pollCast]);
 
   // 누적 API 비용(₩) — 마운트 + 단계 변화(분할 완료 등) 때 갱신.
   useEffect(() => {
@@ -238,6 +269,43 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
+  async function runCastJob() {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await fetch("/api/cast", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "캐스팅 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, cast: { ...prev.steps.cast, status: "running" } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "캐스팅 실패");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveCast(cast: Character[], approve: boolean) {
+    const r = await fetch("/api/cast", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId: project.id, cast, approve }),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error ?? "저장 실패");
+    setProject((prev) => ({
+      ...prev,
+      cast: d.cast,
+      steps: { ...prev.steps, cast: { ...prev.steps.cast, status: d.status } },
+    }));
+  }
+
   const canvas = project.virtualCanvas;
   const hasCuts = project.scenes.length > 0;
   const approved = sourceStatus === "approved";
@@ -277,7 +345,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       {/* 단계 네비 (M1 은 1단계만 활성) */}
       <nav className="mb-6 flex gap-1 text-xs">
         {STEP_ORDER.map((k) => {
-          const active = k === "source";
+          const active = k === "source" || (k === "cast" && approved);
           return (
             <span
               key={k}
@@ -433,6 +501,59 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </div>
             ))}
           </div>
+        </section>
+      )}
+
+      {/* M2) 캐스팅 — 등장인물 구분 */}
+      {approved && (
+        <section className="mb-6">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">
+              2. 캐스팅{" "}
+              <span className="font-normal text-[var(--muted)]">— 등장인물 구분 (누가 누군지)</span>
+            </h2>
+            {castStatus === "pending" || castStatus === "error" ? (
+              <button
+                onClick={runCastJob}
+                disabled={busy || castRunning}
+                className="rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {castRunning ? "처리 중…" : "캐스팅 실행"}
+              </button>
+            ) : (
+              <button
+                onClick={runCastJob}
+                disabled={busy || castRunning}
+                className="rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50"
+              >
+                다시 캐스팅
+              </button>
+            )}
+          </div>
+
+          {castRunning && (
+            <p className="flex items-center gap-2 text-sm text-[var(--muted)]">
+              <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+              인물 구분 중… {progress && <span className="opacity-70">{progress}</span>}
+            </p>
+          )}
+
+          {castStatus === "error" && (
+            <p className="rounded-md border border-[var(--danger)] bg-[var(--panel)] p-3 text-sm text-[var(--danger)]">
+              {project.steps.cast.error ?? "캐스팅 오류"}
+            </p>
+          )}
+
+          {(castStatus === "review" || castStatus === "approved") && (
+            <>
+              {castStatus === "approved" && (
+                <p className="mb-2 text-xs text-[var(--ok)]">
+                  ✓ 캐스팅 확정됨 — 이후 재생성(M3)에서 인물별 레퍼런스로 사용
+                </p>
+              )}
+              <CastReview scenes={project.scenes} cast={project.cast ?? []} onSave={saveCast} />
+            </>
+          )}
         </section>
       )}
 

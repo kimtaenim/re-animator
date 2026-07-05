@@ -1,0 +1,211 @@
+"use client";
+
+// ============================================================================
+// M2 캐스팅 검수(G0) — VLM 이 묶은 등장인물을 사람이 확정.
+// ----------------------------------------------------------------------------
+// 캐릭터별로 대표 이미지 + 소속 컷 썸네일. 각 컷을 다른 캐릭터로 재배정하거나
+// 새 캐릭터로 분리, 제외 가능. 대표 컷 지정, 라벨 편집. 확정 시 부모(Studio)로 저장.
+// 같은 인물=같은 엔티티 → 이후 image-2 재생성에 같은 레퍼런스로 얼굴 일관성.
+// ============================================================================
+
+import { useState } from "react";
+import type { Character, Scene } from "@/lib/types";
+
+const CHARACTER_TYPES = new Set(["lead", "reaction", "characters"]);
+
+interface Props {
+  scenes: Scene[];
+  cast: Character[];
+  onSave: (cast: Character[], approve: boolean) => Promise<void>;
+}
+
+// 자동 라벨(캐릭터 N)만 순서대로 다시 매김 — 사람이 바꾼 이름은 보존.
+function relabel(list: Character[]): Character[] {
+  return list
+    .filter((c) => c.sceneIds.length > 0)
+    .map((c, i) => ({
+      ...c,
+      label: /^캐릭터 \d+$/.test(c.label) ? `캐릭터 ${i + 1}` : c.label,
+      refSceneId: c.refSceneId && c.sceneIds.includes(c.refSceneId) ? c.refSceneId : c.sceneIds[0],
+    }));
+}
+
+export default function CastReview({ scenes, cast: initial, onSave }: Props) {
+  const [cast, setCast] = useState<Character[]>(initial);
+  const [saving, setSaving] = useState<null | "save" | "approve">(null);
+
+  // prop 갱신(재캐스팅/저장 후) 재동기화 — 렌더 중 조정 패턴.
+  const [last, setLast] = useState(initial);
+  if (initial !== last) {
+    setLast(initial);
+    setCast(initial);
+  }
+
+  const sceneById = new Map(scenes.map((s) => [s.id, s]));
+  const assigned = new Set(cast.flatMap((c) => c.sceneIds));
+  const unassigned = scenes.filter(
+    (s) => s.cut?.type && CHARACTER_TYPES.has(s.cut.type) && !assigned.has(s.id)
+  );
+
+  function moveScene(sceneId: string, to: string) {
+    setCast((prev) => {
+      let next = prev.map((c) => ({ ...c, sceneIds: c.sceneIds.filter((id) => id !== sceneId) }));
+      if (to === "new") {
+        next.push({
+          id: `char-new-${sceneId}`,
+          label: `캐릭터 ${next.length + 1}`,
+          description: "",
+          refSceneId: sceneId,
+          sceneIds: [sceneId],
+        });
+      } else if (to !== "none") {
+        next = next.map((c) => (c.id === to ? { ...c, sceneIds: [...c.sceneIds, sceneId] } : c));
+      }
+      return relabel(next);
+    });
+  }
+
+  function rename(charId: string, label: string) {
+    setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, label } : c)));
+  }
+  function setRef(charId: string, sceneId: string) {
+    setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, refSceneId: sceneId } : c)));
+  }
+
+  async function doSave(approve: boolean) {
+    setSaving(approve ? "approve" : "save");
+    try {
+      await onSave(cast, approve);
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  const moveOptions = (excludeId?: string) => [
+    ...cast.filter((c) => c.id !== excludeId).map((c) => ({ v: c.id, t: `→ ${c.label}` })),
+    { v: "new", t: "→ 새 캐릭터" },
+    { v: "none", t: "제외" },
+  ];
+
+  function Thumb({ sceneId }: { sceneId: string }) {
+    const s = sceneById.get(sceneId);
+    if (!s?.originalImage) {
+      return <div className="grid h-16 w-16 place-items-center rounded bg-black/40 text-[9px] text-[var(--muted)]">?</div>;
+    }
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={s.originalImage} alt="" className="h-16 w-16 rounded object-cover" />;
+  }
+
+  return (
+    <div>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">
+          G0 · 캐스팅 검수{" "}
+          <span className="font-normal text-[var(--muted)]">({cast.length}명)</span>
+        </h2>
+        <div className="flex gap-2">
+          <button
+            onClick={() => doSave(false)}
+            disabled={saving !== null}
+            className="rounded border border-[var(--border)] px-3 py-1.5 text-sm disabled:opacity-40"
+          >
+            {saving === "save" ? "저장 중…" : "저장"}
+          </button>
+          <button
+            onClick={() => doSave(true)}
+            disabled={saving !== null}
+            className="rounded bg-[var(--ok)] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+          >
+            {saving === "approve" ? "확정 중…" : "캐스팅 확정"}
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {cast.map((c) => (
+          <div key={c.id} className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <input
+                value={c.label}
+                onChange={(e) => rename(c.id, e.target.value)}
+                className="w-32 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-sm font-semibold"
+              />
+              <span className="truncate text-xs text-[var(--muted)]" title={c.description}>
+                {c.description || "외모 미상"}
+              </span>
+              <span className="ml-auto shrink-0 text-xs text-[var(--muted)]">{c.sceneIds.length}컷</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {c.sceneIds.map((sid) => {
+                const isRef = c.refSceneId === sid;
+                return (
+                  <div
+                    key={sid}
+                    className="flex flex-col items-center gap-0.5 rounded border p-1"
+                    style={{ borderColor: isRef ? "var(--accent)" : "var(--border)" }}
+                  >
+                    <Thumb sceneId={sid} />
+                    <button
+                      onClick={() => setRef(c.id, sid)}
+                      className="text-[9px]"
+                      style={{ color: isRef ? "var(--accent)" : "var(--muted)" }}
+                      title="대표 이미지로 지정(레퍼런스)"
+                    >
+                      {isRef ? "★ 대표" : "대표로"}
+                    </button>
+                    <select
+                      value=""
+                      onChange={(e) => e.target.value && moveScene(sid, e.target.value)}
+                      className="w-16 rounded border border-[var(--border)] bg-[var(--panel-2)] text-[9px]"
+                    >
+                      <option value="">이동…</option>
+                      {moveOptions(c.id).map((o) => (
+                        <option key={o.v} value={o.v}>
+                          {o.t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        {unassigned.length > 0 && (
+          <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--panel)] p-3">
+            <h3 className="mb-2 text-sm font-semibold text-[var(--muted)]">
+              미배정 인물 컷 {unassigned.length}개{" "}
+              <span className="font-normal">— 어느 캐릭터인지 지정하세요</span>
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {unassigned.map((s) => (
+                <div key={s.id} className="flex flex-col items-center gap-0.5 rounded border border-[var(--border)] p-1">
+                  <Thumb sceneId={s.id} />
+                  <select
+                    value=""
+                    onChange={(e) => e.target.value && moveScene(s.id, e.target.value)}
+                    className="w-16 rounded border border-[var(--border)] bg-[var(--panel-2)] text-[9px]"
+                  >
+                    <option value="">배정…</option>
+                    {moveOptions().map((o) => (
+                      <option key={o.v} value={o.v}>
+                        {o.t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {cast.length === 0 && unassigned.length === 0 && (
+          <p className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 text-sm text-[var(--muted)]">
+            인물 컷이 없거나 아직 캐스팅 전입니다.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}

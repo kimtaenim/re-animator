@@ -68,13 +68,13 @@ export async function recordCost(entry) {
 }
 
 // 단계 실패 표시 — 오케스트레이터 밖(타임아웃 등)에서도 상태를 error 로.
-export async function failStep(projectId, error) {
+export async function failStep(projectId, error, step = "source") {
   try {
     const p = await getProject(projectId);
-    if (!p) return;
-    p.steps.source.status = "error";
-    p.steps.source.error = String(error);
-    p.steps.source.updatedAt = Date.now();
+    if (!p || !p.steps?.[step]) return;
+    p.steps[step].status = "error";
+    p.steps[step].error = String(error);
+    p.steps[step].updatedAt = Date.now();
     await saveProject(p);
   } catch {}
 }
