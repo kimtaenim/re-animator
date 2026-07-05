@@ -397,6 +397,33 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
+  // 안 그려진 컷만 마저 생성 — OOM 등으로 배치가 중간에 끊겨 일부만 된 경우, 나머지(생성 안
+  // 됐거나 실패한 컷)만 골라 다시. 컷별 모델 반영. generatedImage 없는 컷 = 아직 안 됨/실패.
+  async function regenMissing() {
+    const ids = project.scenes
+      .filter((s) => s.originalImage && s.cut?.type !== "text" && !s.generatedImage)
+      .map((s) => s.id);
+    if (ids.length === 0) return;
+    setError("");
+    const models: Record<string, string> = {};
+    for (const id of ids) models[id] = modelFor(id);
+    try {
+      const r = await fetch("/api/regen", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneIds: ids, models }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "생성 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, regen: { ...prev.steps.regen, status: "running" } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "생성 실패");
+    }
+  }
+
   // 재생성 방식(프로젝트 전체 공통). 기술용어(마스크) 대신 쉬운 이름으로 노출.
   function setProjectRegenMode(mode: "mask" | "full") {
     setProject((prev) => ({ ...prev, regenMode: mode }));
@@ -911,6 +938,24 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   선택 {selForRegen.size}개 생성
                 </button>
               )}
+              {(() => {
+                // 일부만 그려진 상태에서만 노출 — 안 됐거나 실패한 컷만 마저.
+                const cands = project.scenes.filter(
+                  (s) => s.originalImage && s.cut?.type !== "text"
+                );
+                const missing = cands.filter((s) => !s.generatedImage).length;
+                if (missing === 0 || missing === cands.length) return null;
+                return (
+                  <button
+                    onClick={regenMissing}
+                    disabled={busy || regenRunning}
+                    className="rounded-md border border-[var(--accent)] px-3 py-2 text-sm font-medium text-[var(--accent)] disabled:opacity-50"
+                    title="아직 안 그려졌거나 실패한 컷만 마저 생성"
+                  >
+                    안 된 것만 {missing}개
+                  </button>
+                );
+              })()}
               {regenStatus === "pending" || regenStatus === "error" ? (
                 <button
                   onClick={runRegenJob}
