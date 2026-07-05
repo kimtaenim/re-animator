@@ -9,13 +9,14 @@
     { "id": "object",      "ko": "사물",         "regenerate": true,  "entityRole": "prop",      "desc": "특정 사물이 초점(돈·기기·화면·소품)." },
     { "id": "action",      "ko": "액션",         "regenerate": true,  "entityRole": "context",   "desc": "움직임·충돌·역동 효과가 핵심인 컷." },
     { "id": "transition",  "ko": "장면 연결",    "regenerate": true,  "entityRole": "context",   "desc": "★ 오직 '흐르는 연출 효과·화면 전환 그 자체'가 컷의 전부일 때만. 예: 흩날리는 지폐·꽃잎·눈이 화면을 덮은 것, 속도선·집중선만, 빛번짐·반짝임 전환, 페이드 등. ★★ 실제 배경·장소·거리·건물·군중이 그려진 장면은 transition 이 아니다 → crowd_space. 인물이 그려져 있으면 인물 타입. transition 은 서사 장면이 아니라 '장면 사이를 잇는 효과' 자체일 때만 — 남발 금지." },
-    { "id": "text",        "ko": "텍스트",       "regenerate": false, "entityRole": null,        "desc": "★ 그림 없이(또는 거의 없이) 글자·말풍선·타이틀이 컷의 전부일 때만. 예: 말풍선만 덩그러니, 나레이션 글상자만, 표지·제목 글자, 효과음 글자만. ★★ 인물이나 배경이 그려져 있고 그 위에 말풍선이 얹힌 것뿐이면 text 가 아니다 → 그려진 주체 타입(인물/군중·공간 등)으로 하고, 말풍선 글자는 dialogue 필드에 적어라. textKind: dialogue(말풍선)·sfx(효과음)·title(타이틀)." }
+    { "id": "text",        "ko": "텍스트",       "regenerate": false, "entityRole": null,        "desc": "글자가 컷의 전부일 때. ★ 작품 제목·로고·표지·크레딧 화면은 네온·특수서체·배경효과로 화려하게 디자인돼 있어도 여기다(textKind=title) — 절대 object(사물)로 착각 금지. 장소·시간·상황 설명 자막(예: '미국 라스베가스')은 textKind=caption. 말풍선 대사는 dialogue, 효과음 글자는 sfx. ★★ 인물·배경이 그려져 있고 그 위에 말풍선만 얹힌 것뿐이면 text 가 아니라 그려진 주체 타입으로 하고 글자는 dialogue 필드에." }
   ],
 
   "textKinds": [
-    { "id": "dialogue", "ko": "말풍선", "route": "subtitle_dub", "desc": "대사 → 자막·더빙" },
-    { "id": "sfx",      "ko": "효과음", "route": "sound",        "desc": "의성어 → 음향" },
-    { "id": "title",    "ko": "타이틀", "route": "title",        "desc": "표지·제목·크레딧 → 그대로/리스타일" }
+    { "id": "dialogue", "ko": "말풍선", "route": "subtitle_dub", "desc": "대사 → 자막·더빙 (흡수)" },
+    { "id": "sfx",      "ko": "효과음", "route": "sound",        "desc": "의성어 → 음향 (흡수)" },
+    { "id": "caption",  "ko": "자막/캡션", "route": "subtitle",  "desc": "장소·시간·상황 설명 자막(예: '미국 라스베가스', '3일 후'). 나레이션 → 자막 (흡수)" },
+    { "id": "title",    "ko": "타이틀", "route": "title",        "desc": "★작품 자체의 제목·로고·표지·크레딧만. 컷으로 유지(흡수 안 함)" }
   ],
 
   "$cutSchema": "Scene.cut 에 채워지는 필드 설명(문서용). type/textKind 는 위 id.",

@@ -74,7 +74,7 @@ export type CutType =
   | "transition" // 장면 연결 (흐르는 연출·특수효과·전환)
   | "text"; // 말풍선·효과음·타이틀 (재생성 X)
 
-export type TextKind = "dialogue" | "sfx" | "title";
+export type TextKind = "dialogue" | "sfx" | "title" | "caption";
 
 export interface CutOntology {
   type: CutType | null; // null = 미분류(사람이 채움)
