@@ -77,7 +77,10 @@ export async function classifyCast(canvas, fileBuffers, charScenes, key, model, 
           role: "user",
           content: [
             { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: `data:image/png;base64,${sheet.toString("base64")}` } },
+            {
+              type: "image_url",
+              image_url: { url: `data:image/png;base64,${sheet.toString("base64")}`, detail: "high" },
+            },
           ],
         },
       ],

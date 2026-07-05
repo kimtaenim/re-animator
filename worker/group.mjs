@@ -28,8 +28,8 @@ function vlmCostUsd(model, usage) {
   const ot = usage?.completion_tokens ?? 0;
   return (it * p.input + ot * p.output) / 1_000_000;
 }
-const CELL = 210;
-const THUMB = 200;
+const CELL = 350;
+const THUMB = 340; // 말풍선 한글이 읽히도록 크게(작으면 VLM 이 대사를 지어냄)
 const COLS = 4;
 
 // 후보 썸네일 대조표(번호 라벨 포함) 한 장 생성. (로컬 검증용으로도 export)
