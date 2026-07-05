@@ -8,7 +8,8 @@
     { "id": "crowd_space", "ko": "군중 및 공간", "regenerate": true,  "entityRole": "context",   "desc": "익명 군중 또는 장소·배경이 주체(전경 설정샷·거리·군중). 개별 얼굴 일관성 불필요." },
     { "id": "object",      "ko": "사물",         "regenerate": true,  "entityRole": "prop",      "desc": "특정 사물이 초점(돈·기기·화면·소품)." },
     { "id": "action",      "ko": "액션",         "regenerate": true,  "entityRole": "context",   "desc": "움직임·충돌·역동 효과가 핵심인 컷." },
-    { "id": "text",        "ko": "텍스트",       "regenerate": false, "entityRole": null,        "desc": "말풍선·효과음·타이틀처럼 글자가 핵심. 그림 재생성 대신 자막/음향/타이틀로. textKind 로 세분." }
+    { "id": "transition",  "ko": "장면 연결",    "regenerate": true,  "entityRole": "context",   "desc": "장면과 장면을 잇는 흐르는 연출·특수효과·전환. 흩날리는 지폐·꽃잎·눈, 속도선, 빛번짐·반짝임, 화면 전환 효과 등 — 특정 서사 주체(인물·사물)가 중심이 아니라 장면을 연결·전환하는 연출. 돈 뿌리는 장면처럼 여러 컷에 흐르는 효과는 여기로 통합(사물/액션으로 나누지 말 것)." },
+    { "id": "text",        "ko": "텍스트",       "regenerate": false, "entityRole": null,        "desc": "말풍선·타이틀처럼 글자가 핵심. 그림 재생성 대신 자막/음향/타이틀로. textKind 로 세분." }
   ],
 
   "textKinds": [

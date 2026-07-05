@@ -26,6 +26,7 @@ interface Props {
   canvas: VirtualCanvas;
   scenes: Scene[];
   onSave: (regions: SavedRegion[]) => Promise<void>;
+  onResplit?: (regions: SavedRegion[], index: number) => void; // 이 컷을 워커로 재분할
 }
 
 type Region = SavedRegion;
@@ -51,6 +52,7 @@ const TYPE_COLOR: Record<string, string> = {
   crowd_space: "#12b886",
   object: "#e0a021",
   action: "#e0574d",
+  transition: "#a855f7",
   text: "#8a8f98",
 };
 
@@ -107,8 +109,9 @@ function CutThumb({
   );
 }
 
-export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: Props) {
+export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave, onResplit }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
+  const leftScrollRef = useRef<HTMLDivElement>(null);
   const [displayW, setDisplayW] = useState(220);
   // regions 는 항상 yStart 오름차순 유지(렌더 인덱스=드래그 인덱스 일치).
   const [regions, setRegions] = useState<Region[]>(() => scenesToRegions(scenes));
@@ -222,6 +225,32 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
     setDirty(true);
   }
 
+  // 인접 컷과 합병(dir -1=앞, +1=뒤). 합쳐진 컷은 내용이 바뀌므로 미분류로(재확정).
+  function mergeWith(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    setRegions((prev) => {
+      if (j < 0 || j >= prev.length) return prev;
+      const a = prev[i];
+      const b = prev[j];
+      const merged: Region = {
+        yStart: Math.min(a.yStart, b.yStart),
+        yEnd: Math.max(a.yEnd, b.yEnd),
+        xStart: Math.min(a.xStart ?? 0, b.xStart ?? 0),
+        xEnd: Math.max(a.xEnd ?? canvas.refWidth, b.xEnd ?? canvas.refWidth),
+        cut: blankCut(),
+      };
+      const next = prev.filter((_, idx) => idx !== i && idx !== j);
+      next.push(merged);
+      return next.sort((x, y) => x.yStart - y.yStart);
+    });
+    setDirty(true);
+  }
+
+  // 오른쪽 카드 클릭 → 왼쪽 스트립을 그 컷 위치로 스크롤.
+  function scrollToCut(r: Region) {
+    leftScrollRef.current?.scrollTo({ top: Math.max(0, r.yStart * scale - 40), behavior: "smooth" });
+  }
+
   async function save() {
     setSaving(true);
     try {
@@ -255,7 +284,10 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
 
       <div className="flex gap-3">
         {/* 왼쪽: 경계 편집 스트립 (세로 원본 + 컷 박스, 드래그로 경계 조정) */}
-        <div className="max-h-[80vh] shrink-0 overflow-y-auto rounded-lg border border-[var(--border)] bg-black/40">
+        <div
+          ref={leftScrollRef}
+          className="max-h-[80vh] shrink-0 overflow-y-auto rounded-lg border border-[var(--border)] bg-black/40"
+        >
           <div
             ref={boxRef}
             onDoubleClick={addAt}
@@ -354,9 +386,16 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
                     className="relative flex items-center justify-center bg-black/40"
                     style={{ height: THUMB_H + 8 }}
                   >
-                    <CutThumb canvas={canvas} files={files} region={r} />
+                    <button
+                      type="button"
+                      onClick={() => scrollToCut(r)}
+                      title="왼쪽 스트립에서 이 컷 위치로 이동"
+                      className="cursor-pointer"
+                    >
+                      <CutThumb canvas={canvas} files={files} region={r} />
+                    </button>
                     <span
-                      className="absolute left-1 top-1 rounded px-1 text-[10px] font-bold text-white"
+                      className="pointer-events-none absolute left-1 top-1 rounded px-1 text-[10px] font-bold text-white"
                       style={{ backgroundColor: color }}
                     >
                       {i + 1}
@@ -416,6 +455,38 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
                         {brief}
                       </p>
                     )}
+                    <div className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
+                      <span>합병</span>
+                      <button
+                        type="button"
+                        disabled={i === 0}
+                        onClick={() => mergeWith(i, -1)}
+                        className="rounded border border-[var(--border)] px-1 disabled:opacity-30"
+                        title="앞 컷과 합치기"
+                      >
+                        ◀앞
+                      </button>
+                      <button
+                        type="button"
+                        disabled={i === regions.length - 1}
+                        onClick={() => mergeWith(i, 1)}
+                        className="rounded border border-[var(--border)] px-1 disabled:opacity-30"
+                        title="뒤 컷과 합치기"
+                      >
+                        뒤▶
+                      </button>
+                      {onResplit && (
+                        <button
+                          type="button"
+                          onClick={() => onResplit(regions, i)}
+                          disabled={r.yEnd - r.yStart < 80}
+                          className="ml-auto rounded border border-[var(--border)] px-1 disabled:opacity-30"
+                          title="이 컷을 다시 분할(재검출)"
+                        >
+                          분할
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
