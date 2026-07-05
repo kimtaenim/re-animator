@@ -14,6 +14,35 @@ import { classifyScenes } from "./classify.mjs";
 import { classifyCast } from "./cast.mjs";
 
 const CHARACTER_TYPES = new Set(["lead", "reaction", "characters"]);
+
+// 말풍선·효과음 등 '글자만' 컷(text, textKind≠title)은 독립 컷으로 두지 않는다.
+// 대사·효과음 텍스트를 y 로 가장 가까운 실제 장면에 붙이고, 그 글자 컷은 제거.
+// (타이틀은 실제 디자인 화면이라 유지.) → 말풍선은 장면 위 오버레이일 뿐, 장면이 아님.
+function absorbTextCuts(scenes) {
+  const arr = scenes.slice().sort((a, b) => a.sourceRegion.yStart - b.sourceRegion.yStart);
+  const isText = (s) => s.cut?.type === "text" && s.cut?.textKind !== "title";
+  const reals = arr.filter((s) => !isText(s));
+  if (reals.length === 0) return arr; // 전부 글자면 안전하게 그대로 둔다
+  const center = (s) => (s.sourceRegion.yStart + s.sourceRegion.yEnd) / 2;
+  for (const s of arr) {
+    if (!isText(s) || !s.cut) continue;
+    let best = null;
+    let bestD = Infinity;
+    for (const r of reals) {
+      const d = Math.abs(center(r) - center(s));
+      if (d < bestD) {
+        bestD = d;
+        best = r;
+      }
+    }
+    if (!best || !best.cut) continue;
+    const d = (s.cut.dialogue || "").trim();
+    const fx = (s.cut.sfx || "").trim();
+    if (d) best.cut.dialogue = (best.cut.dialogue ? best.cut.dialogue + " " : "") + d;
+    if (fx) best.cut.sfx = (best.cut.sfx ? best.cut.sfx + " " : "") + fx;
+  }
+  return reals;
+}
 import { loadSplitConfig } from "./config.mjs";
 
 async function download(url) {
@@ -119,13 +148,17 @@ export async function runSplit(projectId) {
     }
   }
 
-  const scenes = regions.map((r, idx) => ({
+  const rawScenes = regions.map((r, idx) => ({
     id: randomUUID(),
     order: idx,
     sourceRegion: { yStart: r.yStart, yEnd: r.yEnd, xStart: r.xStart, xEnd: r.xEnd },
     cut: cuts[idx] ?? undefined,
     status: "review",
   }));
+  // 말풍선·효과음(글자만) 컷 흡수 → 대사만 옆 장면에 붙이고 컷은 제거.
+  const before = rawScenes.length;
+  const scenes = absorbTextCuts(rawScenes).map((s, i) => ({ ...s, order: i }));
+  if (scenes.length !== before) await log(`말풍선 컷 흡수: ${before} → ${scenes.length}컷`);
 
   // 최신 프로젝트를 다시 읽어 결과만 병합(중간에 다른 갱신 있었을 수 있음).
   const p2 = await getProject(projectId);
@@ -325,9 +358,10 @@ export async function runResplit(projectId, payload) {
   const p2 = await getProject(projectId);
   if (!p2) throw new Error("프로젝트가 사라졌어요");
   const kept = (p2.scenes ?? []).filter((s) => s.id !== target.id);
-  p2.scenes = [...kept, ...newScenes]
-    .sort((a, b) => a.sourceRegion.yStart - b.sourceRegion.yStart)
-    .map((s, i) => ({ ...s, order: i }));
+  const merged = [...kept, ...newScenes].sort(
+    (a, b) => a.sourceRegion.yStart - b.sourceRegion.yStart
+  );
+  p2.scenes = absorbTextCuts(merged).map((s, i) => ({ ...s, order: i }));
   p2.steps.source = {
     ...p2.steps.source,
     kind: "source",
