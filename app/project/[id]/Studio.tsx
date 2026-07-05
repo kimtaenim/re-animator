@@ -241,6 +241,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const canvas = project.virtualCanvas;
   const hasCuts = project.scenes.length > 0;
   const approved = sourceStatus === "approved";
+  const typedCount = project.scenes.filter((s) => s.cut?.type).length;
 
   return (
     <div>
@@ -388,7 +389,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             <h2 className="text-sm font-semibold">
               G1 · 컷 경계 검수{" "}
               <span className="font-normal text-[var(--muted)]">
-                ({project.scenes.length}컷)
+                ({project.scenes.length}컷 · AI 분류 {typedCount}/{project.scenes.length})
               </span>
             </h2>
             <button

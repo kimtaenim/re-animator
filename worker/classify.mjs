@@ -125,6 +125,47 @@ function normalizeCut(raw, R) {
   return c;
 }
 
+// 대조표 1장 → 분류 호출. finish_reason/refusal/파싱 실패를 구체적 에러로 던진다.
+async function callClassify(sheet, prompt, schema, key, model) {
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model,
+      temperature: 0,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: `data:image/png;base64,${sheet.toString("base64")}` } },
+          ],
+        },
+      ],
+      response_format: { type: "json_schema", json_schema: schema },
+      max_tokens: 16384,
+    }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
+  const d = await r.json();
+  const choice = d.choices?.[0];
+  const finish = choice?.finish_reason;
+  const msg = choice?.message;
+  if (msg?.refusal) throw new Error(`거부(refusal): ${String(msg.refusal).slice(0, 140)}`);
+  const txt = msg?.content ?? "";
+  let parsed;
+  try {
+    parsed = JSON.parse(txt || "{}");
+  } catch {
+    throw new Error(`JSON 파싱 실패 (finish=${finish}, ${txt.length}자 — 잘렸을 수 있음)`);
+  }
+  return { cuts: parsed.cuts || [], cost: costUsd(model, d.usage), finish };
+}
+
+// 컷을 배치(대조표 여러 장)로 나눠 분류 — 한 응답이 max_tokens 를 넘겨 잘리는 것 방지.
+const BATCH = 12;
+
 export async function classifyScenes(canvas, fileBuffers, regions, key, model, log, projectId) {
   const n = regions.length;
   if (!key || n === 0) return regions.map(blankCut);
@@ -137,68 +178,55 @@ export async function classifyScenes(canvas, fileBuffers, regions, key, model, l
     tkKoToId: new Map(ont.textKinds.map((t) => [t.ko, t.id])),
   };
   const typeLines = ont.cutTypes.map((t) => `- ${t.id} (${t.ko}): ${t.desc}`).join("\n");
-  const prompt = loadPrompts()
-    .classify_task.replace(/\{n\}/g, String(n))
-    .replace(/\{types\}/g, typeLines);
+  const promptBase = loadPrompts().classify_task;
   const schema = buildSchema([...R.typeIdSet], [...R.textKindIdSet]);
 
-  let sheet;
-  try {
-    await log?.("컷 분류용 대조표 생성…");
-    sheet = await buildContactSheet(canvas, fileBuffers, regions, log);
-  } catch (e) {
-    await log?.(`대조표 생성 실패(미분류로 진행): ${e?.message ?? e}`);
-    return regions.map(blankCut);
+  const out = regions.map(blankCut);
+  let totalCost = 0;
+  let typed = 0;
+
+  for (let start = 0; start < n; start += BATCH) {
+    const batch = regions.slice(start, start + BATCH);
+    const bn = batch.length;
+    await log?.(`컷 분류 ${start + 1}~${start + bn}/${n}…`);
+    let sheet;
+    try {
+      sheet = await buildContactSheet(canvas, fileBuffers, batch, null);
+    } catch (e) {
+      await log?.(`  대조표 실패(이 구간 미분류): ${e?.message ?? e}`);
+      continue;
+    }
+    const prompt = promptBase.replace(/\{n\}/g, String(bn)).replace(/\{types\}/g, typeLines);
+    try {
+      const res = await callClassify(sheet, prompt, schema, key, model);
+      totalCost += res.cost;
+      let hit = 0;
+      for (const raw of res.cuts) {
+        const li = Number(raw?.n) - 1; // 배치 내 1-base → 0-base
+        if (li >= 0 && li < bn) {
+          const c = normalizeCut(raw, R);
+          out[start + li] = c;
+          if (c.type) {
+            typed++;
+            hit++;
+          }
+        }
+      }
+      await log?.(`  → 응답 ${res.cuts.length}개 · 타입 ${hit}/${bn} (finish=${res.finish})`);
+    } catch (e) {
+      await log?.(`  분류 실패(이 구간 미분류): ${e?.message ?? e}`);
+    }
   }
 
   try {
-    await log?.(`AI가 컷 ${n}개 타입 분류 중…`);
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: `data:image/png;base64,${sheet.toString("base64")}` } },
-            ],
-          },
-        ],
-        response_format: { type: "json_schema", json_schema: schema },
-        max_tokens: 4000,
-      }),
-      signal: AbortSignal.timeout(120_000),
+    await recordCost({
+      projectId,
+      vendor: "openai",
+      model,
+      costUsd: totalCost,
+      meta: { kind: "cut-classify", cuts: n, classified: typed },
     });
-    if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text().catch(() => "")).slice(0, 160)}`);
-    const d = await r.json();
-    const txt = d.choices?.[0]?.message?.content ?? "{}";
-    await log?.(`분류 응답: ${txt.slice(0, 220)}`);
-    const parsed = JSON.parse(txt);
-    const byN = new Map();
-    for (const raw of parsed.cuts || []) {
-      const idx = Number(raw?.n) - 1; // 1-base → 0-base
-      if (idx >= 0 && idx < n) byN.set(idx, normalizeCut(raw, R));
-    }
-    const typed = [...byN.values()].filter((c) => c.type).length;
-    await log?.(`분류 매핑: 응답 ${parsed.cuts?.length ?? 0}개 · 타입 인식 ${typed}/${n}`);
-    const cost = costUsd(model, d.usage);
-    try {
-      await recordCost({
-        projectId,
-        vendor: "openai",
-        model,
-        costUsd: cost,
-        meta: { kind: "cut-classify", cuts: n, classified: byN.size },
-      });
-    } catch {}
-    await log?.(`컷 분류 완료: ${byN.size}/${n} (~$${cost.toFixed(4)})`);
-    return regions.map((_, i) => byN.get(i) ?? blankCut());
-  } catch (e) {
-    await log?.(`컷 분류 실패(미분류로 진행): ${e?.message ?? e}`);
-    return regions.map(blankCut);
-  }
+  } catch {}
+  await log?.(`컷 분류 완료: 타입 인식 ${typed}/${n} (~$${totalCost.toFixed(4)})`);
+  return out;
 }
