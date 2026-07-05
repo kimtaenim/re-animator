@@ -74,14 +74,23 @@ export type CutType =
 
 export type TextKind = "dialogue" | "caption" | "sfx";
 
+// 글씨 영역(0~1 정규화). 마스크 재생성에서 이 부분을 '채울 곳'으로.
+export interface TextBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 export interface CutOntology {
   type: CutType | null; // null = 미분류(사람이 채움)
   textKind: TextKind | null; // type=text 일 때만
   characters: string[]; // 초점 인물 서술 → M2 캐스팅이 엔티티로 해소
   setting: string; // 장소/배경 한 줄
   objects: string[]; // 핵심 사물
-  dialogue: string; // 말풍선 텍스트(재생성 제외 → 자막/더빙)
+  dialogue: string; // 말풍선 텍스트(풀해상도 OCR로 정확히 → 자막/더빙)
   speakerId?: string | null; // 이 대사를 말하는 캐릭터 id(M2 화자 귀속). null=나레이션/미상
+  textBoxes?: TextBox[]; // 글씨(말풍선·자막·효과음) 영역들(0~1 정규화) — 마스크 재생성용
   sfx: string; // 의성어/효과음
   description: string; // VLM 자유 서술(인물·배경·구도·분위기) → image-2 로 그대로 전달
   promptDraft: string; // image-2 재생성용 프롬프트 초안(영문)
@@ -95,6 +104,7 @@ export interface Scene {
   sourceRegion: SourceRegion; // 가상 캔버스 전역 좌표
   cut?: CutOntology; // 컷 온톨로지(타입+내용). 미분류면 type=null.
   originalImage?: string; // 추출된 원본 컷 Blob URL (확정 후 워커가 채움)
+  regenMode?: "mask" | "full"; // 재생성 방식: mask=원본보존+빈공간/글씨만, full=통째 재생성
   generatedImage?: string; // M3 재생성 이미지 Blob URL (image-2)
   regenError?: string; // 재생성 실패 사유(있으면)
   status: StepStatus; // M1 에선 경계 확정 여부 관리에만 사용

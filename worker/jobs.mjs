@@ -19,7 +19,8 @@ import { detectRegions } from "./detect.mjs";
 import { splitTallRegions, forceSplit } from "./group.mjs";
 import { classifyScenes } from "./classify.mjs";
 import { classifyCast } from "./cast.mjs";
-import { regenScene, REGEN_CONCURRENCY } from "./regen.mjs";
+import { regenScene, regenSceneMasked, REGEN_CONCURRENCY } from "./regen.mjs";
+import { readCutText } from "./ocr.mjs";
 
 const CHARACTER_TYPES = new Set(["person"]);
 
@@ -212,6 +213,7 @@ export async function runExtract(projectId) {
   const buffers = [];
   for (const f of files) buffers.push(await download(f.url));
 
+  const pngById = new Map(); // 풀해상도 컷 png (OCR 재사용)
   for (let i = 0; i < scenes.length; i++) {
     const s = scenes[i];
     await log(`컷 ${i + 1}/${scenes.length} 추출·업로드…`);
@@ -223,6 +225,7 @@ export async function runExtract(projectId) {
       s.sourceRegion.xStart,
       s.sourceRegion.xEnd
     );
+    pngById.set(s.id, png);
     const { url } = await put(
       `project/${projectId}/cut-${s.order}-${Date.now()}.png`,
       png,
@@ -230,6 +233,32 @@ export async function runExtract(projectId) {
     );
     s.originalImage = url;
     s.status = "approved";
+  }
+
+  // 글씨 읽기(OCR) — 썸네일 아니라 풀해상도 컷으로 정확히. 대사·효과음·글씨박스.
+  const key = process.env.OPENAI_API_KEY;
+  if (key) {
+    const OCR_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
+    const C = 4;
+    let done = 0;
+    for (let i = 0; i < scenes.length; i += C) {
+      const chunk = scenes.slice(i, i + C);
+      await Promise.all(
+        chunk.map(async (s) => {
+          try {
+            const { dialogue, sfx, boxes } = await readCutText(pngById.get(s.id), key, OCR_MODEL);
+            if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
+            s.cut.dialogue = dialogue;
+            if (sfx) s.cut.sfx = sfx;
+            s.cut.textBoxes = boxes;
+          } catch (e) {
+            await log(`컷 ${s.order + 1} 글씨읽기 실패: ${String(e?.message ?? e).slice(0, 100)}`);
+          }
+        })
+      );
+      done = Math.min(i + C, scenes.length);
+      await log(`글씨 읽기 ${done}/${scenes.length}`);
+    }
   }
 
   const p2 = await getProject(projectId);
@@ -520,7 +549,9 @@ export async function runRegen(projectId, payload) {
       chunk.map(async (s) => {
         try {
           const imgBuf = await download(s.originalImage);
-          const { b64, cost } = await regenScene(s, imgBuf, p, key, model);
+          const mode = s.regenMode || "mask";
+          const gen = mode === "mask" ? regenSceneMasked : regenScene;
+          const { b64, cost } = await gen(s, imgBuf, p, key, model);
           costTotal += cost;
           const { url } = await put(
             `project/${projectId}/gen-${s.order}-${Date.now()}.png`,

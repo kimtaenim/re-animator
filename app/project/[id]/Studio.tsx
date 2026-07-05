@@ -342,6 +342,19 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }).catch(() => {});
   }
 
+  // 씬별 재생성 방식(마스크=원본보존+빈공간/글씨만, full=통째 재생성).
+  function setRegenMode(sceneId: string, mode: "mask" | "full") {
+    setProject((prev) => ({
+      ...prev,
+      scenes: prev.scenes.map((s) => (s.id === sceneId ? { ...s, regenMode: mode } : s)),
+    }));
+    fetch("/api/cut", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId: project.id, sceneId, regenMode: mode }),
+    }).catch(() => {});
+  }
+
   // 컷 하나만 생성/다시 생성 — 배치 전에 싸게 충실도 테스트, 마음에 안 드는 컷 재생성.
   async function regenOne(sceneId: string) {
     setError("");
@@ -836,14 +849,34 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         />
                         <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
                           {speaker && <span>화자: {speaker}</span>}
-                          <button
-                            onClick={() => regenOne(s.id)}
-                            disabled={busy || regenRunning}
-                            className="ml-auto rounded border border-[var(--border)] px-2 py-0.5 disabled:opacity-40"
-                            title="이 컷만 생성(테스트·재생성)"
-                          >
-                            {s.generatedImage ? "다시 생성" : "생성"}
-                          </button>
+                          <div className="ml-auto flex items-center gap-1">
+                            {(["mask", "full"] as const).map((m) => (
+                              <button
+                                key={m}
+                                onClick={() => setRegenMode(s.id, m)}
+                                title={
+                                  m === "mask"
+                                    ? "원본 보존 + 빈 공간·글씨만 채움"
+                                    : "통째 재생성(재해석)"
+                                }
+                                className={`rounded border px-1.5 py-0.5 ${
+                                  (s.regenMode || "mask") === m
+                                    ? "border-[var(--accent)] text-[var(--accent)]"
+                                    : "border-[var(--border)]"
+                                }`}
+                              >
+                                {m === "mask" ? "마스크" : "재생성"}
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => regenOne(s.id)}
+                              disabled={busy || regenRunning}
+                              className="rounded border border-[var(--border)] px-2 py-0.5 disabled:opacity-40"
+                              title="이 컷만 생성(테스트·재생성)"
+                            >
+                              {s.generatedImage ? "다시" : "생성"}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>

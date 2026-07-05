@@ -57,7 +57,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m3-regen-v2");
+console.log("[worker] BUILD = m3-mask-ocr-v3");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();
