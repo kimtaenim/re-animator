@@ -80,6 +80,50 @@ export async function buildContactSheet(canvas, fileBuffers, candidates, log) {
 // split 지목 컷을 VLM 에 "크게" 보여주고 패널 경계 위치(높이 대비 비율)를 받아 자른다.
 // 자를 위치를 알고리즘이 아니라 VLM 이 정함 → 붙은 패널은 정확히 자르고, 연속 그림
 // (흐르는 이펙트·한 동작)은 VLM 이 빈 배열을 줘서 안 잘린다. (panels vs 연속 구분)
+// 컷 PNG → 행별 "경계다움"(색 전환 mean 급변 + flat 단색 띠). VLM 위치 스냅용. (export: 로컬 검증)
+export async function computeBoundaryness(png) {
+  const { data, info } = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true });
+  const W = info.width;
+  const H = info.height;
+  const means = new Float32Array(H);
+  const bness = new Float32Array(H);
+  for (let y = 0; y < H; y++) {
+    let s = 0;
+    let s2 = 0;
+    const off = y * W;
+    for (let x = 0; x < W; x++) {
+      const v = data[off + x];
+      s += v;
+      s2 += v * v;
+    }
+    const m = s / W;
+    means[y] = m;
+    const std = Math.sqrt(Math.max(0, s2 / W - m * m));
+    bness[y] = std < 12 ? (12 - std) * 2 : 0; // flat 단색 띠
+  }
+  const w = 6;
+  for (let y = w; y < H; y++) {
+    const edge = Math.abs(means[y] - means[y - w]); // 색 전환
+    if (edge > bness[y]) bness[y] = edge;
+  }
+  return bness;
+}
+
+// VLM 위치를 근처(±win)의 가장 뚜렷한 경계로 스냅. 경계 약하면 원위치 유지.
+export function snapTo(bness, yPos, win) {
+  let best = yPos;
+  let bs = -1;
+  const lo = Math.max(1, yPos - win);
+  const hi = Math.min(bness.length - 1, yPos + win);
+  for (let y = lo; y <= hi; y++) {
+    if (bness[y] > bs) {
+      bs = bness[y];
+      best = y;
+    }
+  }
+  return bs >= 22 ? best : yPos;
+}
+
 async function vlmSplitCut(canvas, fileBuffers, region, key, model, log, splitPrompt) {
   const png = await extractRegion(canvas, fileBuffers, region.yStart, region.yEnd);
   const img = await sharp(png).resize({ width: 340 }).png().toBuffer();
@@ -117,7 +161,13 @@ async function vlmSplitCut(canvas, fileBuffers, region, key, model, log, splitPr
       .sort((a, b) => a - b);
     const cost = vlmCostUsd(model, d.usage);
     if (!fr.length) return { subs: [region], cost };
-    const ys = [0, ...fr.map((f) => Math.round(f * H)), H];
+    // VLM 비율 위치를 실제 패널 경계로 스냅(픽셀 정확도). ±6% 창에서 가장 뚜렷한 경계로.
+    const bness = await computeBoundaryness(png);
+    const win = Math.max(20, Math.round(H * 0.06));
+    const positions = fr
+      .map((f) => snapTo(bness, Math.round(f * H), win))
+      .sort((a, b) => a - b);
+    const ys = [0, ...positions, H];
     const subs = [];
     for (let i = 0; i < ys.length - 1; i++) {
       if (ys[i + 1] - ys[i] >= 40) {
