@@ -8,11 +8,13 @@
 // 같은 인물=같은 엔티티 → 이후 image-2 재생성에 같은 레퍼런스로 얼굴 일관성.
 // ============================================================================
 
-import { useState, type DragEvent } from "react";
+import { useState, useEffect, type DragEvent } from "react";
 import type { Character, Scene } from "@/lib/types";
 
 // 캐스팅 대상 = 인물이 담긴 컷. person(정지·반응) + action(동작 중 인물) 모두 포함.
 const CHARACTER_TYPES = new Set(["person", "action"]);
+
+type VoiceOpt = { id: string; name: string; language?: string };
 
 interface Props {
   scenes: Scene[];
@@ -63,8 +65,50 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
     setSpeakers(initSpeakers(scenes));
   }
   const dialogueScenes = scenes.filter(hasDialogue);
-  const setSpeaker = (sceneId: string, charId: string) =>
+
+  // 목소리 목록(Typecast) — 캐릭터별 더빙 목소리 선택용. 키 없으면 빈 목록(수동 입력 폴백).
+  const [voices, setVoices] = useState<VoiceOpt[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/voices", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (alive && d.ok) setVoices(d.voices ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // ── 자동 저장(중간중간) — 변경 표시(dirty) 후 1.2s 디바운스로 저장(approve=false).
+  // 확정은 버튼으로. ref 대신 state+effect 라 render 중 ref 접근 없음.
+  const [dirty, setDirty] = useState(false);
+  const [autoSavedAt, setAutoSavedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (!dirty) return;
+    const t = setTimeout(() => {
+      onSave(cast, speakers, false)
+        .then(() => setAutoSavedAt(Date.now()))
+        .catch(() => {});
+      setDirty(false);
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [dirty, cast, speakers, onSave]);
+  const scheduleSave = () => setDirty(true);
+
+  const setSpeaker = (sceneId: string, charId: string) => {
     setSpeakers((prev) => ({ ...prev, [sceneId]: charId }));
+    scheduleSave();
+  };
+  const setVoice = (charId: string, voice: string, voiceName: string) => {
+    setCast((prev) =>
+      prev.map((c) =>
+        c.id === charId ? { ...c, voice: voice || undefined, voiceName: voiceName || undefined } : c
+      )
+    );
+    scheduleSave();
+  };
 
   const sceneById = new Map(scenes.map((s) => [s.id, s]));
   const assigned = new Set(cast.flatMap((c) => c.sceneIds));
@@ -93,6 +137,7 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
       }
       return relabel(next);
     });
+    scheduleSave();
   }
 
   function rename(charId: string, label: string) {
@@ -103,6 +148,7 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
   }
   function setRef(charId: string, sceneId: string) {
     setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, refSceneId: sceneId } : c)));
+    scheduleSave();
   }
 
   async function doSave(approve: boolean) {
@@ -168,7 +214,8 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
           G0 · 캐스팅 검수{" "}
           <span className="font-normal text-[var(--muted)]">({cast.length}명)</span>
         </h2>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {autoSavedAt && <span className="text-xs text-[var(--muted)]">자동 저장됨 ✓</span>}
           <button
             onClick={() => doSave(false)}
             disabled={saving !== null}
@@ -228,14 +275,43 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
                 <input
                   value={c.label}
                   onChange={(e) => rename(c.id, e.target.value)}
+                  onBlur={scheduleSave}
                   className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-sm font-semibold"
                 />
                 <input
                   value={c.description ?? ""}
                   onChange={(e) => setDescription(c.id, e.target.value)}
+                  onBlur={scheduleSave}
                   placeholder="외모·특징 (예: 빨간머리 여자, 검은 정장)"
                   className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-xs text-[var(--muted)]"
                 />
+                {voices.length > 0 ? (
+                  <select
+                    value={c.voice ?? ""}
+                    onChange={(e) => {
+                      const v = voices.find((x) => x.id === e.target.value);
+                      setVoice(c.id, e.target.value, v?.name ?? "");
+                    }}
+                    title="이 캐릭터 더빙 목소리(Typecast)"
+                    className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-xs"
+                  >
+                    <option value="">🎙 목소리 선택…</option>
+                    {voices.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                        {v.language ? ` (${v.language})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={c.voice ?? ""}
+                    onChange={(e) => setVoice(c.id, e.target.value, "")}
+                    onBlur={scheduleSave}
+                    placeholder="🎙 목소리 id (tc_…) — TYPECAST_API_KEY 설정 시 목록"
+                    className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-[11px] text-[var(--muted)]"
+                  />
+                )}
               </div>
               <span className="ml-auto shrink-0 text-xs text-[var(--muted)]">{c.sceneIds.length}컷</span>
             </div>

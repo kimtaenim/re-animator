@@ -121,6 +121,8 @@ export interface Character {
   description: string; // 외모(머리·옷·특징) — VLM 서술
   refSceneId?: string; // 대표 컷(가장 선명한 등장) → 레퍼런스 이미지
   sceneIds: string[]; // 이 인물이 나오는 컷 id 들
+  voice?: string; // 더빙 목소리 — Typecast voice_id(tc_…). M4 더빙에 사용.
+  voiceName?: string; // 표시용 목소리 이름(선택). 목록 재조회 없이 라벨 표시.
 }
 
 // ── 프로젝트 ──────────────────────────────────────────────────────────────────

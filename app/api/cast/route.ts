@@ -100,6 +100,8 @@ export async function PUT(req: NextRequest) {
       description: typeof r.description === "string" ? r.description.slice(0, 200) : "",
       refSceneId,
       sceneIds,
+      voice: typeof r.voice === "string" && r.voice ? r.voice.slice(0, 80) : undefined,
+      voiceName: typeof r.voiceName === "string" ? r.voiceName.slice(0, 60) : undefined,
     });
   }
 
