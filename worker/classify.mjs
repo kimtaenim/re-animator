@@ -37,11 +37,43 @@ function blankCut() {
   };
 }
 
-function normalizeCut(raw, typeIds, textKindIds) {
+// VLM 이 id 대신 한글 라벨·영문 동의어로 답해도 우리 타입으로 관대하게 매핑.
+// (엄격 매칭이면 "중심인물"·"character" 같은 정답을 버려 전부 미분류가 됨.)
+const TYPE_SYN = {
+  character: "lead", protagonist: "lead", 주인공: "lead", 중심: "lead", 중심인물: "lead",
+  reaction: "reaction", 반응: "reaction", 반응인물: "reaction",
+  characters: "characters", group: "characters", 인물들: "characters", 대화: "characters",
+  crowd: "crowd_space", crowd_space: "crowd_space", setting: "crowd_space",
+  background: "crowd_space", establishing: "crowd_space", scenery: "crowd_space",
+  군중: "crowd_space", 배경: "crowd_space", 공간: "crowd_space", "군중 및 공간": "crowd_space",
+  object: "object", prop: "object", item: "object", 사물: "object", 소품: "object",
+  action: "action", 액션: "action", 동작: "action",
+  text: "text", speech: "text", dialogue: "text", narration: "text", sfx: "text",
+  title: "text", 텍스트: "text", 말풍선: "text", 나레이션: "text", 효과음: "text", 타이틀: "text",
+};
+const TEXTKIND_SYN = {
+  dialogue: "dialogue", speech: "dialogue", 말풍선: "dialogue", 대사: "dialogue", 나레이션: "dialogue",
+  sfx: "sfx", 효과음: "sfx", 의성어: "sfx", onomatopoeia: "sfx",
+  title: "title", 타이틀: "title", 제목: "title", credits: "title",
+};
+
+function resolve(raw, idSet, koToId, syn) {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim();
+  if (idSet.has(s)) return s;
+  if (koToId.has(s)) return koToId.get(s);
+  const low = s.toLowerCase();
+  if (idSet.has(low)) return low;
+  return syn[low] ?? syn[s] ?? null;
+}
+
+function normalizeCut(raw, R) {
   const c = blankCut();
   if (!raw || typeof raw !== "object") return c;
-  if (typeIds.includes(raw.type)) c.type = raw.type;
-  if (c.type === "text" && textKindIds.includes(raw.textKind)) c.textKind = raw.textKind;
+  c.type = resolve(raw.type, R.typeIdSet, R.koToId, TYPE_SYN);
+  if (c.type === "text") {
+    c.textKind = resolve(raw.textKind, R.textKindIdSet, R.tkKoToId, TEXTKIND_SYN) || "dialogue";
+  }
   if (Array.isArray(raw.characters)) c.characters = raw.characters.map(String).slice(0, 6);
   if (typeof raw.setting === "string") c.setting = raw.setting.slice(0, 200);
   if (Array.isArray(raw.objects)) c.objects = raw.objects.map(String).slice(0, 8);
@@ -55,8 +87,12 @@ export async function classifyScenes(canvas, fileBuffers, regions, key, model, l
   if (!key || n === 0) return regions.map(blankCut);
 
   const ont = loadOntology();
-  const typeIds = ont.cutTypes.map((t) => t.id);
-  const textKindIds = ont.textKinds.map((t) => t.id);
+  const R = {
+    typeIdSet: new Set(ont.cutTypes.map((t) => t.id)),
+    koToId: new Map(ont.cutTypes.map((t) => [t.ko, t.id])),
+    textKindIdSet: new Set(ont.textKinds.map((t) => t.id)),
+    tkKoToId: new Map(ont.textKinds.map((t) => [t.ko, t.id])),
+  };
   const typeLines = ont.cutTypes.map((t) => `- ${t.id} (${t.ko}): ${t.desc}`).join("\n");
   const prompt = loadPrompts()
     .classify_task.replace(/\{n\}/g, String(n))
@@ -95,12 +131,16 @@ export async function classifyScenes(canvas, fileBuffers, regions, key, model, l
     });
     if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text().catch(() => "")).slice(0, 160)}`);
     const d = await r.json();
-    const parsed = JSON.parse(d.choices?.[0]?.message?.content ?? "{}");
+    const txt = d.choices?.[0]?.message?.content ?? "{}";
+    await log?.(`분류 응답: ${txt.slice(0, 220)}`);
+    const parsed = JSON.parse(txt);
     const byN = new Map();
     for (const raw of parsed.cuts || []) {
       const idx = Number(raw?.n) - 1; // 1-base → 0-base
-      if (idx >= 0 && idx < n) byN.set(idx, normalizeCut(raw, typeIds, textKindIds));
+      if (idx >= 0 && idx < n) byN.set(idx, normalizeCut(raw, R));
     }
+    const typed = [...byN.values()].filter((c) => c.type).length;
+    await log?.(`분류 매핑: 응답 ${parsed.cuts?.length ?? 0}개 · 타입 인식 ${typed}/${n}`);
     const cost = costUsd(model, d.usage);
     try {
       await recordCost({
