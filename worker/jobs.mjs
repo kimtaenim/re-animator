@@ -224,7 +224,9 @@ export async function runResplit(projectId, payload) {
   let acc = 0;
   for (const buf of buffers) {
     const { profile } = await computeRowProfile(buf, canvas.refWidth);
-    global.set(profile, acc);
+    const room = global.length - acc;
+    if (room <= 0) break;
+    global.set(room >= profile.length ? profile : profile.subarray(0, room), acc);
     acc += profile.length;
   }
   const y0 = Math.round(target.sourceRegion.yStart);
@@ -255,6 +257,29 @@ export async function runResplit(projectId, payload) {
       }
     }
     subs = out;
+  }
+
+  // 여전히 1개면(강한 경계 못 찾음) 가장 평탄한 행에서 강제 2분할 — 사람이 '분할'을
+  // 눌렀으니 최소 한 번은 나눈다. 평탄(=거터 같은) 행을 골라 인물 몸 관통 최소화.
+  if (subs.length === 1 && subs[0].yEnd - subs[0].yStart >= 120) {
+    const s = subs[0];
+    const lo = s.yStart + Math.round((s.yEnd - s.yStart) * 0.3);
+    const hi = s.yStart + Math.round((s.yEnd - s.yStart) * 0.7);
+    let bestY = -1;
+    let bestStd = Infinity;
+    for (let y = lo; y < hi; y++) {
+      if (global[y] < bestStd) {
+        bestStd = global[y];
+        bestY = y;
+      }
+    }
+    if (bestY > s.yStart + 20 && bestY < s.yEnd - 20) {
+      subs = [
+        { yStart: s.yStart, yEnd: bestY },
+        { yStart: bestY, yEnd: s.yEnd },
+      ];
+      await log(`강제 2분할 @${bestY} (평탄도 ${bestStd.toFixed(1)})`);
+    }
   }
 
   // 여백 트림(대상의 x 범위 상속).
