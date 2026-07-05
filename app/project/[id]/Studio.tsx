@@ -271,6 +271,26 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
+  // 워커 작업 중지 — 워커 프로세스는 못 죽이지만 UI 가 '진행 중'에 갇히지 않게 단계를 되돌림.
+  async function cancelJob(step: "source" | "cast") {
+    try {
+      const r = await fetch("/api/cancel", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, step }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "중지 실패");
+      setProgress("");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, [step]: { ...prev.steps[step], status: d.status } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "중지 실패");
+    }
+  }
+
   async function confirm() {
     setBusy(true);
     setError("");
@@ -462,6 +482,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           <p className="flex items-center gap-2 text-sm text-[var(--muted)]">
             <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
             워커 작업 중… {progress && <span className="opacity-70">{progress}</span>}
+            <button
+              onClick={() => cancelJob("source")}
+              className="ml-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:border-[var(--danger)] hover:text-[var(--danger)]"
+            >
+              작업 중지
+            </button>
           </p>
           {(() => {
             const m = progress.match(/\((\d+)%\)/);
@@ -565,6 +591,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             <p className="flex items-center gap-2 text-sm text-[var(--muted)]">
               <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
               인물 구분 중… {progress && <span className="opacity-70">{progress}</span>}
+              <button
+                onClick={() => cancelJob("cast")}
+                className="ml-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:border-[var(--danger)] hover:text-[var(--danger)]"
+              >
+                작업 중지
+              </button>
             </p>
           )}
 
