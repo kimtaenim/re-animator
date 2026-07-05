@@ -75,10 +75,15 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
     setCast((prev) => {
       let next = prev.map((c) => ({ ...c, sceneIds: c.sceneIds.filter((id) => id !== sceneId) }));
       if (to === "new") {
+        // 새 캐릭터 설명을 그 컷의 인물 서술로 자동 시드 → '외모 미상'으로 비지 않게.
+        const src = sceneById.get(sceneId);
+        const seeded =
+          (src?.cut?.characters?.filter(Boolean).join(", ") || "").trim() ||
+          (src?.cut?.description || "").trim().slice(0, 40);
         next.push({
           id: `char-new-${sceneId}`,
           label: `캐릭터 ${next.length + 1}`,
-          description: "",
+          description: seeded,
           refSceneId: sceneId,
           sceneIds: [sceneId],
         });
@@ -91,6 +96,9 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
 
   function rename(charId: string, label: string) {
     setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, label } : c)));
+  }
+  function setDescription(charId: string, description: string) {
+    setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, description } : c)));
   }
   function setRef(charId: string, sceneId: string) {
     setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, refSceneId: sceneId } : c)));
@@ -164,9 +172,12 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
                   onChange={(e) => rename(c.id, e.target.value)}
                   className="w-40 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-sm font-semibold"
                 />
-                <span className="truncate text-xs text-[var(--muted)]" title={c.description}>
-                  {c.description || "외모 미상"}
-                </span>
+                <input
+                  value={c.description ?? ""}
+                  onChange={(e) => setDescription(c.id, e.target.value)}
+                  placeholder="외모·특징 (예: 빨간머리 여자, 검은 정장)"
+                  className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-xs text-[var(--muted)]"
+                />
               </div>
               <span className="ml-auto shrink-0 text-xs text-[var(--muted)]">{c.sceneIds.length}컷</span>
             </div>
