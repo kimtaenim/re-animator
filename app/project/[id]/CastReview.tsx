@@ -210,6 +210,7 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
       </div>
 
       <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {cast.map((c) => (
           <div
             key={c.id}
@@ -226,7 +227,7 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
                 <input
                   value={c.label}
                   onChange={(e) => rename(c.id, e.target.value)}
-                  className="w-40 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-sm font-semibold"
+                  className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-sm font-semibold"
                 />
                 <input
                   value={c.description ?? ""}
@@ -275,6 +276,7 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
             </div>
           </div>
         ))}
+        </div>
 
         {unassigned.length > 0 && (
           <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--panel)] p-3">
