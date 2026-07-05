@@ -46,7 +46,7 @@ export function buildRegenPrompt(scene, project) {
   if (content) p += ` Scene content (reference; stay faithful to the drawing): ${content}`;
   // ★ 목표 프레임을 꽉 채워라 — 컷 모양이 달라도 배경을 자연스럽게 확장해 채우되
   // 주요 인물·피사체는 왜곡 없이 충실히. 모든 출력이 같은 프레임 크기.
-  p += ` Compose the result to completely fill ${frameDesc(project)}. If the source panel has a different shape (e.g. a tall vertical webtoon panel), naturally extend the background and setting to fill the whole frame — do NOT stretch, squash, or distort the subject; keep characters and drawing faithful, placed sensibly within the frame. Every output must share this exact same frame size.`;
+  p += ` Compose the result to completely fill ${frameDesc(project)}, edge to edge. If the source panel has a different shape (e.g. a tall vertical webtoon panel), naturally extend the background and setting to fill the whole frame — do NOT stretch, squash, or distort the subject; keep characters and drawing faithful, placed sensibly within the frame. There must be NO black bars, white space, empty margins, borders, vignette, or gradient fade at any edge — the entire frame is finished illustration. Every output must share this exact same frame size.`;
   const style = String(project.stylePrompt || "").trim();
   if (style) p += ` Style note: ${style}.`;
   return p.slice(0, 1400);
@@ -106,11 +106,11 @@ export async function buildMaskInputs(scene, imgBuf, project, model) {
   const px = Math.floor((TW - pw) / 2);
   const py = Math.floor((TH - ph) / 2);
 
-  // 배치 이미지: 흰 캔버스에 컷 contain 합성.
+  // 배경(여백)을 흰색 대신 '원본을 꽉 채운(cover) 블러본'으로 깐다 → 모델이 여백을 덜 채워도
+  // 흰/검/그라데이션 대신 같은 그림의 자연스러운 연속처럼 보인다. 그 위에 원본 컷을 contain 합성.
   const cutResized = await sharp(imgBuf).resize(pw, ph, { fit: "fill" }).png().toBuffer();
-  const composed = await sharp({
-    create: { width: TW, height: TH, channels: 3, background: { r: 255, g: 255, b: 255 } },
-  })
+  const bg = await sharp(imgBuf).resize(TW, TH, { fit: "cover" }).blur(24).png().toBuffer();
+  const composed = await sharp(bg)
     .composite([{ input: cutResized, left: px, top: py }])
     .png()
     .toBuffer();
@@ -141,7 +141,8 @@ export async function buildMaskInputs(scene, imgBuf, project, model) {
   const falMask = await sharp(gray, { raw: { width: TW, height: TH, channels: 3 } }).png().toBuffer();
 
   const prompt =
-    `Fill only the empty (masked) areas of this image so the whole ${frameDesc(project)} is completely filled — naturally extend the background and setting to seamlessly match the surrounding artwork (no blank or black area). ` +
+    `Extend and fill the masked areas so the whole ${frameDesc(project)} is filled edge to edge — naturally continue the background, scenery and colors to seamlessly match the surrounding artwork. ` +
+    "Absolutely NO black bars, white space, empty margins, borders, vignette, or gradient fade anywhere — every pixel must be finished illustration reaching all four edges. " +
     "Where speech bubbles or lettering were, remove the text and fill with plausible background continuation. Keep all other artwork exactly as-is, faithful and unchanged. No text, letters, or watermark in the output.";
 
   return { composed, openaiMask, falMask, prompt, TW, TH };
