@@ -3,7 +3,7 @@
 
   "cutTypes": [
     { "id": "lead",        "ko": "중심인물",     "regenerate": true,  "entityRole": "character", "desc": "한 인물이 이 순간의 서사 중심(주인공의 동작·결정). 그 인물이 머리~발끝 온전히." },
-    { "id": "reaction",    "ko": "반응인물",     "regenerate": true,  "entityRole": "character", "desc": "한 인물의 반응 컷(표정·놀람 클로즈업). 대사보다 표정이 핵심." },
+    { "id": "reaction",    "ko": "반응인물",     "regenerate": true,  "entityRole": "character", "desc": "대사(말풍선) 없이 인물의 얼굴만(주로 작게) 나와 반응·표정만 보여주는 인서트 컷. 무언가에 대한 반응 장면 — 대사가 있거나 인물이 동작의 주체면 이게 아니라 중심인물이다." },
     { "id": "characters",  "ko": "인물들",       "regenerate": true,  "entityRole": "character", "desc": "이름 있는 두셋 인물이 함께(대화·상호작용). 각 인물 온전히." },
     { "id": "crowd_space", "ko": "군중 및 공간", "regenerate": true,  "entityRole": "context",   "desc": "익명 군중 또는 장소·배경이 주체(전경 설정샷·거리·군중). 개별 얼굴 일관성 불필요." },
     { "id": "object",      "ko": "사물",         "regenerate": true,  "entityRole": "prop",      "desc": "특정 사물이 초점(돈·기기·화면·소품)." },
