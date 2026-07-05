@@ -23,7 +23,8 @@ import { regenScene, regenSceneMasked, REGEN_CONCURRENCY } from "./regen.mjs";
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { readCutText } from "./ocr.mjs";
 
-const CHARACTER_TYPES = new Set(["person"]);
+// 캐스팅 대상 = 인물이 담긴 컷. person(정지·반응) + action(동작 중 인물) 모두 포함.
+const CHARACTER_TYPES = new Set(["person", "action"]);
 
 // 말풍선·효과음 등 '글자만' 컷(text, textKind≠title)은 독립 컷으로 두지 않는다.
 // 대사·효과음 텍스트를 y 로 가장 가까운 실제 장면에 붙이고, 그 글자 컷은 제거.

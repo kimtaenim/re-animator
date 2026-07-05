@@ -11,7 +11,8 @@
 import { useState, type DragEvent } from "react";
 import type { Character, Scene } from "@/lib/types";
 
-const CHARACTER_TYPES = new Set(["person"]);
+// 캐스팅 대상 = 인물이 담긴 컷. person(정지·반응) + action(동작 중 인물) 모두 포함.
+const CHARACTER_TYPES = new Set(["person", "action"]);
 
 interface Props {
   scenes: Scene[];

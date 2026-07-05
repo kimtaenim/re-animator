@@ -596,7 +596,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const approved = sourceStatus === "approved";
   const typedCount = project.scenes.filter((s) => s.cut?.type).length;
   const showSrc = srcOpen ?? !approved; // 1단계 완료(승인)되면 소스 섹션 기본 접힘
-  const charCutCount = project.scenes.filter((s) => s.cut?.type === "person").length;
+  const charCutCount = project.scenes.filter(
+    (s) => s.cut?.type === "person" || s.cut?.type === "action"
+  ).length;
 
   return (
     <div>
