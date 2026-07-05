@@ -46,13 +46,10 @@ function scenesToRegions(scenes: Scene[]): Region[] {
 
 // 타입별 색(중심 구분용). 캐릭터=파랑 계열, 맥락=초록, 사물=노랑, 액션=빨강, 텍스트=회색.
 const TYPE_COLOR: Record<string, string> = {
-  lead: "#1e90ff",
-  reaction: "#3aa0ff",
-  characters: "#5bb0ff",
-  crowd_space: "#12b886",
-  object: "#e0a021",
+  person: "#1e90ff",
   action: "#e0574d",
-  transition: "#a855f7",
+  object: "#e0a021",
+  background_crowd: "#12b886",
   text: "#8a8f98",
 };
 
@@ -65,16 +62,20 @@ function CutThumb({
   canvas,
   files,
   region,
+  maxW = THUMB_W,
+  maxH = THUMB_H,
 }: {
   canvas: VirtualCanvas;
   files: SourceFile[];
   region: Region;
+  maxW?: number;
+  maxH?: number;
 }) {
   const x0 = region.xStart ?? 0;
   const x1 = region.xEnd ?? canvas.refWidth;
   const regW = Math.max(1, x1 - x0);
   const regH = Math.max(1, region.yEnd - region.yStart);
-  const scale = Math.min(THUMB_W / regW, THUMB_H / regH);
+  const scale = Math.min(maxW / regW, maxH / regH);
   const tw = Math.max(1, regW * scale);
   const th = Math.max(1, regH * scale);
   return (
@@ -116,6 +117,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
   const [displayW, setDisplayW] = useState(220);
   const [selected, setSelected] = useState<number | null>(null);
   const [splitting, setSplitting] = useState<number | null>(null);
+  const [zoom, setZoom] = useState<Region | null>(null);
   // regions 는 항상 yStart 오름차순 유지(렌더 인덱스=드래그 인덱스 일치).
   const [regions, setRegions] = useState<Region[]>(() => scenesToRegions(scenes));
   const [drag, setDrag] = useState<{ index: number; edge: "top" | "bottom" } | null>(null);
@@ -501,6 +503,14 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                         AI
                       </span>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => setZoom(r)}
+                      title="크게 보기"
+                      className="absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[11px] leading-none text-white hover:bg-black/80"
+                    >
+                      ⤢
+                    </button>
                   </div>
                   <div className="flex flex-col gap-1 p-1.5">
                     <div className="flex items-center gap-1">
@@ -586,8 +596,28 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
 
       <p className="mt-2 text-xs text-[var(--muted)]">
         왼쪽 스트립에서 박스 모서리 드래그로 경계 조정, 빈 곳 더블클릭으로 컷 추가. 오른쪽 카드에서 각
-        컷의 <b>중심</b>을 확정하세요(재생성·자막에 사용). 고르면 카드·박스 색이 바뀝니다.
+        컷의 <b>중심</b>을 확정하세요(재생성·자막에 사용). 썸네일의 ⤢ 로 크게 볼 수 있어요.
       </p>
+
+      {zoom && (
+        <div
+          onClick={() => setZoom(null)}
+          className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2"
+          >
+            <CutThumb canvas={canvas} files={files} region={zoom} maxW={720} maxH={720} />
+            <button
+              onClick={() => setZoom(null)}
+              className="absolute right-2 top-2 rounded bg-[var(--danger)] px-2 py-0.5 text-xs text-white"
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

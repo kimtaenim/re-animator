@@ -2,21 +2,17 @@
   "$comment": "만화 컷 온톨로지 — 컷 타입(중심)과 컷별 내용 스키마. 하드코딩 금지, 여기서만 튜닝. 컷 검출 후 VLM 이 각 컷을 type 으로 분류하고 내용을 뽑아 Scene.cut 에 채운다. 나중에 image-2(재생성)에 레퍼런스+프롬프트로 넘어간다. regenerate=false 는 그림 재생성 대신 자막/음향/타이틀로 처리.",
 
   "cutTypes": [
-    { "id": "lead",        "ko": "중심인물",     "regenerate": true,  "entityRole": "character", "desc": "한 인물이 이 순간의 서사 중심(주인공의 동작·결정). 그 인물이 머리~발끝 온전히." },
-    { "id": "reaction",    "ko": "반응인물",     "regenerate": true,  "entityRole": "character", "desc": "대사(말풍선) 없이 인물의 얼굴만(주로 작게) 나와 반응·표정만 보여주는 인서트 컷. 무언가에 대한 반응 장면 — 대사가 있거나 인물이 동작의 주체면 이게 아니라 중심인물이다." },
-    { "id": "characters",  "ko": "인물들",       "regenerate": true,  "entityRole": "character", "desc": "이름 있는 두셋 인물이 함께(대화·상호작용). 각 인물 온전히." },
-    { "id": "crowd_space", "ko": "군중 및 공간", "regenerate": true,  "entityRole": "context",   "desc": "익명 다수(군중)가 주체이거나, 인물이 초점이 아닌 배경·장소·거리·건물·풍경·실내 장면. ★★ 단, 특정 개인 인물이 화면에 뚜렷이 있고 그 인물이 장면의 초점이면 여기가 아니라 인물 타입(lead/characters)이다 — 개인 인물을 crowd_space 로 빨아들이지 마라. crowd_space 는 '얼굴을 알아볼 개인이 초점이 아닐 때'만." },
-    { "id": "object",      "ko": "사물",         "regenerate": true,  "entityRole": "prop",      "desc": "특정 사물이 초점(돈·기기·화면·소품)." },
-    { "id": "action",      "ko": "액션",         "regenerate": true,  "entityRole": "context",   "desc": "움직임·충돌·역동 효과가 핵심인 컷." },
-    { "id": "transition",  "ko": "장면 연결",    "regenerate": true,  "entityRole": "context",   "desc": "★ 오직 '흐르는 연출 효과·화면 전환 그 자체'가 컷의 전부일 때만. 예: 흩날리는 지폐·꽃잎·눈이 화면을 덮은 것, 속도선·집중선만, 빛번짐·반짝임 전환, 페이드 등. ★★ 실제 배경·장소·거리·건물·군중이 그려진 장면은 transition 이 아니다 → crowd_space. 인물이 그려져 있으면 인물 타입. transition 은 서사 장면이 아니라 '장면 사이를 잇는 효과' 자체일 때만 — 남발 금지." },
-    { "id": "text",        "ko": "텍스트",       "regenerate": false, "entityRole": null,        "desc": "글자가 컷의 전부일 때. ★ 작품 제목·로고·표지·크레딧 화면은 네온·특수서체·배경효과로 화려하게 디자인돼 있어도 여기다(textKind=title) — 절대 object(사물)로 착각 금지. 장소·시간·상황 설명 자막(예: '미국 라스베가스')은 textKind=caption. 말풍선 대사는 dialogue, 효과음 글자는 sfx. ★★ 인물·배경이 그려져 있고 그 위에 말풍선만 얹힌 것뿐이면 text 가 아니라 그려진 주체 타입으로 하고 글자는 dialogue 필드에." }
+    { "id": "person",           "ko": "인물",         "regenerate": true,  "entityRole": "character", "desc": "얼굴·몸을 알아볼 등장인물이 초점인 컷 — 한 명이든 여럿이든, 동작 중이든 반응(표정)만이든 모두 여기. 캐스팅에서 누가 누군지 식별한다. 개인 인물이 뚜렷하면 배경(background_crowd)으로 보내지 마라." },
+    { "id": "action",           "ko": "액션",         "regenerate": true,  "entityRole": "context",   "desc": "움직임·충돌·역동적 동작·효과가 핵심인 컷." },
+    { "id": "object",           "ko": "사물",         "regenerate": true,  "entityRole": "prop",      "desc": "특정 사물·소품이 초점(돈·기기·화면 등). ★ 화면이 글자·그림으로 구성된 시각 콘텐츠 — 작품 제목·로고·표지, 다이어그램·도표·인포그래픽·글씨 삽화 — 도 여기(시각 컷으로 유지). object 는 재생성 대상." },
+    { "id": "background_crowd", "ko": "배경 및 군중", "regenerate": true,  "entityRole": "context",   "desc": "장소·배경·거리·건물·풍경·실내, 익명 군중, 화면 전환·흐르는 연출(지폐·꽃잎·속도선 등). 개인 인물이 초점이 아닐 때. 인물이 뚜렷이 초점이면 person 이다." },
+    { "id": "text",             "ko": "말풍선/자막", "regenerate": false, "entityRole": null,        "desc": "그림 없이 말풍선·자막·효과음 '글자만' 얹힌 오버레이. 장면이 아니라 옆 장면의 대사·자막이므로 자동 제거(흡수)된다. ★ 그림(인물·배경·사물·다이어그램)이 하나라도 있으면 text 가 아니라 그려진 주체 타입으로 하고 글자는 dialogue 에. textKind: dialogue(말풍선)·caption(장소·시간 자막)·sfx(효과음)." }
   ],
 
   "textKinds": [
     { "id": "dialogue", "ko": "말풍선", "route": "subtitle_dub", "desc": "대사 → 자막·더빙 (흡수)" },
-    { "id": "sfx",      "ko": "효과음", "route": "sound",        "desc": "의성어 → 음향 (흡수)" },
-    { "id": "caption",  "ko": "자막/캡션", "route": "subtitle",  "desc": "장소·시간·상황 설명 자막(예: '미국 라스베가스', '3일 후'). 나레이션 → 자막 (흡수)" },
-    { "id": "title",    "ko": "타이틀", "route": "title",        "desc": "★작품 자체의 제목·로고·표지·크레딧만. 컷으로 유지(흡수 안 함)" }
+    { "id": "caption",  "ko": "자막",   "route": "subtitle",     "desc": "장소·시간·상황 설명 자막(예: '미국 라스베가스', '3일 후') → 자막 (흡수)" },
+    { "id": "sfx",      "ko": "효과음", "route": "sound",        "desc": "의성어 → 음향 (흡수)" }
   ],
 
   "$cutSchema": "Scene.cut 에 채워지는 필드 설명(문서용). type/textKind 는 위 id.",

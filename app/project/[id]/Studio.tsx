@@ -335,9 +335,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const hasCuts = project.scenes.length > 0;
   const approved = sourceStatus === "approved";
   const typedCount = project.scenes.filter((s) => s.cut?.type).length;
-  const charCutCount = project.scenes.filter(
-    (s) => s.cut?.type === "lead" || s.cut?.type === "reaction" || s.cut?.type === "characters"
-  ).length;
+  const charCutCount = project.scenes.filter((s) => s.cut?.type === "person").length;
 
   return (
     <div>

@@ -81,21 +81,26 @@ function buildSchema(typeEnum, textKindEnum) {
 // VLM 이 id 대신 한글 라벨·영문 동의어로 답해도 우리 타입으로 관대하게 매핑.
 // (엄격 매칭이면 "중심인물"·"character" 같은 정답을 버려 전부 미분류가 됨.)
 const TYPE_SYN = {
-  character: "lead", protagonist: "lead", 주인공: "lead", 중심: "lead", 중심인물: "lead",
-  reaction: "reaction", 반응: "reaction", 반응인물: "reaction",
-  characters: "characters", group: "characters", 인물들: "characters", 대화: "characters",
-  crowd: "crowd_space", crowd_space: "crowd_space", setting: "crowd_space",
-  background: "crowd_space", establishing: "crowd_space", scenery: "crowd_space",
-  군중: "crowd_space", 배경: "crowd_space", 공간: "crowd_space", "군중 및 공간": "crowd_space",
+  lead: "person", reaction: "person", characters: "person", character: "person",
+  protagonist: "person", 인물: "person", 중심인물: "person", 반응인물: "person",
+  인물들: "person", 사람: "person", 주인공: "person",
+  action: "action", 액션: "action", 동작: "action", 움직임: "action",
   object: "object", prop: "object", item: "object", 사물: "object", 소품: "object",
-  action: "action", 액션: "action", 동작: "action",
-  text: "text", speech: "text", dialogue: "text", narration: "text", sfx: "text",
-  title: "text", 텍스트: "text", 말풍선: "text", 나레이션: "text", 효과음: "text", 타이틀: "text",
+  title: "object", 타이틀: "object", 로고: "object", logo: "object",
+  diagram: "object", 다이어그램: "object", 도표: "object", chart: "object",
+  infographic: "object", 인포그래픽: "object",
+  crowd_space: "background_crowd", crowd: "background_crowd", 군중: "background_crowd",
+  background: "background_crowd", 배경: "background_crowd", setting: "background_crowd",
+  공간: "background_crowd", 장소: "background_crowd", scenery: "background_crowd",
+  풍경: "background_crowd", transition: "background_crowd", 장면연결: "background_crowd",
+  "장면 연결": "background_crowd", 전환: "background_crowd",
+  text: "text", speech: "text", dialogue: "text", 말풍선: "text", 자막: "text",
+  caption: "text", narration: "text", 나레이션: "text", sfx: "text", 효과음: "text", 텍스트: "text",
 };
 const TEXTKIND_SYN = {
   dialogue: "dialogue", speech: "dialogue", 말풍선: "dialogue", 대사: "dialogue", 나레이션: "dialogue",
+  caption: "caption", 자막: "caption", narration: "caption",
   sfx: "sfx", 효과음: "sfx", 의성어: "sfx", onomatopoeia: "sfx",
-  title: "title", 타이틀: "title", 제목: "title", credits: "title",
 };
 
 function resolve(raw, idSet, koToId, syn) {

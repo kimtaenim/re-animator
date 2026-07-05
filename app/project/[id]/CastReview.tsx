@@ -11,7 +11,7 @@
 import { useState } from "react";
 import type { Character, Scene } from "@/lib/types";
 
-const CHARACTER_TYPES = new Set(["lead", "reaction", "characters"]);
+const CHARACTER_TYPES = new Set(["person"]);
 
 interface Props {
   scenes: Scene[];

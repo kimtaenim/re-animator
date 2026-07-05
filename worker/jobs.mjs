@@ -13,7 +13,7 @@ import { splitTallRegions, forceSplit } from "./group.mjs";
 import { classifyScenes } from "./classify.mjs";
 import { classifyCast } from "./cast.mjs";
 
-const CHARACTER_TYPES = new Set(["lead", "reaction", "characters"]);
+const CHARACTER_TYPES = new Set(["person"]);
 
 // 말풍선·효과음 등 '글자만' 컷(text, textKind≠title)은 독립 컷으로 두지 않는다.
 // 대사·효과음 텍스트를 y 로 가장 가까운 실제 장면에 붙이고, 그 글자 컷은 제거.
@@ -25,8 +25,7 @@ function absorbTextCuts(scenes) {
   const median = heights[Math.floor(heights.length / 2)] || 300;
   // 흡수 대상: 타이틀 아닌 text 이면서 '작은' 컷(말풍선·자막 크기). 큰 패널이 text 로
   // 오분류돼도 통째로 사라지지 않게 — 큰 text 는 실제 컷으로 남긴다(사람이 재분류).
-  const isAbsorbable = (s) =>
-    s.cut?.type === "text" && s.cut?.textKind !== "title" && h(s) < Math.max(280, median * 0.5);
+  const isAbsorbable = (s) => s.cut?.type === "text" && h(s) < Math.max(280, median * 0.5);
   const reals = arr.filter((s) => !isAbsorbable(s));
   if (reals.length === 0) return arr; // 전부 흡수대상이면 안전하게 그대로 둔다
   const center = (s) => (s.sourceRegion.yStart + s.sourceRegion.yEnd) / 2;

@@ -65,16 +65,13 @@ export interface SourceRegion {
 // 분할 시 VLM 이 채우고 사람이 G1 에서 확정한다. 이후 image-2(재생성)에 레퍼런스+
 // 프롬프트로 넘어간다. regenerate=false 타입(text)은 자막/음향/타이틀로 라우팅.
 export type CutType =
-  | "lead" // 중심인물
-  | "reaction" // 반응인물
-  | "characters" // 인물들
-  | "crowd_space" // 군중 및 공간
-  | "object" // 사물
+  | "person" // 인물 (중심·반응·인물들 통합)
   | "action" // 액션
-  | "transition" // 장면 연결 (흐르는 연출·특수효과·전환)
-  | "text"; // 말풍선·효과음·타이틀 (재생성 X)
+  | "object" // 사물 (타이틀·다이어그램·글씨그림 포함)
+  | "background_crowd" // 배경 및 군중 (공간·군중·전환)
+  | "text"; // 말풍선·자막·효과음 (오버레이 → 자동 제거)
 
-export type TextKind = "dialogue" | "sfx" | "title" | "caption";
+export type TextKind = "dialogue" | "caption" | "sfx";
 
 export interface CutOntology {
   type: CutType | null; // null = 미분류(사람이 채움)
