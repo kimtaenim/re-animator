@@ -1280,7 +1280,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     ? Math.max(2, Math.min(8, Math.round(dubChars / 5)))
                     : s.cut?.type === "transition"
                       ? 1.5
-                      : 2;
+                      : 1;
                 const curDur = s.cut?.durationSec ?? estSec;
                 const setDur = (v: number) =>
                   updateCut(s.id, { durationSec: Math.max(0.5, Math.min(15, Math.round(v * 2) / 2)) });
@@ -1362,12 +1362,39 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           {voiceLabel ? ` · 목소리: ${voiceLabel}` : " · 목소리 미지정"}
                         </span>
                       </div>
-                      {(s.cut?.dialogue?.trim() || s.cut?.narration?.trim()) && (
-                        <p className="truncate text-[var(--muted)]">
-                          {s.cut?.dialogue?.trim() ? `“${s.cut.dialogue.trim()}”` : ""}
-                          {s.cut?.narration?.trim() ? ` (${s.cut.narration.trim()})` : ""}
-                        </p>
+                      {/* 대사 직접 편집 — 말풍선별 입력(클릭해서 수정, 자동 저장) */}
+                      {bubs.length > 0 ? (
+                        <div className="flex flex-col gap-0.5">
+                          {bubs.map((b, bi) => (
+                            <input
+                              key={bi}
+                              value={b.text}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const nb = (s.cut?.bubbles ?? []).map((x, i) =>
+                                  i === bi ? { ...x, text: val } : x
+                                );
+                                updateCut(s.id, { bubbles: nb });
+                              }}
+                              placeholder={`말풍선 ${bi + 1} 대사`}
+                              className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5"
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <input
+                          value={s.cut?.dialogue ?? ""}
+                          onChange={(e) => updateCut(s.id, { dialogue: e.target.value })}
+                          placeholder="대사 (클릭해서 입력)"
+                          className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5"
+                        />
                       )}
+                      <input
+                        value={s.cut?.narration ?? ""}
+                        onChange={(e) => updateCut(s.id, { narration: e.target.value })}
+                        placeholder="나레이션/자막 (선택)"
+                        className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5 text-[var(--muted)]"
+                      />
                       {s.cut?.description?.trim() && (
                         <p
                           className="truncate text-[10px] text-[var(--muted)] opacity-70"

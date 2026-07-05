@@ -658,7 +658,7 @@ function estimateVideoSeconds(cut) {
     return Math.max(MIN, Math.min(MAX, Math.round(chars / CPS)));
   }
   if (cut?.type === "transition") return Number(process.env.VIDEO_TRANSITION_SEC || 1.5);
-  return MIN;
+  return Number(process.env.VIDEO_SILENT_SEC || 1); // 대사 없는 정지컷 기본 1초
 }
 
 // 영상 모션 프롬프트 = 컷 모션(카메라 워크) + 가이드(스톱모션 느낌). aninews video_motion 계승.
