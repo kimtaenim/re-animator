@@ -378,16 +378,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
-  // 컷별 재생성 방식(마스크=원본보존+빈공간/글씨만, full=통째 재생성). 드롭다운으로.
-  function setRegenMode(sceneId: string, mode: "mask" | "full") {
-    setProject((prev) => ({
-      ...prev,
-      scenes: prev.scenes.map((s) => (s.id === sceneId ? { ...s, regenMode: mode } : s)),
-    }));
-    fetch("/api/cut", {
+  // 재생성 방식(프로젝트 전체 공통). 기술용어(마스크) 대신 쉬운 이름으로 노출.
+  function setProjectRegenMode(mode: "mask" | "full") {
+    setProject((prev) => ({ ...prev, regenMode: mode }));
+    fetch(`/api/project/${project.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ projectId: project.id, sceneId, regenMode: mode }),
+      body: JSON.stringify({ regenMode: mode }),
     }).catch(() => {});
   }
 
@@ -409,6 +406,39 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     } catch (e) {
       setError(e instanceof Error ? e.message : "분할 실패");
     }
+  }
+
+  // M3 컷 합병(앞/뒤) — 합친 영역 추출+글씨읽기까지 워커가. regen 폴링으로 반영.
+  async function mergeCutM3(sceneId: string, dir: "prev" | "next") {
+    setError("");
+    try {
+      const r = await fetch("/api/mergecut", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneId, dir }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "합병 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, regen: { ...prev.steps.regen, status: "running" } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "합병 실패");
+    }
+  }
+
+  // M3 컷 삭제 — 재추출 불필요, 즉시 로컬 반영 + 서버 저장.
+  function deleteCutM3(sceneId: string) {
+    setProject((prev) => ({
+      ...prev,
+      scenes: prev.scenes.filter((s) => s.id !== sceneId).map((s, i) => ({ ...s, order: i })),
+    }));
+    fetch("/api/scene", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId: project.id, sceneId }),
+    }).catch(() => {});
   }
 
   // 컷 하나만 생성/다시 생성 — 배치 전에 싸게 충실도 테스트, 마음에 안 드는 컷 재생성.
@@ -713,33 +743,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         </section>
       )}
 
-      {/* 3) 추출 완료 */}
-      {approved && (
-        <section className="mb-6">
-          <h2 className="mb-3 text-sm font-semibold">
-            추출된 컷{" "}
-            <span className="font-normal text-[var(--muted)]">
-              ({project.scenes.length}컷) — 1단계 완료, 이후 캐스팅(M2)로
-            </span>
-          </h2>
-          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
-            {project.scenes.map((s) => (
-              <div key={s.id} className="rounded border border-[var(--border)] bg-[var(--panel)] p-1">
-                {s.originalImage ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={s.originalImage} alt={`cut ${s.order}`} className="w-full rounded" />
-                ) : (
-                  <div className="grid h-24 place-items-center text-xs text-[var(--muted)]">
-                    #{s.order}
-                  </div>
-                )}
-                <p className="mt-1 text-center text-xs text-[var(--muted)]">컷 {s.order + 1}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
       {/* M2) 캐스팅 — 등장인물 구분 */}
       {approved && (
         <section className="mb-6">
@@ -834,6 +837,26 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     }`}
                   >
                     {o.t} {o.v}
+                  </button>
+                ))}
+                <span className="ml-2 text-[var(--muted)]">방식:</span>
+                {(
+                  [
+                    { v: "mask", t: "원본 유지", d: "그림은 그대로 두고 빈 공간·글씨만 채움(권장)" },
+                    { v: "full", t: "새로 그리기", d: "컷을 통째로 다시 생성" },
+                  ] as const
+                ).map((o) => (
+                  <button
+                    key={o.v}
+                    onClick={() => setProjectRegenMode(o.v)}
+                    title={o.d}
+                    className={`rounded border px-2 py-0.5 ${
+                      (project.regenMode || "mask") === o.v
+                        ? "border-[var(--accent)] text-[var(--accent)]"
+                        : "border-[var(--border)] text-[var(--muted)]"
+                    }`}
+                  >
+                    {o.t}
                   </button>
                 ))}
               </div>
@@ -950,24 +973,41 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px]"
                         />
                         <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
-                          <select
-                            value={s.regenMode || "mask"}
-                            onChange={(e) => setRegenMode(s.id, e.target.value as "mask" | "full")}
-                            title="이 컷 재생성 방식"
-                            className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
-                          >
-                            <option value="mask">마스크</option>
-                            <option value="full">전체</option>
-                          </select>
                           {speaker && <span>화자: {speaker}</span>}
                           <div className="ml-auto flex items-center gap-1">
                             <button
+                              onClick={() => mergeCutM3(s.id, "prev")}
+                              disabled={busy || regenRunning || s.order === 0}
+                              className="rounded border border-[var(--border)] px-1.5 py-0.5 disabled:opacity-30"
+                              title="앞 컷과 합치기"
+                            >
+                              ◀합
+                            </button>
+                            <button
+                              onClick={() => mergeCutM3(s.id, "next")}
+                              disabled={busy || regenRunning}
+                              className="rounded border border-[var(--border)] px-1.5 py-0.5 disabled:opacity-30"
+                              title="뒤 컷과 합치기"
+                            >
+                              합▶
+                            </button>
+                            <button
                               onClick={() => splitCutM3(s.id)}
                               disabled={busy || regenRunning}
-                              className="rounded border border-[var(--border)] px-2 py-0.5 disabled:opacity-40"
+                              className="rounded border border-[var(--border)] px-1.5 py-0.5 disabled:opacity-40"
                               title="이 컷을 분할(서브컷 추출까지)"
                             >
                               분할
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`컷 ${s.order + 1} 삭제할까요?`)) deleteCutM3(s.id);
+                              }}
+                              disabled={busy || regenRunning}
+                              className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--danger)] hover:text-[var(--danger)] disabled:opacity-40"
+                              title="이 컷 삭제"
+                            >
+                              삭제
                             </button>
                             <button
                               onClick={() => regenOne(s.id)}

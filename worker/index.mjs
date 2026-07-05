@@ -2,17 +2,25 @@
 // aninews 와 달리 이 워커가 입력단 픽셀 연산까지 담당(Vercel 서버리스 60초·메모리 회피).
 // Render/Railway/Fly 등 상시 서버에서 `node index.mjs`.
 import { popJob, updateJob, failStep } from "./store.mjs";
-import { runSplit, runExtract, runCast, runResplit, runRegen, runSplitCut } from "./jobs.mjs";
+import {
+  runSplit,
+  runExtract,
+  runCast,
+  runResplit,
+  runRegen,
+  runSplitCut,
+  runMergeCut,
+} from "./jobs.mjs";
 
 const POLL_MS = 3000;
 const JOB_TIMEOUT_MS = 12 * 60 * 1000; // 12분(재생성 배치 여유)
 
-// 우선순위: split → resplit → splitcut → extract → cast(M2) → regen(M3).
-const TYPES = ["split", "resplit", "splitcut", "extract", "cast", "regen"];
+const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen"];
 const JOB_FN = {
   split: runSplit,
   resplit: runResplit,
   splitcut: runSplitCut,
+  mergecut: runMergeCut,
   extract: runExtract,
   cast: runCast,
   regen: runRegen,
@@ -21,6 +29,7 @@ const JOB_STEP = {
   split: "source",
   resplit: "source",
   splitcut: "regen",
+  mergecut: "regen",
   extract: "source",
   cast: "cast",
   regen: "regen",

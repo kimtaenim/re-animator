@@ -253,7 +253,10 @@ export async function runExtract(projectId) {
           try {
             const { dialogue, sfx, boxes } = await readCutText(pngById.get(s.id), key, OCR_MODEL);
             if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
-            s.cut.dialogue = dialogue;
+            // 흡수된 위·아래 나레이션/대사(absorb 로 붙은 것)를 OCR 이 덮어쓰지 않게 합친다.
+            const prev = (s.cut.dialogue || "").trim();
+            const now = (dialogue || "").trim();
+            s.cut.dialogue = prev && prev !== now ? [now, prev].filter(Boolean).join("\n") : now;
             if (sfx) s.cut.sfx = sfx;
             s.cut.textBoxes = boxes;
           } catch (e) {
@@ -739,4 +742,91 @@ export async function runSplitCut(projectId, payload) {
   await saveProject(p2);
   await log(`분할 완료: ${target.order + 1}번 → ${newScenes.length}개`);
   return newScenes.length;
+}
+
+// ── mergecut(M3+): 컷을 앞/뒤 이웃과 합병 → 합친 영역 추출+글씨읽기 → M3 재생성 준비.
+export async function runMergeCut(projectId, payload) {
+  await resetProgress(projectId);
+  const log = async (m) => {
+    console.error("[mergecut]", m);
+    await logProgress(projectId, m);
+  };
+  const sceneId = payload?.sceneId;
+  const dir = payload?.dir === "prev" ? -1 : 1;
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  if (!p.virtualCanvas) throw new Error("가상 캔버스가 없어요");
+  const canvas = p.virtualCanvas;
+  const scenes = (p.scenes ?? []).slice().sort((a, b) => a.order - b.order);
+  const idx = scenes.findIndex((s) => s.id === sceneId);
+  if (idx < 0) throw new Error("합병할 컷을 찾을 수 없어요");
+  const j = idx + dir;
+  if (j < 0 || j >= scenes.length) throw new Error("합칠 이웃 컷이 없어요");
+  const a = scenes[idx];
+  const b = scenes[j];
+
+  const region = {
+    yStart: Math.min(a.sourceRegion.yStart, b.sourceRegion.yStart),
+    yEnd: Math.max(a.sourceRegion.yEnd, b.sourceRegion.yEnd),
+    xStart: Math.min(a.sourceRegion.xStart ?? 0, b.sourceRegion.xStart ?? 0),
+    xEnd: Math.max(a.sourceRegion.xEnd ?? canvas.refWidth, b.sourceRegion.xEnd ?? canvas.refWidth),
+  };
+
+  const files = sortedFiles(p);
+  await log(`소스 ${files.length}개 다운로드…`);
+  const buffers = [];
+  for (const f of files) buffers.push(await download(f.url));
+
+  await log("합친 영역 추출·글씨읽기…");
+  const png = await extractRegion(canvas, buffers, region.yStart, region.yEnd, region.xStart, region.xEnd);
+  const { url } = await put(`project/${projectId}/cut-merge-${Date.now()}.png`, png, {
+    access: "public",
+    contentType: "image/png",
+    addRandomSuffix: false,
+  });
+  const key = process.env.OPENAI_API_KEY;
+  const VLM_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
+  const cut = { type: a.cut?.type ?? b.cut?.type ?? null, dialogue: "", sfx: "", textBoxes: [] };
+  // 대사: 합친 이미지 OCR + 두 컷의 기존 대사(흡수 나레이션 포함) 합쳐 중복 줄 제거.
+  let ocr = null;
+  if (key) {
+    try {
+      ocr = await readCutText(png, key, VLM_MODEL);
+    } catch (e) {
+      await log(`글씨읽기 실패: ${String(e?.message ?? e).slice(0, 100)}`);
+    }
+  }
+  const lines = [ocr?.dialogue, a.cut?.dialogue, b.cut?.dialogue]
+    .flatMap((t) => String(t || "").split("\n"))
+    .map((x) => x.trim())
+    .filter(Boolean);
+  cut.dialogue = [...new Set(lines)].join("\n");
+  cut.sfx = ocr?.sfx || a.cut?.sfx || b.cut?.sfx || "";
+  cut.textBoxes = ocr?.boxes ?? [];
+
+  const merged = {
+    id: randomUUID(),
+    order: 0,
+    sourceRegion: region,
+    cut,
+    originalImage: url,
+    status: "approved",
+  };
+
+  const p2 = await getProject(projectId);
+  if (!p2) throw new Error("프로젝트가 사라졌어요");
+  const kept = (p2.scenes ?? []).filter((s) => s.id !== a.id && s.id !== b.id);
+  p2.scenes = [...kept, merged]
+    .sort((x, y) => x.sourceRegion.yStart - y.sourceRegion.yStart)
+    .map((s, i) => ({ ...s, order: i }));
+  p2.steps.regen = {
+    ...p2.steps.regen,
+    kind: "regen",
+    status: "review",
+    error: undefined,
+    updatedAt: Date.now(),
+  };
+  await saveProject(p2);
+  await log("합병 완료");
+  return 1;
 }
