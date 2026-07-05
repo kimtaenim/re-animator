@@ -247,30 +247,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setProject((prev) => ({ ...prev, scenes: d.scenes }));
   }
 
-  // 한 컷 재분할 — 편집본을 먼저 저장(서버 order 일치)한 뒤 워커에 재분할 적재.
-  async function resplitCut(regions: SavedRegion[], index: number) {
-    setBusy(true);
-    setError("");
-    try {
-      await saveRegions(regions);
-      const r = await fetch("/api/resplit", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, order: index }),
-      });
-      const d = await r.json();
-      if (!d.ok) throw new Error(d.error ?? "재분할 실패");
-      setProject((prev) => ({
-        ...prev,
-        steps: { ...prev.steps, source: { ...prev.steps.source, status: "running" } },
-      }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "재분할 실패");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   // 워커 작업 중지 — 워커 프로세스는 못 죽이지만 UI 가 '진행 중'에 갇히지 않게 단계를 되돌림.
   async function cancelJob(step: "source" | "cast") {
     try {
@@ -527,8 +503,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             sourceFiles={project.sourceFiles}
             canvas={canvas}
             scenes={project.scenes}
+            projectId={project.id}
             onSave={saveRegions}
-            onResplit={resplitCut}
           />
         </section>
       )}

@@ -25,8 +25,8 @@ interface Props {
   sourceFiles: SourceFile[];
   canvas: VirtualCanvas;
   scenes: Scene[];
+  projectId: string;
   onSave: (regions: SavedRegion[]) => Promise<void>;
-  onResplit?: (regions: SavedRegion[], index: number) => void; // 이 컷을 워커로 재분할
 }
 
 type Region = SavedRegion;
@@ -109,12 +109,13 @@ function CutThumb({
   );
 }
 
-export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave, onResplit }: Props) {
+export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId, onSave }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const leftScrollRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
   const [displayW, setDisplayW] = useState(220);
   const [selected, setSelected] = useState<number | null>(null);
+  const [splitting, setSplitting] = useState<number | null>(null);
   // regions 는 항상 yStart 오름차순 유지(렌더 인덱스=드래그 인덱스 일치).
   const [regions, setRegions] = useState<Region[]>(() => scenesToRegions(scenes));
   const [drag, setDrag] = useState<{ index: number; edge: "top" | "bottom" } | null>(null);
@@ -261,6 +262,52 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave, on
   function selectFromRight(i: number) {
     setSelected(i);
     scrollToCut(regions[i]);
+  }
+
+  // 이 컷만 즉시 분할 — 저장된 프로파일로 API 가 계산(워커·VLM·재다운로드 없음).
+  async function doSplit(i: number) {
+    const r = regions[i];
+    setSplitting(i);
+    try {
+      const res = await fetch("/api/resplit-local", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          region: { yStart: r.yStart, yEnd: r.yEnd, xStart: r.xStart, xEnd: r.xEnd },
+        }),
+      });
+      const d = await res.json();
+      if (!d.ok) {
+        window.alert(d.error ?? "분할 실패");
+        return;
+      }
+      const subs = (d.subs ?? []).map(
+        (s: { yStart: number; yEnd: number; xStart?: number; xEnd?: number }) => ({
+          yStart: s.yStart,
+          yEnd: s.yEnd,
+          xStart: s.xStart,
+          xEnd: s.xEnd,
+          cut: blankCut(),
+        })
+      );
+      if (subs.length < 2) {
+        window.alert("나눌 경계를 못 찾았어요");
+        return;
+      }
+      setRegions((prev) =>
+        prev
+          .filter((_, idx) => idx !== i)
+          .concat(subs)
+          .sort((a, b) => a.yStart - b.yStart)
+      );
+      setSelected(null);
+      setDirty(true);
+    } catch {
+      window.alert("분할 실패");
+    } finally {
+      setSplitting(null);
+    }
   }
 
   async function save() {
@@ -495,17 +542,15 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave, on
                       >
                         뒤▶
                       </button>
-                      {onResplit && (
-                        <button
-                          type="button"
-                          onClick={() => onResplit(regions, i)}
-                          disabled={r.yEnd - r.yStart < 80}
-                          className="ml-auto rounded border border-[var(--border)] px-1 disabled:opacity-30"
-                          title="이 컷을 다시 분할(재검출)"
-                        >
-                          분할
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => doSplit(i)}
+                        disabled={splitting !== null || r.yEnd - r.yStart < 80}
+                        className="ml-auto rounded border border-[var(--border)] px-1 disabled:opacity-30"
+                        title="이 컷을 즉시 분할"
+                      >
+                        {splitting === i ? "분할…" : "분할"}
+                      </button>
                     </div>
                   </div>
                 </div>

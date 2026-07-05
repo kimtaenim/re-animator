@@ -5,7 +5,7 @@
 
 import { randomUUID } from "node:crypto";
 import { put } from "@vercel/blob";
-import { getProject, saveProject, logProgress, resetProgress } from "./store.mjs";
+import { getProject, saveProject, logProgress, resetProgress, saveRowProfile } from "./store.mjs";
 import { computeRowProfile, extractRegion, trimBox } from "./imaging.mjs";
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
@@ -20,12 +20,18 @@ const CHARACTER_TYPES = new Set(["lead", "reaction", "characters"]);
 // (타이틀은 실제 디자인 화면이라 유지.) → 말풍선은 장면 위 오버레이일 뿐, 장면이 아님.
 function absorbTextCuts(scenes) {
   const arr = scenes.slice().sort((a, b) => a.sourceRegion.yStart - b.sourceRegion.yStart);
-  const isText = (s) => s.cut?.type === "text" && s.cut?.textKind !== "title";
-  const reals = arr.filter((s) => !isText(s));
-  if (reals.length === 0) return arr; // 전부 글자면 안전하게 그대로 둔다
+  const h = (s) => s.sourceRegion.yEnd - s.sourceRegion.yStart;
+  const heights = arr.map(h).sort((a, b) => a - b);
+  const median = heights[Math.floor(heights.length / 2)] || 300;
+  // 흡수 대상: 타이틀 아닌 text 이면서 '작은' 컷(말풍선·자막 크기). 큰 패널이 text 로
+  // 오분류돼도 통째로 사라지지 않게 — 큰 text 는 실제 컷으로 남긴다(사람이 재분류).
+  const isAbsorbable = (s) =>
+    s.cut?.type === "text" && s.cut?.textKind !== "title" && h(s) < Math.max(280, median * 0.5);
+  const reals = arr.filter((s) => !isAbsorbable(s));
+  if (reals.length === 0) return arr; // 전부 흡수대상이면 안전하게 그대로 둔다
   const center = (s) => (s.sourceRegion.yStart + s.sourceRegion.yEnd) / 2;
   for (const s of arr) {
-    if (!isText(s) || !s.cut) continue;
+    if (!isAbsorbable(s) || !s.cut) continue;
     let best = null;
     let bestD = Infinity;
     for (const r of reals) {
@@ -94,6 +100,11 @@ export async function runSplit(projectId) {
     global.set(pr, acc);
     acc += pr.length;
   }
+  // 프로파일 저장 → 앱이 '그 컷만 분할'을 워커 왕복 없이 즉시 계산.
+  await saveRowProfile(
+    projectId,
+    Buffer.from(global.buffer, global.byteOffset, global.byteLength).toString("base64")
+  );
 
   // 1) 어디서 자를지 = 알고리즘. 실제 평탄 행(패널 사이 거터)에서만 자른다.
   //    → 인물 몸(평탄하지 않음)을 물리적으로 못 자르고, 거터 없는 패널을 못 쪼갠다.

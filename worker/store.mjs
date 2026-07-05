@@ -54,6 +54,14 @@ export async function getProgress(projectId) {
   }
 }
 
+// 행 프로파일 저장(base64 Float32) — 앱이 '그 컷만 분할'을 워커 없이 즉시 계산하게.
+export async function saveRowProfile(projectId, base64) {
+  try {
+    await redis.set(`rowprofile:${projectId}`, base64);
+    await redis.expire(`rowprofile:${projectId}`, 60 * 60 * 24 * 7);
+  } catch {}
+}
+
 // 비용 기록 — API 호출 후 USD 를 Redis 리스트에 적재. 앱이 합산해 ₩로 표시(§15).
 export async function recordCost(entry) {
   try {
