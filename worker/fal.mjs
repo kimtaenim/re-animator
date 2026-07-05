@@ -60,10 +60,12 @@ export async function regenSceneFal(scene, project, key) {
   return { buf: await downloadFit(url, project), cost: FAL_COST };
 }
 
-// 마스크(원본 유지) — 목표 비율 캔버스 합성 + [여백+글씨]만 Flux Fill 인페인트.
+// 마스크(원본 유지) — 컷은 그대로(옆은 블러 배경), 글씨 자리만 Flux Fill 인페인트.
 export async function regenSceneMaskedFal(scene, imgBuf, project, key) {
   if (!key) throw new Error("FAL_KEY 없음");
-  const { composed, falMask, prompt } = await buildMaskInputs(scene, imgBuf, project, "fal");
+  const { composed, falMask, prompt, hasFill } = await buildMaskInputs(scene, imgBuf, project, "fal");
+  // 지울 글씨가 없으면 Fill 호출 불필요 — 합성본(컷+블러밴드) 그대로.
+  if (!hasFill) return { buf: await fitBuffer(composed, project), cost: 0 };
   const url = await callFal(
     FAL_FILL,
     {

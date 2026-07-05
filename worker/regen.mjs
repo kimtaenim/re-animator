@@ -115,42 +115,47 @@ export async function buildMaskInputs(scene, imgBuf, project, model) {
     .png()
     .toBuffer();
 
-  const rgba = Buffer.alloc(TW * TH * 4, 0); // OpenAI: 기본 alpha 0(=채움)
-  const gray = Buffer.alloc(TW * TH * 3, 255); // fal: 기본 흰(=채움)
-  const setBox = (x0, y0, x1, y1, keep) => {
+  // ★ 여백(옆 밴드)은 이미 블러 배경으로 꽉 차 있으니 '보존'으로 둔다 — 모델이 옆을 그려
+  // 채우려다 그림을 가로로 늘리는(번지는) 현상 제거. 채움(재생성)은 '글씨 박스'만.
+  // OpenAI: alpha 255=보존/0=채움.  fal: 검정(0)=보존/흰(255)=채움. 기본을 '보존'으로.
+  const rgba = Buffer.alloc(TW * TH * 4); // RGB 0, alpha 는 아래서 255(보존)로 채움
+  for (let i = 3; i < rgba.length; i += 4) rgba[i] = 255;
+  const gray = Buffer.alloc(TW * TH * 3, 0); // 검정 = 보존
+  let filled = false;
+  const setFill = (x0, y0, x1, y1) => {
     const xa = Math.max(0, Math.floor(x0));
     const ya = Math.max(0, Math.floor(y0));
     const xb = Math.min(TW, Math.ceil(x1));
     const yb = Math.min(TH, Math.ceil(y1));
-    const g = keep ? 0 : 255;
+    if (xb > xa && yb > ya) filled = true;
     for (let y = ya; y < yb; y++) {
       const row = y * TW;
       for (let x = xa; x < xb; x++) {
-        rgba[(row + x) * 4 + 3] = keep ? 255 : 0;
-        gray[(row + x) * 3] = g;
-        gray[(row + x) * 3 + 1] = g;
-        gray[(row + x) * 3 + 2] = g;
+        rgba[(row + x) * 4 + 3] = 0; // 채움
+        gray[(row + x) * 3] = 255;
+        gray[(row + x) * 3 + 1] = 255;
+        gray[(row + x) * 3 + 2] = 255;
       }
     }
   };
-  setBox(px, py, px + pw, py + ph, true); // 컷 영역 보존
   for (const b of scene.cut?.textBoxes ?? []) {
-    setBox(px + b.left * pw, py + b.top * ph, px + b.right * pw, py + b.bottom * ph, false); // 글씨 채움
+    setFill(px + b.left * pw, py + b.top * ph, px + b.right * pw, py + b.bottom * ph); // 글씨 자리만
   }
   const openaiMask = await sharp(rgba, { raw: { width: TW, height: TH, channels: 4 } }).png().toBuffer();
   const falMask = await sharp(gray, { raw: { width: TW, height: TH, channels: 3 } }).png().toBuffer();
 
   const prompt =
-    `Extend and fill the masked areas so the whole ${frameDesc(project)} is filled edge to edge — naturally continue the background, scenery and colors to seamlessly match the surrounding artwork. ` +
-    "Absolutely NO black bars, white space, empty margins, borders, vignette, or gradient fade anywhere — every pixel must be finished illustration reaching all four edges. " +
-    "Where speech bubbles or lettering were, remove the text and fill with plausible background continuation. Keep all other artwork exactly as-is, faithful and unchanged. No text, letters, or watermark in the output.";
+    "This image already fills the whole frame. Only where the mask marks text — speech bubbles, lettering, captions, sound effects — remove the text and fill that exact spot with plausible background continuation matching the immediately surrounding art. " +
+    "Do NOT redraw, restyle, extend, stretch, or move anything else; do not touch the outer areas. Keep every other pixel exactly as-is. No text, letters, or watermark in the output.";
 
-  return { composed, openaiMask, falMask, prompt, TW, TH };
+  return { composed, openaiMask, falMask, prompt, TW, TH, hasFill: filled };
 }
 
-// 마스크 재생성(OpenAI images/edits) — 원본 픽셀 보존 + [빈 공간 + 글씨 박스]만 채움.
+// 마스크 재생성(OpenAI images/edits) — 원본 컷 보존(옆은 블러 배경) + 글씨 자리만 지움.
 export async function regenSceneMasked(scene, imgBuf, project, key, model) {
-  const { composed, openaiMask, prompt, TW, TH } = await buildMaskInputs(scene, imgBuf, project, model);
+  const { composed, openaiMask, prompt, TW, TH, hasFill } = await buildMaskInputs(scene, imgBuf, project, model);
+  // 지울 글씨가 없으면 모델 호출 불필요 — 합성본(컷+블러밴드)을 그대로.
+  if (!hasFill) return { buf: await fitBuffer(composed, project), cost: 0 };
   const form = new FormData();
   form.append("model", model);
   form.append("image", new Blob([composed], { type: "image/png" }), "cut.png");
