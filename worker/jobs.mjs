@@ -24,8 +24,8 @@ import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { readCutText } from "./ocr.mjs";
 
-// 영상(I2V)은 submit→poll 로 컷당 수십 초~수 분 → 동시성 낮게(잡 하나가 그 동안 점유).
-const VIDEO_CONCURRENCY = Number(process.env.VIDEO_CONCURRENCY || 2);
+// 영상(I2V)은 submit→poll + xAI 레이트리밋(초당 1건) → 기본 1(동시 제출 금지).
+const VIDEO_CONCURRENCY = Number(process.env.VIDEO_CONCURRENCY || 1);
 
 // 캐스팅 대상 = 인물이 담긴 컷. person(정지·반응) + action(동작 중 인물) 모두 포함.
 const CHARACTER_TYPES = new Set(["person", "action"]);

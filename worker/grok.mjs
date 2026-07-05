@@ -29,6 +29,8 @@ function grokError(status, bodyText) {
   } catch {
     /* keep raw */
   }
+  if (status === 429 || /rate limit|too many requests/i.test(detail))
+    return "Grok 요청 한도 초과(초당 1건 제한) — 동시 생성 수를 줄이세요(VIDEO_CONCURRENCY=1).";
   if (/balance|credit|quota|insufficient/i.test(detail))
     return "Grok(xAI) 잔액/크레딧 부족 — console.x.ai 결제 확인.";
   if (/moderation|rejected|content|policy|safety|flag/i.test(detail))
@@ -36,11 +38,25 @@ function grokError(status, bodyText) {
   return `Grok ${status}: ${String(detail).slice(0, 200)}`;
 }
 
+// 429(초당 1건 제한) 자동 백오프 재시도. Retry-After 존중, 없으면 2·4·8초.
+async function fetchRetry(url, opts, tries = 4) {
+  for (let i = 0; ; i++) {
+    const r = await fetch(url, opts);
+    if ((r.status === 429 || r.status === 503) && i < tries) {
+      const ra = Number(r.headers.get("retry-after"));
+      const waitMs = (ra > 0 ? ra : Math.min(8, 2 ** (i + 1))) * 1000;
+      await new Promise((res) => setTimeout(res, waitMs));
+      continue;
+    }
+    return r;
+  }
+}
+
 async function submit({ imageUrl, prompt, duration }) {
   const body = { model: GROK_VIDEO_MODEL, image: { url: imageUrl } };
   if (prompt) body.prompt = prompt;
   if (typeof duration === "number") body.duration = duration;
-  const r = await fetch(`${API}/videos/generations`, {
+  const r = await fetchRetry(`${API}/videos/generations`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key()}` },
     body: JSON.stringify(body),
@@ -54,7 +70,7 @@ async function submit({ imageUrl, prompt, duration }) {
 }
 
 async function poll(requestId) {
-  const r = await fetch(`${API}/videos/${requestId}`, {
+  const r = await fetchRetry(`${API}/videos/${requestId}`, {
     headers: { authorization: `Bearer ${key()}` },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
