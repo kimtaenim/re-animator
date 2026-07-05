@@ -71,7 +71,10 @@ async function fetchRetry(url, opts, tries = 4) {
 async function submit({ imageUrl, prompt, duration }) {
   const body = { model: GROK_VIDEO_MODEL, image: { url: imageUrl } };
   if (prompt) body.prompt = prompt;
-  if (typeof duration === "number") body.duration = duration;
+  // Grok duration 은 정수(i32)만 받는다 — 0.5 같은 소수는 422. 반올림+안전 범위(1~10)로.
+  if (typeof duration === "number" && duration > 0) {
+    body.duration = Math.max(1, Math.min(10, Math.round(duration)));
+  }
   const r = await fetchRetry(`${API}/videos/generations`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key()}` },

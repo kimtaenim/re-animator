@@ -1611,21 +1611,27 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       )}
 
       {/* ── 5단계: 합성(영상 이어붙이기, 오디오·자막 없이) ── */}
-      {approved && project.scenes.some((s) => s.videoUrl) && (
+      {approved && project.scenes.some((s) => s.generatedImage) && (
         <section className="mb-6">
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <h2 className="text-sm font-semibold">{STEP_LABEL.compose}</h2>
-            <span className="text-xs text-[var(--muted)]">
-              — 영상 {project.scenes.filter((s) => s.videoUrl).length}개를 하나로 이어붙이기(전환 적용 · 오디오·자막은 나중)
-            </span>
-            <button
-              onClick={runComposeJob}
-              disabled={busy || composeRunning}
-              className="ml-auto rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
-              {composeRunning ? "합성 중…" : project.composedUrl ? "다시 합성" : "영상 묶기"}
-            </button>
-          </div>
+          {(() => {
+            const nVid = project.scenes.filter((s) => s.videoUrl).length;
+            return (
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-semibold">{STEP_LABEL.compose}</h2>
+                <span className="text-xs text-[var(--muted)]">
+                  — 영상 {nVid}개를 하나로 이어붙이기(전환 적용 · 오디오·자막은 나중)
+                </span>
+                <button
+                  onClick={runComposeJob}
+                  disabled={busy || composeRunning || nVid === 0}
+                  title={nVid === 0 ? "먼저 4단계에서 동영상을 생성하세요" : ""}
+                  className="ml-auto rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {composeRunning ? "합성 중…" : project.composedUrl ? "다시 합성" : "영상 묶기"}
+                </button>
+              </div>
+            );
+          })()}
 
           {composeRunning && (
             <p className="mb-3 flex items-center gap-2 text-sm text-[var(--muted)]">
