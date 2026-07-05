@@ -727,10 +727,11 @@ export async function runVideo(projectId, payload) {
     await Promise.all(
       chunk.map(async (s) => {
         try {
-          const dur = estimateVideoSeconds(s.cut); // 대사/타입/지정 기반 초
+          const dur = estimateVideoSeconds(s.cut); // 대사/타입/지정 기반 초(0.5 단위 가능)
+          const grokDur = Math.max(1, Math.min(10, Math.round(dur))); // Grok 은 정수만
           const videoUrl = await grokVideoFromImage(
-            { imageUrl: s.generatedImage, prompt: buildVideoPrompt(s.cut), duration: dur },
-            () => log(`컷 ${s.order + 1} 생성 중…(${dur}s)`)
+            { imageUrl: s.generatedImage, prompt: buildVideoPrompt(s.cut), duration: grokDur },
+            () => log(`컷 ${s.order + 1} 생성 중…(${grokDur}s)`)
           );
           const buf = await download(videoUrl);
           const { url } = await put(
