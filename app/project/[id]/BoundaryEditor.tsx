@@ -177,6 +177,17 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
     };
   }, [drag, scale, minH, canvas.totalHeight]);
 
+  // 자동 저장 — 변경(타입·내용·경계) 후 잠시 뒤 자동으로 저장. 드래그 중엔 재예약돼
+  // 손 뗀 900ms 뒤 한 번만 저장. 저장되면 scenes prop 갱신으로 dirty 가 풀린다.
+  useEffect(() => {
+    if (!dirty || saving) return;
+    const t = setTimeout(() => {
+      setSaving(true);
+      onSave(regions.map((r) => ({ ...r }))).finally(() => setSaving(false));
+    }, 900);
+    return () => clearTimeout(t);
+  }, [regions, dirty, saving, onSave]);
+
   function deleteRegion(i: number) {
     setRegions((prev) => prev.filter((_, idx) => idx !== i));
     setDirty(true);
@@ -223,6 +234,16 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
     setRegions((prev) =>
       prev.map((r, idx) =>
         idx === i ? { ...r, cut: { ...(r.cut ?? blankCut()), textKind, confirmed: true } } : r
+      )
+    );
+    setDirty(true);
+  }
+
+  // VLM 이 읽은 컷 내용(묘사·대사 등)을 사람이 편집. 자동 저장됨.
+  function setCutField(i: number, field: "description" | "dialogue" | "setting", value: string) {
+    setRegions((prev) =>
+      prev.map((r, idx) =>
+        idx === i ? { ...r, cut: { ...(r.cut ?? blankCut()), [field]: value } } : r
       )
     );
     setDirty(true);
@@ -339,13 +360,13 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
   return (
     <div>
       <div className="mb-2 flex items-center justify-between text-xs text-[var(--muted)]">
-        <span>왼쪽: 박스 드래그=경계 · 빈 곳 더블클릭=추가 · 오른쪽 카드에서 중심 선택</span>
+        <span>왼쪽: 박스 드래그=경계 · 빈 곳 더블클릭=추가 · 오른쪽 카드에서 중심·내용 편집 (자동 저장)</span>
         <button
           onClick={save}
-          disabled={!dirty || saving}
-          className="rounded bg-[var(--accent)] px-3 py-1 text-white disabled:opacity-40"
+          disabled={saving}
+          className="rounded border border-[var(--border)] px-3 py-1 disabled:opacity-40"
         >
-          {saving ? "저장 중…" : dirty ? `저장 (${regions.length}컷)` : "저장됨"}
+          {saving ? "저장 중…" : dirty ? "곧 자동 저장…" : "자동 저장됨 ✓"}
         </button>
       </div>
 
@@ -434,16 +455,6 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
             {regions.map((r, i) => {
               const cut = r.cut ?? blankCut();
               const color = (cut.type && TYPE_COLOR[cut.type]) || "var(--muted)";
-              const brief =
-                cut.description ||
-                [
-                  cut.characters?.length ? `인물: ${cut.characters.join(", ")}` : "",
-                  cut.setting ? `장소: ${cut.setting}` : "",
-                  cut.dialogue ? `“${cut.dialogue}”` : "",
-                  cut.sfx ? `효과음: ${cut.sfx}` : "",
-                ]
-                  .filter(Boolean)
-                  .join(" · ");
               return (
                 <div
                   key={`card-${i}`}
@@ -522,14 +533,19 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                         </select>
                       )}
                     </div>
-                    {brief && (
-                      <p
-                        className="line-clamp-2 text-[11px] leading-tight text-[var(--muted)]"
-                        title={brief}
-                      >
-                        {brief}
-                      </p>
-                    )}
+                    <textarea
+                      value={cut.description}
+                      onChange={(e) => setCutField(i, "description", e.target.value)}
+                      placeholder="그림 내용 (편집 가능)"
+                      rows={2}
+                      className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[11px] leading-tight text-[var(--text)]"
+                    />
+                    <input
+                      value={cut.dialogue}
+                      onChange={(e) => setCutField(i, "dialogue", e.target.value)}
+                      placeholder="대사"
+                      className="w-full rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[11px] text-[var(--text)]"
+                    />
                     <div className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
                       <span>합병</span>
                       <button
