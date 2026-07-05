@@ -5,13 +5,21 @@
 
 import { randomUUID } from "node:crypto";
 import { put } from "@vercel/blob";
-import { getProject, saveProject, logProgress, resetProgress, saveRowProfile } from "./store.mjs";
+import {
+  getProject,
+  saveProject,
+  logProgress,
+  resetProgress,
+  saveRowProfile,
+  recordCost,
+} from "./store.mjs";
 import { computeRowProfile, extractRegion, trimBox } from "./imaging.mjs";
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
 import { splitTallRegions, forceSplit } from "./group.mjs";
 import { classifyScenes } from "./classify.mjs";
 import { classifyCast } from "./cast.mjs";
+import { regenScene, REGEN_CONCURRENCY } from "./regen.mjs";
 
 const CHARACTER_TYPES = new Set(["person"]);
 
@@ -448,4 +456,87 @@ export async function runCast(projectId) {
   };
   await saveProject(p2);
   return cast.length;
+}
+
+// ── regen(M3): 각 컷을 gpt-image-1(i2i)로 재생성 → 청크 병렬 → Scene.generatedImage ─
+export async function runRegen(projectId) {
+  await resetProgress(projectId);
+  const log = async (m) => {
+    console.error("[regen]", m);
+    await logProgress(projectId, m);
+  };
+
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENAI_API_KEY 없음");
+  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  const scenes = (p.scenes ?? []).slice().sort((a, b) => a.order - b.order);
+  // 텍스트 오버레이 제외, 추출된 컷만(원본 이미지 필요).
+  const cand = scenes.filter((s) => s.originalImage && s.cut?.type !== "text");
+  await log(`재생성 대상 ${cand.length}컷 (전체 ${scenes.length}), 동시 ${REGEN_CONCURRENCY}장`);
+  if (cand.length === 0) throw new Error("재생성할 컷이 없어요(컷 추출 먼저)");
+
+  const genById = new Map(); // sceneId → { url } | { error }
+  let costTotal = 0;
+  let ok = 0;
+
+  for (let i = 0; i < cand.length; i += REGEN_CONCURRENCY) {
+    const chunk = cand.slice(i, i + REGEN_CONCURRENCY);
+    await log(`이미지 생성 ${i + 1}~${i + chunk.length}/${cand.length}…`);
+    await Promise.all(
+      chunk.map(async (s) => {
+        try {
+          const imgBuf = await download(s.originalImage);
+          const { b64, cost } = await regenScene(s, imgBuf, p, key, model);
+          costTotal += cost;
+          const { url } = await put(
+            `project/${projectId}/gen-${s.order}-${Date.now()}.png`,
+            Buffer.from(b64, "base64"),
+            { access: "public", contentType: "image/png", addRandomSuffix: false }
+          );
+          genById.set(s.id, { url });
+          ok++;
+        } catch (e) {
+          genById.set(s.id, { error: String(e?.message ?? e) });
+          await log(`컷 ${s.order + 1} 실패: ${String(e?.message ?? e).slice(0, 120)}`);
+        }
+      })
+    );
+    await log(`진행 ${Math.min(i + chunk.length, cand.length)}/${cand.length} (${Math.round((Math.min(i + chunk.length, cand.length) / cand.length) * 100)}%)`);
+  }
+
+  try {
+    await recordCost({
+      projectId,
+      vendor: "openai",
+      model,
+      costUsd: costTotal,
+      meta: { kind: "regen", images: cand.length, ok },
+    });
+  } catch {}
+
+  const p2 = await getProject(projectId);
+  if (!p2) throw new Error("프로젝트가 사라졌어요");
+  for (const s of p2.scenes ?? []) {
+    const g = genById.get(s.id);
+    if (!g) continue;
+    if (g.url) {
+      s.generatedImage = g.url;
+      s.regenError = undefined;
+    } else {
+      s.regenError = g.error || "생성 실패";
+    }
+  }
+  p2.steps.regen = {
+    ...p2.steps.regen,
+    kind: "regen",
+    status: "review",
+    error: undefined,
+    updatedAt: Date.now(),
+  };
+  await saveProject(p2);
+  await log(`재생성 완료: ${ok}/${cand.length} (~$${costTotal.toFixed(3)})`);
+  return ok;
 }

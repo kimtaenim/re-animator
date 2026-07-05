@@ -94,6 +94,8 @@ export interface Scene {
   sourceRegion: SourceRegion; // 가상 캔버스 전역 좌표
   cut?: CutOntology; // 컷 온톨로지(타입+내용). 미분류면 type=null.
   originalImage?: string; // 추출된 원본 컷 Blob URL (확정 후 워커가 채움)
+  generatedImage?: string; // M3 재생성 이미지 Blob URL (image-2)
+  regenError?: string; // 재생성 실패 사유(있으면)
   status: StepStatus; // M1 에선 경계 확정 여부 관리에만 사용
 }
 

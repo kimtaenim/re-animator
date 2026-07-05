@@ -45,6 +45,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const running = sourceStatus === "running";
   const castStatus = project.steps.cast.status;
   const castRunning = castStatus === "running";
+  const regenStatus = project.steps.regen.status;
+  const regenRunning = regenStatus === "running";
 
   // ── 분할/추출 진행 폴링 (워커 작업 중일 때만) ──────────────────────────────
   const poll = useCallback(async () => {
@@ -104,6 +106,33 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       clearTimeout(first);
     };
   }, [castRunning, pollCast]);
+
+  // ── 재생성(M3) 진행 폴링 ─────────────────────────────────────────────────────
+  const pollRegen = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/regen?projectId=${project.id}`, { cache: "no-store" });
+      const d = await r.json();
+      if (!d.ok) return;
+      setProgress(d.progress ?? "");
+      setProject((prev) => ({
+        ...prev,
+        scenes: d.scenes ?? prev.scenes,
+        steps: { ...prev.steps, regen: { ...prev.steps.regen, status: d.status, error: d.error } },
+      }));
+    } catch {
+      /* 다음 틱 재시도 */
+    }
+  }, [project.id]);
+
+  useEffect(() => {
+    if (!regenRunning) return;
+    const t = setInterval(pollRegen, 2500);
+    const first = setTimeout(pollRegen, 0);
+    return () => {
+      clearInterval(t);
+      clearTimeout(first);
+    };
+  }, [regenRunning, pollRegen]);
 
   // 누적 API 비용(₩) — 마운트 + 단계 변화(분할 완료 등) 때 갱신.
   useEffect(() => {
@@ -247,8 +276,30 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setProject((prev) => ({ ...prev, scenes: d.scenes }));
   }
 
+  async function runRegenJob() {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await fetch("/api/regen", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "재생성 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, regen: { ...prev.steps.regen, status: "running" } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "재생성 실패");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // 워커 작업 중지 — 워커 프로세스는 못 죽이지만 UI 가 '진행 중'에 갇히지 않게 단계를 되돌림.
-  async function cancelJob(step: "source" | "cast") {
+  async function cancelJob(step: "source" | "cast" | "regen") {
     try {
       const r = await fetch("/api/cancel", {
         method: "POST",
@@ -371,7 +422,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       {/* 단계 네비 (M1 은 1단계만 활성) */}
       <nav className="mb-6 flex gap-1 text-xs">
         {STEP_ORDER.map((k) => {
-          const active = k === "source" || (k === "cast" && approved);
+          const active = k === "source" || ((k === "cast" || k === "regen") && approved);
           return (
             <span
               key={k}
@@ -594,6 +645,92 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               )}
               <CastReview scenes={project.scenes} cast={project.cast ?? []} onSave={saveCast} />
             </>
+          )}
+        </section>
+      )}
+
+      {/* M3) 재생성 — 좌(원본) / 우(생성) */}
+      {approved && (
+        <section className="mb-6">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">
+              3. 재생성{" "}
+              <span className="font-normal text-[var(--muted)]">
+                — gpt-image-1, 병렬 · 원본→생성
+              </span>
+            </h2>
+            {regenStatus === "pending" || regenStatus === "error" ? (
+              <button
+                onClick={runRegenJob}
+                disabled={busy || regenRunning}
+                className="rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {regenRunning ? "생성 중…" : "이미지 생성"}
+              </button>
+            ) : (
+              <button
+                onClick={runRegenJob}
+                disabled={busy || regenRunning}
+                className="rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50"
+              >
+                다시 생성
+              </button>
+            )}
+          </div>
+
+          {regenRunning && (
+            <p className="mb-3 flex items-center gap-2 text-sm text-[var(--muted)]">
+              <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+              이미지 생성 중… {progress && <span className="opacity-70">{progress}</span>}
+              <button
+                onClick={() => cancelJob("regen")}
+                className="ml-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:border-[var(--danger)] hover:text-[var(--danger)]"
+              >
+                작업 중지
+              </button>
+            </p>
+          )}
+
+          {regenStatus === "error" && (
+            <p className="mb-3 rounded-md border border-[var(--danger)] bg-[var(--panel)] p-3 text-sm text-[var(--danger)]">
+              {project.steps.regen.error ?? "재생성 오류"}
+            </p>
+          )}
+
+          {(regenStatus === "review" || regenStatus === "approved" || regenRunning) && (
+            <div className="space-y-2">
+              {project.scenes
+                .filter((s) => s.originalImage && s.cut?.type !== "text")
+                .map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2"
+                  >
+                    <span className="w-10 shrink-0 text-center text-xs text-[var(--muted)]">
+                      컷 {s.order + 1}
+                    </span>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={s.originalImage}
+                      alt="원본"
+                      className="h-28 w-auto rounded border border-[var(--border)]"
+                    />
+                    <span className="shrink-0 text-[var(--muted)]">→</span>
+                    {s.generatedImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={s.generatedImage}
+                        alt="생성"
+                        className="glow-accent h-28 w-auto rounded border border-[var(--accent)]"
+                      />
+                    ) : (
+                      <div className="grid h-28 flex-1 place-items-center rounded border border-dashed border-[var(--border)] text-xs text-[var(--muted)]">
+                        {s.regenError ? `실패: ${s.regenError}` : regenRunning ? "생성 대기…" : "미생성"}
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </div>
           )}
         </section>
       )}
