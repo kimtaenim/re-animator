@@ -3,22 +3,29 @@ import { getProject, deleteProject, saveProject } from "@/lib/projectStore";
 
 export const runtime = "nodejs";
 
-// PATCH — 프로젝트 필드 수정(현재 name).
+// PATCH — 프로젝트 필드 수정(name, aspectRatio).
+const ASPECTS = new Set(["16:9", "9:16", "1:1"]);
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const body = await req.json().catch(() => ({}) as { name?: string });
+  const body = await req.json().catch(() => ({}) as { name?: string; aspectRatio?: string });
   const project = await getProject(id);
   if (!project) {
     return NextResponse.json({ ok: false, error: "프로젝트 없음" }, { status: 404 });
   }
+  let changed = false;
   if (typeof body.name === "string" && body.name.trim()) {
     project.name = body.name.trim();
-    await saveProject(project);
+    changed = true;
   }
-  return NextResponse.json({ ok: true, name: project.name });
+  if (typeof body.aspectRatio === "string" && ASPECTS.has(body.aspectRatio)) {
+    project.aspectRatio = body.aspectRatio as typeof project.aspectRatio;
+    changed = true;
+  }
+  if (changed) await saveProject(project);
+  return NextResponse.json({ ok: true, name: project.name, aspectRatio: project.aspectRatio });
 }
 
 // GET — 프로젝트 전체 상태(Studio 폴링용).

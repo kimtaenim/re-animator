@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
-import { type Project, type StepKind, type Character, STEP_ORDER } from "@/lib/types";
+import {
+  type Project,
+  type StepKind,
+  type Character,
+  type CutOntology,
+  STEP_ORDER,
+} from "@/lib/types";
+import { blankCut } from "@/lib/ontology";
 import BoundaryEditor, { type SavedRegion } from "./BoundaryEditor";
 import CastReview from "./CastReview";
 
@@ -16,6 +23,7 @@ const STEP_LABEL: Record<StepKind, string> = {
 
 export default function Studio({ initialProject }: { initialProject: Project }) {
   const [project, setProject] = useState<Project>(initialProject);
+  const projectRef = useRef(project);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
@@ -133,6 +141,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       clearTimeout(first);
     };
   }, [regenRunning, pollRegen]);
+
+  // projectRef 를 최신 project 로 동기화(자동저장 디바운스에서 최신 cut 읽기용).
+  useEffect(() => {
+    projectRef.current = project;
+  }, [project]);
 
   // 누적 API 비용(₩) — 마운트 + 단계 변화(분할 완료 등) 때 갱신.
   useEffect(() => {
@@ -296,6 +309,37 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     } finally {
       setBusy(false);
     }
+  }
+
+  // 컷 내용 편집(묘사·대사 등) → 로컬 반영 + 700ms 디바운스 자동 저장(단일 Project 라 앞단계 싱크).
+  const cutSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  function updateCut(sceneId: string, patch: Partial<CutOntology>) {
+    setProject((prev) => ({
+      ...prev,
+      scenes: prev.scenes.map((s) =>
+        s.id === sceneId ? { ...s, cut: { ...(s.cut ?? blankCut()), ...patch } } : s
+      ),
+    }));
+    clearTimeout(cutSaveTimers.current[sceneId]);
+    cutSaveTimers.current[sceneId] = setTimeout(() => {
+      const cut = projectRef.current.scenes.find((s) => s.id === sceneId)?.cut;
+      if (!cut) return;
+      fetch("/api/cut", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneId, cut }),
+      }).catch(() => {});
+    }, 700);
+  }
+
+  // 출력 비율 선택(세로/가로/1:1) — 모든 컷이 이 비율로 일관되게 생성됨.
+  async function setAspect(aspectRatio: "16:9" | "9:16" | "1:1") {
+    setProject((prev) => ({ ...prev, aspectRatio }));
+    await fetch(`/api/project/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ aspectRatio }),
+    }).catch(() => {});
   }
 
   // 컷 하나만 생성/다시 생성 — 배치 전에 싸게 충실도 테스트, 마음에 안 드는 컷 재생성.
@@ -673,12 +717,34 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       {approved && (
         <section className="mb-6">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">
-              3. 재생성{" "}
-              <span className="font-normal text-[var(--muted)]">
-                — gpt-image-1, 병렬 · 원본→생성
-              </span>
-            </h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-sm font-semibold">
+                3. 재생성{" "}
+                <span className="font-normal text-[var(--muted)]">— gpt-image-1, 병렬</span>
+              </h2>
+              <div className="flex items-center gap-1 text-xs">
+                <span className="text-[var(--muted)]">출력 비율:</span>
+                {(
+                  [
+                    { v: "9:16", t: "세로" },
+                    { v: "16:9", t: "가로" },
+                    { v: "1:1", t: "정사각" },
+                  ] as const
+                ).map((o) => (
+                  <button
+                    key={o.v}
+                    onClick={() => setAspect(o.v)}
+                    className={`rounded border px-2 py-0.5 ${
+                      project.aspectRatio === o.v
+                        ? "border-[var(--accent)] text-[var(--accent)]"
+                        : "border-[var(--border)] text-[var(--muted)]"
+                    }`}
+                  >
+                    {o.t} {o.v}
+                  </button>
+                ))}
+              </div>
+            </div>
             {regenStatus === "pending" || regenStatus === "error" ? (
               <button
                 onClick={runRegenJob}
@@ -721,43 +787,68 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             <div className="space-y-2">
               {project.scenes
                 .filter((s) => s.originalImage && s.cut?.type !== "text")
-                .map((s) => (
-                  <div
-                    key={s.id}
-                    className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2"
-                  >
-                    <span className="w-10 shrink-0 text-center text-xs text-[var(--muted)]">
-                      컷 {s.order + 1}
-                    </span>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={s.originalImage}
-                      alt="원본"
-                      className="h-28 w-auto rounded border border-[var(--border)]"
-                    />
-                    <span className="shrink-0 text-[var(--muted)]">→</span>
-                    {s.generatedImage ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={s.generatedImage}
-                        alt="생성"
-                        className="glow-accent h-28 w-auto rounded border border-[var(--accent)]"
-                      />
-                    ) : (
-                      <div className="grid h-28 flex-1 place-items-center rounded border border-dashed border-[var(--border)] text-xs text-[var(--muted)]">
-                        {s.regenError ? `실패: ${s.regenError}` : regenRunning ? "생성 대기…" : "미생성"}
-                      </div>
-                    )}
-                    <button
-                      onClick={() => regenOne(s.id)}
-                      disabled={busy || regenRunning}
-                      className="ml-auto shrink-0 rounded border border-[var(--border)] px-2 py-1 text-xs disabled:opacity-40"
-                      title="이 컷만 생성(테스트·재생성)"
+                .map((s) => {
+                  const speaker = project.cast?.find((c) => c.id === s.cut?.speakerId)?.label;
+                  return (
+                    <div
+                      key={s.id}
+                      className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2"
                     >
-                      {s.generatedImage ? "다시" : "생성"}
-                    </button>
-                  </div>
-                ))}
+                      <span className="w-7 shrink-0 pt-10 text-center text-xs text-[var(--muted)]">
+                        {s.order + 1}
+                      </span>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={s.originalImage}
+                        alt="원본"
+                        className="h-28 w-auto shrink-0 rounded border border-[var(--border)]"
+                      />
+                      <span className="shrink-0 pt-11 text-[var(--muted)]">→</span>
+                      {s.generatedImage ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={s.generatedImage}
+                          alt="생성"
+                          className="glow-accent h-28 w-auto shrink-0 rounded border border-[var(--accent)]"
+                        />
+                      ) : (
+                        <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] px-1 text-center text-[10px] text-[var(--muted)]">
+                          {s.regenError
+                            ? `실패: ${s.regenError}`
+                            : regenRunning
+                              ? "생성 대기…"
+                              : "미생성"}
+                        </div>
+                      )}
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <textarea
+                          value={s.cut?.description ?? ""}
+                          onChange={(e) => updateCut(s.id, { description: e.target.value })}
+                          placeholder="프롬프트(그림 내용) — 재생성에 그대로 들어감"
+                          rows={2}
+                          className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px] leading-tight"
+                        />
+                        <input
+                          value={s.cut?.dialogue ?? ""}
+                          onChange={(e) => updateCut(s.id, { dialogue: e.target.value })}
+                          placeholder="대사 (이 칸에 들어갈 자막·더빙)"
+                          className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px]"
+                        />
+                        <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
+                          {speaker && <span>화자: {speaker}</span>}
+                          <button
+                            onClick={() => regenOne(s.id)}
+                            disabled={busy || regenRunning}
+                            className="ml-auto rounded border border-[var(--border)] px-2 py-0.5 disabled:opacity-40"
+                            title="이 컷만 생성(테스트·재생성)"
+                          >
+                            {s.generatedImage ? "다시 생성" : "생성"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           )}
         </section>
