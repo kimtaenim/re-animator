@@ -181,34 +181,48 @@ async function vlmSplitCut(canvas, fileBuffers, region, key, model, log, splitPr
   }
 }
 
-// VLM 판정 적용: absorb(앞 컷 흡수) / split(VLM 위치-분할) / 나머지 그대로.
-async function applyDecision(candidates, absorbSet, splitSet, ctx) {
-  const { canvas, fileBuffers, key, model, log } = ctx;
-  const splitTotal = [...splitSet].filter((n) => n >= 1 && n <= candidates.length).length;
+// VLM 판정 적용: absorb(조각 흡수) → 병합. 그다음 "키 큰 컷"은 per-cut 고해상도로
+// VLM 에 나눌지·어디서 물어봄(대조표 flag 보다 신뢰↑). VLM 이 위치 주면 실제 경계로 스냅.
+async function applyDecision(candidates, absorbSet, ctx) {
+  const { canvas, fileBuffers, key, model, log, splitPrompt } = ctx;
+
+  // 1) absorb 적용 → 병합.
+  const merged = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
+    if (absorbSet.has(i + 1) && merged.length > 0) {
+      merged[merged.length - 1].yEnd = c.yEnd;
+    } else {
+      merged.push({ yStart: c.yStart, yEnd: c.yEnd });
+    }
+  }
+
+  // 2) 키 큰 컷은 분할 검사(중앙값 1.5배 또는 900px 초과). 서사 순간이 여럿이면 나뉜다.
+  const hs = merged.map((r) => r.yEnd - r.yStart).sort((a, b) => a - b);
+  const median = hs[Math.floor(hs.length / 2)] || 500;
+  const threshold = Math.max(900, Math.round(median * 1.5));
+  const tallCount = merged.filter((r) => r.yEnd - r.yStart > threshold).length;
+
   const out = [];
   let splitCost = 0;
   let done = 0;
-  for (let i = 0; i < candidates.length; i++) {
-    const c = candidates[i];
-    const n = i + 1;
-    if (absorbSet.has(n) && out.length > 0) {
-      out[out.length - 1].yEnd = c.yEnd;
-    } else if (splitSet.has(n)) {
+  for (const r of merged) {
+    if (r.yEnd - r.yStart > threshold) {
       done++;
-      await log?.(`컷 분할 판정 ${done}/${splitTotal}…`);
+      await log?.(`컷 분할 검사 ${done}/${tallCount}…`);
       const { subs, cost } = await vlmSplitCut(
         canvas,
         fileBuffers,
-        c,
+        r,
         key,
         model,
         log,
-        ctx.splitPrompt
+        splitPrompt
       );
       splitCost += cost;
-      for (const s of subs) out.push({ yStart: s.yStart, yEnd: s.yEnd });
+      for (const s of subs) out.push(s);
     } else {
-      out.push({ yStart: c.yStart, yEnd: c.yEnd });
+      out.push(r);
     }
   }
   return { regions: out.length ? out : candidates, splitCost };
@@ -271,13 +285,14 @@ export async function groupScenes(
     await log?.(`VLM 응답: ${txt.slice(0, 220)}`);
     const parsed = JSON.parse(txt);
     const absorbSet = new Set((parsed.absorb || []).map((x) => Number(x)));
-    const splitSet = new Set((parsed.split || []).map((x) => Number(x)));
-    const { regions: merged, splitCost } = await applyDecision(
-      candidates,
-      absorbSet,
-      splitSet,
-      { canvas, fileBuffers, key, model: MODEL, log, splitPrompt }
-    );
+    const { regions: merged, splitCost } = await applyDecision(candidates, absorbSet, {
+      canvas,
+      fileBuffers,
+      key,
+      model: MODEL,
+      log,
+      splitPrompt,
+    });
     const costUsd = vlmCostUsd(MODEL, d.usage) + splitCost;
     await recordCost({
       projectId,
@@ -288,7 +303,7 @@ export async function groupScenes(
     });
     await log?.(
       `VLM 판정: 후보 ${candidates.length} → 최종 ${merged.length} ` +
-        `(흡수 ${absorbSet.size}, 분할지목 ${splitSet.size}, ~$${costUsd.toFixed(4)})`
+        `(흡수 ${absorbSet.size}, ~$${costUsd.toFixed(4)})`
     );
     return merged;
   } catch (e) {
