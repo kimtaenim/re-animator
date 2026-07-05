@@ -13,6 +13,13 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import ffmpegStatic from "ffmpeg-static";
+import ffprobeStatic from "ffprobe-static";
+
+// Render node 런타임엔 시스템 ffmpeg 가 없어서 npm 정적 바이너리를 쓴다(설치가 심어줌).
+// env 로 override 가능, 최후 폴백은 PATH 의 ffmpeg/ffprobe.
+const FFMPEG = process.env.FFMPEG_PATH || ffmpegStatic || "ffmpeg";
+const FFPROBE = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
 
 const FADE = Number(process.env.COMPOSE_FADE_SEC || 0.5);
 const FPS = Number(process.env.COMPOSE_FPS || 30);
@@ -41,7 +48,7 @@ function run(cmd, args, timeoutMs = 180_000) {
 
 function probeDuration(file) {
   return new Promise((res) => {
-    const p = spawn("ffprobe", [
+    const p = spawn(FFPROBE, [
       "-v", "error", "-show_entries", "format=duration",
       "-of", "default=nw=1:nk=1", file,
     ]);
@@ -107,7 +114,7 @@ export async function runCompose(projectId) {
       if (fadeOut) vf.push(`fade=t=out:st=${Math.max(0, dur - FADE).toFixed(2)}:d=${FADE}`);
 
       const out = join(dir, `n${i}.mp4`);
-      await run("ffmpeg", [
+      await run(FFMPEG, [
         "-y", "-i", raw,
         "-vf", vf.join(","),
         "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",

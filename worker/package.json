@@ -11,6 +11,8 @@
   "dependencies": {
     "@upstash/redis": "^1.37.0",
     "@vercel/blob": "^2.3.3",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
     "sharp": "^0.34.1"
   }
 }
