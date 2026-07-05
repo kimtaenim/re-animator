@@ -50,6 +50,7 @@ const TYPE_COLOR: Record<string, string> = {
   action: "#e0574d",
   object: "#e0a021",
   background_crowd: "#12b886",
+  transition: "#a855f7",
   text: "#8a8f98",
 };
 

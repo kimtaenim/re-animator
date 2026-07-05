@@ -68,7 +68,8 @@ export type CutType =
   | "person" // 인물 (중심·반응·인물들 통합)
   | "action" // 액션
   | "object" // 사물 (타이틀·다이어그램·글씨그림 포함)
-  | "background_crowd" // 배경 및 군중 (공간·군중·전환)
+  | "background_crowd" // 배경 및 군중 (공간·군중)
+  | "transition" // 장면 전환 (흐르는 연출·효과)
   | "text"; // 말풍선·자막·효과음 (오버레이 → 자동 제거)
 
 export type TextKind = "dialogue" | "caption" | "sfx";

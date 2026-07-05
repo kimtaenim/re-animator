@@ -91,9 +91,9 @@ const TYPE_SYN = {
   infographic: "object", 인포그래픽: "object",
   crowd_space: "background_crowd", crowd: "background_crowd", 군중: "background_crowd",
   background: "background_crowd", 배경: "background_crowd", setting: "background_crowd",
-  공간: "background_crowd", 장소: "background_crowd", scenery: "background_crowd",
-  풍경: "background_crowd", transition: "background_crowd", 장면연결: "background_crowd",
-  "장면 연결": "background_crowd", 전환: "background_crowd",
+  공간: "background_crowd", 장소: "background_crowd", scenery: "background_crowd", 풍경: "background_crowd",
+  transition: "transition", 장면전환: "transition", "장면 전환": "transition",
+  전환: "transition", 장면연결: "transition", "장면 연결": "transition",
   text: "text", speech: "text", dialogue: "text", 말풍선: "text", 자막: "text",
   caption: "text", narration: "text", 나레이션: "text", sfx: "text", 효과음: "text", 텍스트: "text",
 };
