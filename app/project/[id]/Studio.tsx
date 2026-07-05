@@ -42,6 +42,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [progressLog, setProgressLog] = useState<string[]>([]);
   const [srcOpen, setSrcOpen] = useState<boolean | null>(null); // null=기본(승인되면 접힘)
   const [regenOpen, setRegenOpen] = useState(true); // 3단계 컷 목록 접기
+  const [vidPending, setVidPending] = useState<Set<string>>(() => new Set()); // 영상 생성 중인 컷
   const [genModel, setGenModel] = useState("gpt-image-2"); // 재생성 모델(비교용)
   const [costKrw, setCostKrw] = useState<number | null>(null);
   const [editingName, setEditingName] = useState(false);
@@ -176,20 +177,29 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         scenes: d.scenes ?? prev.scenes,
         steps: { ...prev.steps, scene: { ...prev.steps.scene, status: d.status, error: d.error } },
       }));
+      // 완료(영상 있음)·실패한 컷은 '생성 중'에서 해제 → 그 컷 버튼 다시 활성.
+      const resolved = new Set(
+        (d.scenes ?? [])
+          .filter((s: { videoUrl?: string; videoError?: string }) => s.videoUrl || s.videoError)
+          .map((s: { id: string }) => s.id)
+      );
+      setVidPending((prev) => new Set([...prev].filter((id) => !resolved.has(id))));
     } catch {
       /* 다음 틱 재시도 */
     }
   }, [project.id]);
 
+  // 진행 중이거나 대기 중인 컷이 하나라도 있으면 폴링(여러 잡이 큐로 쌓여도 계속 반영).
+  const scenePolling = sceneRunning || vidPending.size > 0;
   useEffect(() => {
-    if (!sceneRunning) return;
+    if (!scenePolling) return;
     const t = setInterval(pollScene, 3000);
     const first = setTimeout(pollScene, 0);
     return () => {
       clearInterval(t);
       clearTimeout(first);
     };
-  }, [sceneRunning, pollScene]);
+  }, [scenePolling, pollScene]);
 
   // projectRef 를 최신 project 로 동기화(자동저장 디바운스에서 최신 cut 읽기용).
   useEffect(() => {
@@ -569,7 +579,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       setError(e instanceof Error ? e.message : "영상 실패");
     }
   }
-  const videoOne = (sceneId: string) => runVideoJob([sceneId]);
+  const videoOne = (sceneId: string) => {
+    setVidPending((prev) => new Set(prev).add(sceneId));
+    runVideoJob([sceneId]);
+  };
 
   // 워커 작업 중지 — 워커 프로세스는 못 죽이지만 UI 가 '진행 중'에 갇히지 않게 단계를 되돌림.
   async function cancelJob(step: "source" | "cast" | "regen" | "scene") {
@@ -1219,7 +1232,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               — 재생성 컷 {project.scenes.filter((s) => s.generatedImage).length}개 · Grok I2V(초당 $0.05)
             </span>
             <button
-              onClick={() => runVideoJob()}
+              onClick={() => {
+                const ids = project.scenes.filter((s) => s.generatedImage).map((s) => s.id);
+                setVidPending((prev) => new Set([...prev, ...ids]));
+                runVideoJob();
+              }}
               disabled={busy || sceneRunning}
               className="ml-auto rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50"
             >
@@ -1312,8 +1329,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] px-1 text-center text-[10px] text-[var(--muted)]">
                         {s.videoError
                           ? `실패: ${s.videoError}`
-                          : sceneRunning
-                            ? "생성 대기…"
+                          : vidPending.has(s.id)
+                            ? "생성 중…"
                             : "미생성"}
                       </div>
                     )}
@@ -1321,11 +1338,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       <div className="flex flex-wrap items-center gap-2">
                         <button
                           onClick={() => videoOne(s.id)}
-                          disabled={busy || sceneRunning}
+                          disabled={busy || vidPending.has(s.id)}
                           className="rounded bg-[var(--accent)] px-3 py-0.5 font-medium text-white disabled:opacity-40"
                           title="이 컷 이미지로 Grok 동영상 생성"
                         >
-                          {s.videoUrl ? "🎬 다시" : "🎬 동영상"}
+                          {vidPending.has(s.id) ? "생성 중…" : s.videoUrl ? "🎬 다시" : "🎬 동영상"}
                         </button>
                         <div
                           className="flex items-center gap-1 text-[var(--muted)]"
