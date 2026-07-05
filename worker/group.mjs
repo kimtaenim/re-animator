@@ -124,6 +124,22 @@ export function snapTo(bness, yPos, win) {
   return bs >= 22 ? best : yPos;
 }
 
+// 엄격 스냅: ±win 안에 '진짜' 경계(거터/색전환)가 있을 때만 그 y 를, 없으면 null.
+// → VLM 이 위치를 제안해도 실제 경계가 없으면 자르지 않는다(연속 그림·인물 몸 관통 금지).
+export function snapStrict(bness, yPos, win, minB = 26) {
+  let best = yPos;
+  let bs = -1;
+  const lo = Math.max(1, yPos - win);
+  const hi = Math.min(bness.length - 1, yPos + win);
+  for (let y = lo; y <= hi; y++) {
+    if (bness[y] > bs) {
+      bs = bness[y];
+      best = y;
+    }
+  }
+  return bs >= minB ? best : null;
+}
+
 async function vlmSplitCut(canvas, fileBuffers, region, key, model, log, splitPrompt) {
   const png = await extractRegion(canvas, fileBuffers, region.yStart, region.yEnd);
   const img = await sharp(png).resize({ width: 340 }).png().toBuffer();
@@ -161,12 +177,15 @@ async function vlmSplitCut(canvas, fileBuffers, region, key, model, log, splitPr
       .sort((a, b) => a - b);
     const cost = vlmCostUsd(model, d.usage);
     if (!fr.length) return { subs: [region], cost };
-    // VLM 비율 위치를 실제 패널 경계로 스냅(픽셀 정확도). ±6% 창에서 가장 뚜렷한 경계로.
+    // VLM 비율 위치를 실제 패널 경계로 스냅(픽셀 정확도). ±6% 창에서 '진짜' 경계로만.
+    // 경계가 없으면(연속 그림·인물 몸) 그 컷은 자르지 않는다 → 몸 관통 물리적 차단.
     const bness = await computeBoundaryness(png);
     const win = Math.max(20, Math.round(H * 0.06));
     const positions = fr
-      .map((f) => snapTo(bness, Math.round(f * H), win))
+      .map((f) => snapStrict(bness, Math.round(f * H), win))
+      .filter((v) => v != null)
       .sort((a, b) => a - b);
+    if (!positions.length) return { subs: [region], cost };
     const ys = [0, ...positions, H];
     const subs = [];
     for (let i = 0; i < ys.length - 1; i++) {
@@ -226,6 +245,44 @@ async function applyDecision(candidates, absorbSet, ctx) {
     }
   }
   return { regions: out.length ? out : candidates, splitCost };
+}
+
+// 거터-우선 파이프라인용: 병합(absorb) 없이, '키 큰' 거터-없는 구간만 VLM 이
+// 여러 장면인지 판정 → 실제 경계로 엄격 스냅해 분할. 경계 없으면 그대로 둔다.
+// 알고리즘 거터 컷의 픽셀 정확도를 유지하면서, 붙은 스택 패널만 추가로 나눈다.
+export async function splitTallRegions(canvas, fileBuffers, candidates, key, model, log, projectId) {
+  if (!key || !candidates.length) return candidates;
+  const P = loadPrompts();
+  const splitPrompt = `${P.cut_definition}\n\n${P.split_task}`;
+  const hs = candidates.map((r) => r.yEnd - r.yStart).sort((a, b) => a - b);
+  const median = hs[Math.floor(hs.length / 2)] || 500;
+  const threshold = Math.max(900, Math.round(median * 1.5));
+  const tallCount = candidates.filter((r) => r.yEnd - r.yStart > threshold).length;
+  const out = [];
+  let cost = 0;
+  let done = 0;
+  for (const r of candidates) {
+    if (r.yEnd - r.yStart > threshold) {
+      done++;
+      await log?.(`긴 구간 분할 검사 ${done}/${tallCount}…`);
+      const { subs, cost: c } = await vlmSplitCut(canvas, fileBuffers, r, key, model, log, splitPrompt);
+      cost += c;
+      for (const s of subs) out.push(s);
+    } else {
+      out.push(r);
+    }
+  }
+  try {
+    await recordCost({
+      projectId,
+      vendor: "openai",
+      model,
+      costUsd: cost,
+      meta: { kind: "tall-split", tall: tallCount, before: candidates.length, after: out.length },
+    });
+  } catch {}
+  await log?.(`분할 검사: 긴 구간 ${tallCount}개 → 컷 ${out.length}개 (~$${cost.toFixed(4)})`);
+  return out;
 }
 
 export async function groupScenes(

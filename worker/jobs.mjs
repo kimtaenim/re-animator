@@ -9,7 +9,7 @@ import { getProject, saveProject, logProgress, resetProgress } from "./store.mjs
 import { computeRowProfile, extractRegion, trimBox } from "./imaging.mjs";
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
-import { detectScenesVLM } from "./detect-vlm.mjs";
+import { splitTallRegions } from "./group.mjs";
 import { loadSplitConfig } from "./config.mjs";
 
 async function download(url) {
@@ -62,25 +62,26 @@ export async function runSplit(projectId) {
     acc += pr.length;
   }
 
-  // VLM 이 장면 영역(박스)을 직접 판정. 키 없거나 실패 시 알고리즘 폴백.
+  // 1) 어디서 자를지 = 알고리즘. 실제 평탄 행(패널 사이 거터)에서만 자른다.
+  //    → 인물 몸(평탄하지 않음)을 물리적으로 못 자르고, 거터 없는 패널을 못 쪼갠다.
+  await log("경계 검출(실제 거터)…");
+  let regions = detectRegions(global, cfg).map((c) => ({ yStart: c.yStart, yEnd: c.yEnd }));
+  await log(`거터 컷 ${regions.length}개`);
+
+  // 2) 무엇이 장면인지 = VLM. 거터 없는 '키 큰' 구간만 여러 장면인지 판정하고,
+  //    그 위치도 실제 경계로 엄격 스냅 — 진짜 경계 없으면 안 자른다(연속 그림·몸 보호).
   const key = process.env.OPENAI_API_KEY;
   const VLM_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
-  let regions = null;
   if (key) {
-    await log("VLM 장면 영역 검출…");
     try {
-      regions = await detectScenesVLM(canvas, buffers, key, VLM_MODEL, log, projectId);
+      regions = await splitTallRegions(canvas, buffers, regions, key, VLM_MODEL, log, projectId);
     } catch (e) {
-      await log(`VLM 검출 실패(알고리즘 폴백): ${e?.message ?? e}`);
+      await log(`분할 검사 실패(거터 컷 유지): ${e?.message ?? e}`);
     }
   }
-  if (!regions || !regions.length) {
-    await log("경계 검출(알고리즘)…");
-    const candidates = detectRegions(global, cfg);
-    regions = candidates.map((c) => ({ yStart: c.yStart, yEnd: c.yEnd, xStart: 0, xEnd: refWidth }));
-  }
 
-  // 여백 트림: 각 박스를 그려진 내용에 4변으로 딱 조인다(검은/단색/그라데이션 여백 제거).
+  // 3) 여백 트림: 각 박스를 그려진 내용에 4변으로 딱 조인다(검은/단색/그라데이션 여백 제거).
+  regions = regions.map((r) => ({ yStart: r.yStart, yEnd: r.yEnd, xStart: 0, xEnd: refWidth }));
   await log(`장면 ${regions.length}개 여백 트림…`);
   const trimmed = [];
   for (let i = 0; i < regions.length; i++) {
@@ -90,7 +91,7 @@ export async function runSplit(projectId) {
     let box = { yStart: r.yStart, yEnd: r.yEnd, xStart: x0, xEnd: x1 };
     try {
       const png = await extractRegion(canvas, buffers, r.yStart, r.yEnd, x0, x1);
-      const t = await trimBox(png, cfg.flatStdThreshold);
+      const t = await trimBox(png);
       const ny0 = r.yStart + t.top;
       const ny1 = r.yStart + t.bottom;
       const nx0 = x0 + t.left;

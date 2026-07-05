@@ -64,43 +64,40 @@ export async function computeSideCrop(regionPng, flatStd = 10) {
   return { xStart, xEnd };
 }
 
-// 박스 PNG의 4변에서 "평탄한 여백"(검은/흰/단색/그라데이션)을 트림 → 그려진 내용에 딱 맞게.
-// 반환: 박스 내부 오프셋 { top, bottom, left, right }.
-export async function trimBox(png, flatStd = 11) {
+// 박스 PNG의 4변에서 "내용 없는 여백"을 트림 → 그려진 내용에 딱 맞게.
+// 판정: '그려진 경계'(인접 픽셀 밝기 급변)의 개수. 단색·그라데이션 배경은 급변이
+// 없어(부드러움) 트림되고, 그림 선(급변 많음)은 내용으로 남는다. std 방식과 달리
+// 세로/가로 그라데이션 여백도 잡는다. 반환: 박스 내부 오프셋 { top, bottom, left, right }.
+export async function trimBox(png) {
   const { data, info } = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true });
   const W = info.width;
   const H = info.height;
-  const rowStd = (y) => {
-    let s = 0;
-    let s2 = 0;
-    const o = y * W;
-    for (let x = 0; x < W; x++) {
-      const v = data[o + x];
-      s += v;
-      s2 += v * v;
+  const STRONG = 12; // 인접 픽셀 밝기 차 ≥ 이 값이면 '그려진 경계'(부드러운 배경은 미달)
+  const MINR = Math.max(4, Math.round(H * 0.02)); // 열이 내용이려면 이만큼 행에서 경계 필요
+  const MINC = Math.max(4, Math.round(W * 0.02)); // 행이 내용이려면 이만큼 열에서 경계 필요
+  const colContent = (x) => {
+    let c = 0;
+    for (let y = 1; y < H; y++) {
+      if (Math.abs(data[y * W + x] - data[(y - 1) * W + x]) > STRONG && ++c >= MINR) return true;
     }
-    const m = s / W;
-    return Math.sqrt(Math.max(0, s2 / W - m * m));
+    return false;
   };
-  const colStd = (x) => {
-    let s = 0;
-    let s2 = 0;
-    for (let y = 0; y < H; y++) {
-      const v = data[y * W + x];
-      s += v;
-      s2 += v * v;
+  const rowContent = (y) => {
+    let c = 0;
+    const o = y * W;
+    for (let x = 1; x < W; x++) {
+      if (Math.abs(data[o + x] - data[o + x - 1]) > STRONG && ++c >= MINC) return true;
     }
-    const m = s / H;
-    return Math.sqrt(Math.max(0, s2 / H - m * m));
+    return false;
   };
   let top = 0;
-  while (top < H && rowStd(top) < flatStd) top++;
+  while (top < H && !rowContent(top)) top++;
   let bottom = H;
-  while (bottom > top && rowStd(bottom - 1) < flatStd) bottom--;
+  while (bottom > top && !rowContent(bottom - 1)) bottom--;
   let left = 0;
-  while (left < W && colStd(left) < flatStd) left++;
+  while (left < W && !colContent(left)) left++;
   let right = W;
-  while (right > left && colStd(right - 1) < flatStd) right--;
+  while (right > left && !colContent(right - 1)) right--;
   if (bottom - top < 30 || right - left < 30) return { top: 0, bottom: H, left: 0, right: W };
   return { top, bottom, left, right };
 }
