@@ -1515,9 +1515,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         </div>
                         <label
                           className="flex items-center gap-1 text-[var(--muted)]"
-                          title="이 컷 끝의 전환(합성 때 적용)"
+                          title="이 컷과 다음 컷 사이 전환. 개별 컷엔 안 보이고 5단계 '영상 묶기' 결과에서 적용됩니다."
                         >
-                          전환
+                          뒤 전환
                           <select
                             value={s.cut?.transition ?? "none"}
                             onChange={(e) => updateCut(s.id, { transition: e.target.value })}

@@ -114,8 +114,11 @@ export async function runCompose(projectId) {
       const raw = join(dir, `raw${i}.mp4`);
       await download(s.videoUrl, raw);
       const dur = (await probeDuration(raw)) || 3;
-      const fadeOut = FADES_OUT.has(s.cut?.transition); // 이 컷 끝
-      const fadeIn = FADES_IN.has(scenes[i - 1]?.cut?.transition); // 앞 컷의 전환 → 이 컷 시작
+      const fadeOut = FADES_OUT.has(s.cut?.transition); // 이 컷 끝 전환
+      // 이 컷 시작 페이드인: 앞 컷의 전환이 인/암전/디졸브면. 첫 컷은 자기 전환이 페이드인이면(인트로).
+      const fadeIn =
+        FADES_IN.has(scenes[i - 1]?.cut?.transition) ||
+        (i === 0 && s.cut?.transition === "fadein");
 
       const vf = [
         `scale=${W}:${H}:force_original_aspect_ratio=decrease`,
