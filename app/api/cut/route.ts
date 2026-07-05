@@ -62,6 +62,12 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.durationSec === "number" && r.durationSec > 0) {
     c.durationSec = Math.max(0.5, Math.min(15, Math.round(r.durationSec * 2) / 2)); // 0.5초 단위
   }
+  if (
+    typeof r.transition === "string" &&
+    ["none", "fadeout", "fadein", "black", "dissolve"].includes(r.transition)
+  ) {
+    c.transition = r.transition;
+  }
   c.confirmed = r.confirmed === true;
   return c;
 }

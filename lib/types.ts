@@ -105,6 +105,7 @@ export interface CutOntology {
   promptDraft: string; // image-2 재생성용 프롬프트 초안(영문)
   motion: string; // I2V 모션 힌트(후속)
   durationSec?: number; // 이 컷 영상/씬 길이(초) 사람 지정. 없으면 대사·타입으로 추정.
+  transition?: string; // 이 컷 끝의 전환(합성 시): none/fadeout/fadein/black/dissolve
   confirmed: boolean; // 사람이 G1 에서 타입 확정했는지
 }
 

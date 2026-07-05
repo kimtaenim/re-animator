@@ -33,6 +33,15 @@ const CAMERA_MOVES: [string, string, string][] = [
   ["static", "■ 고정", "Locked-off static camera, no camera movement — only very subtle ambient motion; the subject stays still."],
 ];
 
+// 컷 끝 전환(합성 시 적용). 값은 lib/types CutOntology.transition 과 /api/cut 화이트리스트와 일치.
+const TRANSITIONS: [string, string][] = [
+  ["none", "컷(즉시)"],
+  ["fadeout", "페이드아웃"],
+  ["fadein", "페이드인"],
+  ["black", "암전"],
+  ["dissolve", "디졸브(섞임)"],
+];
+
 export default function Studio({ initialProject }: { initialProject: Project }) {
   const [project, setProject] = useState<Project>(initialProject);
   const projectRef = useRef(project);
@@ -1375,6 +1384,23 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             <span className="text-[10px] opacity-50">자동</span>
                           )}
                         </div>
+                        <label
+                          className="flex items-center gap-1 text-[var(--muted)]"
+                          title="이 컷 끝의 전환(합성 때 적용)"
+                        >
+                          전환
+                          <select
+                            value={s.cut?.transition ?? "none"}
+                            onChange={(e) => updateCut(s.id, { transition: e.target.value })}
+                            className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
+                          >
+                            {TRANSITIONS.map(([v, t]) => (
+                              <option key={v} value={v}>
+                                {t}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                         <span className="text-[var(--muted)]">
                           화자: {speakerLabel}
                           {voiceLabel ? ` · 목소리: ${voiceLabel}` : " · 목소리 미지정"}
