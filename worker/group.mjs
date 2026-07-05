@@ -247,6 +247,16 @@ async function applyDecision(candidates, absorbSet, ctx) {
   return { regions: out.length ? out : candidates, splitCost };
 }
 
+// 한 컷을 강제로 재분할(사용자 '분할' 버튼) — 크기 게이트 없이 VLM 에 물어 실제
+// 경계로만 스냅 분할. 경계 없으면 [원본] 그대로(인물 몸 관통 방지). subs 반환.
+export async function forceSplit(canvas, fileBuffers, region, key, model, log) {
+  if (!key) return [region];
+  const P = loadPrompts();
+  const splitPrompt = `${P.cut_definition}\n\n${P.split_task}`;
+  const { subs } = await vlmSplitCut(canvas, fileBuffers, region, key, model, log, splitPrompt);
+  return subs;
+}
+
 // 거터-우선 파이프라인용: 병합(absorb) 없이, '키 큰' 거터-없는 구간만 VLM 이
 // 여러 장면인지 판정 → 실제 경계로 엄격 스냅해 분할. 경계 없으면 그대로 둔다.
 // 알고리즘 거터 컷의 픽셀 정확도를 유지하면서, 붙은 스택 패널만 추가로 나눈다.

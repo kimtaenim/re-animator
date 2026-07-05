@@ -9,7 +9,7 @@ import { getProject, saveProject, logProgress, resetProgress } from "./store.mjs
 import { computeRowProfile, extractRegion, trimBox } from "./imaging.mjs";
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
-import { splitTallRegions } from "./group.mjs";
+import { splitTallRegions, forceSplit } from "./group.mjs";
 import { classifyScenes } from "./classify.mjs";
 import { classifyCast } from "./cast.mjs";
 
@@ -193,6 +193,125 @@ export async function runExtract(projectId) {
   };
   await saveProject(p2);
   return scenes.length;
+}
+
+// ── resplit: 한 컷(order)을 다시 분할 → 서브컷으로 교체 → G1 재검수 ────────────
+export async function runResplit(projectId, payload) {
+  await resetProgress(projectId);
+  const log = async (m) => {
+    console.error("[resplit]", m);
+    await logProgress(projectId, m);
+  };
+
+  const order = Number(payload?.order);
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  if (!p.virtualCanvas) throw new Error("가상 캔버스가 없어요");
+  const canvas = p.virtualCanvas;
+  const scenes = (p.scenes ?? []).slice().sort((a, b) => a.order - b.order);
+  const target = scenes.find((s) => s.order === order) ?? scenes[order];
+  if (!target) throw new Error("재분할할 컷을 찾을 수 없어요");
+
+  const cfg = loadSplitConfig();
+  const files = sortedFiles(p);
+  await log(`소스 ${files.length}개 다운로드…`);
+  const buffers = [];
+  for (const f of files) buffers.push(await download(f.url));
+
+  // 전역 프로파일 → 대상 구간 슬라이스 → 더 민감한 거터 재검출.
+  await log("대상 구간 프로파일…");
+  const global = new Float32Array(canvas.totalHeight);
+  let acc = 0;
+  for (const buf of buffers) {
+    const { profile } = await computeRowProfile(buf, canvas.refWidth);
+    global.set(profile, acc);
+    acc += profile.length;
+  }
+  const y0 = Math.round(target.sourceRegion.yStart);
+  const y1 = Math.round(target.sourceRegion.yEnd);
+  const cfg2 = {
+    ...cfg,
+    minGapPx: Math.max(12, Math.round((cfg.minGapPx ?? 40) / 2)),
+    minSceneHeightPx: Math.max(30, Math.round((cfg.minSceneHeightPx ?? 60) / 2)),
+  };
+  let subs = detectRegions(global.subarray(y0, y1), cfg2).map((r) => ({
+    yStart: y0 + r.yStart,
+    yEnd: y0 + r.yEnd,
+  }));
+  if (subs.length === 0) subs = [{ yStart: y0, yEnd: y1 }];
+  await log(`거터 재검출 ${subs.length}개`);
+
+  // VLM 강제 분할(경계 있을 때만) — 거터로 못 나눈 붙은 장면도 나눔.
+  const key = process.env.OPENAI_API_KEY;
+  const VLM_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
+  if (key) {
+    const out = [];
+    for (const s of subs) {
+      try {
+        out.push(...(await forceSplit(canvas, buffers, s, key, VLM_MODEL, log)));
+      } catch (e) {
+        await log(`VLM 분할 실패(유지): ${e?.message ?? e}`);
+        out.push(s);
+      }
+    }
+    subs = out;
+  }
+
+  // 여백 트림(대상의 x 범위 상속).
+  const x0 = target.sourceRegion.xStart ?? 0;
+  const x1 = target.sourceRegion.xEnd ?? canvas.refWidth;
+  const trimmed = [];
+  for (const s of subs) {
+    let box = { yStart: s.yStart, yEnd: s.yEnd, xStart: x0, xEnd: x1 };
+    try {
+      const png = await extractRegion(canvas, buffers, s.yStart, s.yEnd, x0, x1);
+      const t = await trimBox(png);
+      const ny0 = s.yStart + t.top;
+      const ny1 = s.yStart + t.bottom;
+      const nx0 = x0 + t.left;
+      const nx1 = x0 + t.right;
+      if (ny1 - ny0 >= 40 && nx1 - nx0 >= 40) box = { yStart: ny0, yEnd: ny1, xStart: nx0, xEnd: nx1 };
+    } catch (e) {
+      await log(`트림 건너뜀: ${e?.message ?? e}`);
+    }
+    trimmed.push(box);
+  }
+  await log(`재분할 결과 ${trimmed.length}개`);
+
+  // 새 서브컷 분류.
+  let cuts = trimmed.map(() => null);
+  if (key) {
+    try {
+      cuts = await classifyScenes(canvas, buffers, trimmed, key, VLM_MODEL, log, projectId);
+    } catch (e) {
+      await log(`재분류 실패(미분류): ${e?.message ?? e}`);
+    }
+  }
+
+  const newScenes = trimmed.map((b, k) => ({
+    id: randomUUID(),
+    order: 0,
+    sourceRegion: b,
+    cut: cuts[k] ?? undefined,
+    status: "review",
+  }));
+
+  // 대상 컷을 새 서브컷으로 교체, 전체 정렬·order 재부여.
+  const p2 = await getProject(projectId);
+  if (!p2) throw new Error("프로젝트가 사라졌어요");
+  const kept = (p2.scenes ?? []).filter((s) => s.id !== target.id);
+  p2.scenes = [...kept, ...newScenes]
+    .sort((a, b) => a.sourceRegion.yStart - b.sourceRegion.yStart)
+    .map((s, i) => ({ ...s, order: i }));
+  p2.steps.source = {
+    ...p2.steps.source,
+    kind: "source",
+    status: "review",
+    error: undefined,
+    updatedAt: Date.now(),
+  };
+  await saveProject(p2);
+  return newScenes.length;
 }
 
 // ── cast(M2): 캐릭터 타입 컷을 VLM 이 인물별로 묶어 캐스트 생성 → G0 검수 ────────

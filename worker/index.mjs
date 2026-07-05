@@ -2,20 +2,20 @@
 // aninews 와 달리 이 워커가 입력단 픽셀 연산까지 담당(Vercel 서버리스 60초·메모리 회피).
 // Render/Railway/Fly 등 상시 서버에서 `node index.mjs`.
 import { popJob, updateJob, failStep } from "./store.mjs";
-import { runSplit, runExtract, runCast } from "./jobs.mjs";
+import { runSplit, runExtract, runCast, runResplit } from "./jobs.mjs";
 
 const POLL_MS = 3000;
 const JOB_TIMEOUT_MS = 8 * 60 * 1000; // 8분 넘게 매달리면 에러 처리
 
-// 우선순위: split(사용자가 대기 중인 첫 분할) → extract → cast(M2).
-const TYPES = ["split", "extract", "cast"];
-const JOB_FN = { split: runSplit, extract: runExtract, cast: runCast };
-const JOB_STEP = { split: "source", extract: "source", cast: "cast" };
+// 우선순위: split → resplit → extract → cast(M2).
+const TYPES = ["split", "resplit", "extract", "cast"];
+const JOB_FN = { split: runSplit, resplit: runResplit, extract: runExtract, cast: runCast };
+const JOB_STEP = { split: "source", resplit: "source", extract: "source", cast: "cast" };
 
 async function runJob(job) {
   const fn = JOB_FN[job.type] ?? runSplit;
   const count = await Promise.race([
-    fn(job.projectId),
+    fn(job.projectId, job.payload),
     new Promise((_, rej) =>
       setTimeout(
         () => rej(new Error(`${job.type} 타임아웃(8분) — 워커 매달림`)),

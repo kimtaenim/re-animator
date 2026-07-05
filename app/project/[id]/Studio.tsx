@@ -247,6 +247,30 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setProject((prev) => ({ ...prev, scenes: d.scenes }));
   }
 
+  // 한 컷 재분할 — 편집본을 먼저 저장(서버 order 일치)한 뒤 워커에 재분할 적재.
+  async function resplitCut(regions: SavedRegion[], index: number) {
+    setBusy(true);
+    setError("");
+    try {
+      await saveRegions(regions);
+      const r = await fetch("/api/resplit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, order: index }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "재분할 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, source: { ...prev.steps.source, status: "running" } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "재분할 실패");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function confirm() {
     setBusy(true);
     setError("");
@@ -478,6 +502,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             canvas={canvas}
             scenes={project.scenes}
             onSave={saveRegions}
+            onResplit={resplitCut}
           />
         </section>
       )}
