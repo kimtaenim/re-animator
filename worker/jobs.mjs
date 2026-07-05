@@ -50,9 +50,10 @@ function absorbTextCuts(scenes) {
       }
     }
     if (!best || !best.cut) continue;
+    // 흡수된 위·아래 나레이션/자막은 별도 narration 으로 → 이후 OCR(dialogue)이 안 덮음.
     const d = (s.cut.dialogue || "").trim();
     const fx = (s.cut.sfx || "").trim();
-    if (d) best.cut.dialogue = (best.cut.dialogue ? best.cut.dialogue + " " : "") + d;
+    if (d) best.cut.narration = (best.cut.narration ? best.cut.narration + "\n" : "") + d;
     if (fx) best.cut.sfx = (best.cut.sfx ? best.cut.sfx + " " : "") + fx;
   }
   return reals;
@@ -253,10 +254,8 @@ export async function runExtract(projectId) {
           try {
             const { dialogue, sfx, boxes } = await readCutText(pngById.get(s.id), key, OCR_MODEL);
             if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
-            // 흡수된 위·아래 나레이션/대사(absorb 로 붙은 것)를 OCR 이 덮어쓰지 않게 합친다.
-            const prev = (s.cut.dialogue || "").trim();
-            const now = (dialogue || "").trim();
-            s.cut.dialogue = prev && prev !== now ? [now, prev].filter(Boolean).join("\n") : now;
+            // ★ OCR(풀해상도)이 이 컷 대사의 유일 정답 — 저해상도 분류 대사를 깨끗이 덮어씀.
+            s.cut.dialogue = (dialogue || "").trim();
             if (sfx) s.cut.sfx = sfx;
             s.cut.textBoxes = boxes;
           } catch (e) {

@@ -22,6 +22,7 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.setting === "string") c.setting = r.setting.slice(0, 200);
   if (Array.isArray(r.objects)) c.objects = r.objects.map(String).slice(0, 8);
   if (typeof r.dialogue === "string") c.dialogue = r.dialogue.slice(0, 500);
+  if (typeof r.narration === "string") c.narration = r.narration.slice(0, 500);
   if (typeof r.speakerId === "string") c.speakerId = r.speakerId;
   if (Array.isArray(r.textBoxes)) {
     c.textBoxes = r.textBoxes

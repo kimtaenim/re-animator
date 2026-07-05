@@ -88,7 +88,8 @@ export interface CutOntology {
   characters: string[]; // 초점 인물 서술 → M2 캐스팅이 엔티티로 해소
   setting: string; // 장소/배경 한 줄
   objects: string[]; // 핵심 사물
-  dialogue: string; // 말풍선 텍스트(풀해상도 OCR로 정확히 → 자막/더빙)
+  dialogue: string; // 이 컷의 말풍선 대사(풀해상도 OCR이 유일 정답 = 덮어씀)
+  narration?: string; // 흡수된 위·아래 나레이션/자막(별도 — OCR 이 안 건드림)
   speakerId?: string | null; // 이 대사를 말하는 캐릭터 id(M2 화자 귀속). null=나레이션/미상
   textBoxes?: TextBox[]; // 글씨(말풍선·자막·효과음) 영역들(0~1 정규화) — 마스크 재생성용
   sfx: string; // 의성어/효과음
