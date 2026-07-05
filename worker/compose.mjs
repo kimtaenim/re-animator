@@ -13,13 +13,25 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import ffmpegStatic from "ffmpeg-static";
-import ffprobeStatic from "ffprobe-static";
 
-// Render node 런타임엔 시스템 ffmpeg 가 없어서 npm 정적 바이너리를 쓴다(설치가 심어줌).
-// env 로 override 가능, 최후 폴백은 PATH 의 ffmpeg/ffprobe.
-const FFMPEG = process.env.FFMPEG_PATH || ffmpegStatic || "ffmpeg";
-const FFPROBE = process.env.FFPROBE_PATH || ffprobeStatic?.path || "ffprobe";
+// ffmpeg 바이너리 경로 — 합성할 때만 '지연' 로드한다(워커 시작 때 import 하면 ffmpeg-static
+// 설치 문제가 워커 전체를 죽인다). Render node 런타임엔 시스템 ffmpeg 가 없어 npm 정적
+// 바이너리를 쓰되, 실패하면 PATH 폴백. env(FFMPEG_PATH/FFPROBE_PATH) override 우선.
+let FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
+let FFPROBE = process.env.FFPROBE_PATH || "ffprobe";
+let ffResolved = false;
+async function resolveFf() {
+  if (ffResolved) return;
+  ffResolved = true;
+  try {
+    const ff = (await import("ffmpeg-static")).default;
+    const fp = (await import("ffprobe-static")).default;
+    if (!process.env.FFMPEG_PATH && ff) FFMPEG = ff;
+    if (!process.env.FFPROBE_PATH && fp?.path) FFPROBE = fp.path;
+  } catch {
+    /* PATH 의 ffmpeg/ffprobe 폴백 유지 */
+  }
+}
 
 const FADE = Number(process.env.COMPOSE_FADE_SEC || 0.5);
 const FPS = Number(process.env.COMPOSE_FPS || 30);
@@ -78,6 +90,7 @@ const FADES_IN = new Set(["fadein", "black", "dissolve"]);
 // projectId 의 씬 영상들을 이어붙여 project.composedUrl 로. compose 단계 진행 표시.
 export async function runCompose(projectId) {
   await resetProgress(projectId);
+  await resolveFf(); // ffmpeg 바이너리 경로 확정(지연 로드)
   const log = async (m) => {
     console.error("[compose]", m);
     await logProgress(projectId, m);

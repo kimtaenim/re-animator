@@ -1450,7 +1450,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     >
                       ▶
                     </button>
-                    {s.videoUrl ? (
+                    {vidPending.has(s.id) ? (
+                      // 생성 중이면 최우선 — 옛 영상이 남아 있어도 스피너를 보여준다(재생성 피드백).
+                      <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--accent)] px-1 text-center text-[10px] text-[var(--accent)]">
+                        <span className="flex flex-col items-center gap-1.5">
+                          <span className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+                          생성 중…
+                        </span>
+                      </div>
+                    ) : s.videoUrl ? (
                       <video
                         src={s.videoUrl}
                         autoPlay
@@ -1461,16 +1469,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       />
                     ) : (
                       <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] px-1 text-center text-[10px] text-[var(--muted)]">
-                        {s.videoError ? (
-                          `실패: ${s.videoError}`
-                        ) : vidPending.has(s.id) ? (
-                          <span className="flex flex-col items-center gap-1.5">
-                            <span className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-                            생성 중…
-                          </span>
-                        ) : (
-                          "미생성"
-                        )}
+                        {s.videoError ? `실패: ${s.videoError}` : "미생성"}
                       </div>
                     )}
                     <div className="flex min-w-0 flex-1 flex-col gap-1 text-[11px]">
