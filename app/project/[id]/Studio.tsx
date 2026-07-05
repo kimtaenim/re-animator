@@ -53,6 +53,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [regenOpen, setRegenOpen] = useState(true); // 3단계 컷 목록 접기
   const [vidPending, setVidPending] = useState<Set<string>>(() => new Set()); // 영상 생성 중인 컷
   const [regenPending, setRegenPending] = useState<Map<string, string>>(() => new Map()); // 재생성 중인 컷(값=요청시 옛 이미지 url)
+  const regenSawRunning = useRef(false); // 재생성 잡이 실제 running 을 거쳤는지(스피너 조기 해제 방지)
   const [selForVideo, setSelForVideo] = useState<Set<string>>(() => new Set()); // 4단계 다중 선택
   const [genModel, setGenModel] = useState("gpt-image-2"); // 재생성 모델(비교용)
   const [costKrw, setCostKrw] = useState<number | null>(null);
@@ -162,7 +163,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         scenes: d.scenes ?? prev.scenes,
         steps: { ...prev.steps, regen: { ...prev.steps.regen, status: d.status, error: d.error } },
       }));
-      // 새 이미지가 나왔거나(옛 url 과 다름) 실패한 컷은 '생성 중' 해제. 잡이 끝나면(running 아님) 전부 해제.
+      // 'running' 을 한 번 본 뒤 종료됐을 때만 전부 해제 — 요청 직후 첫 폴링(아직 running
+      // 아님)이 스피너를 즉시 지우는 레이스 방지. 개별 컷은 새 이미지/실패로 그때그때 해제.
+      if (d.status === "running") regenSawRunning.current = true;
+      const ended = d.status !== "running" && regenSawRunning.current;
+      if (ended) regenSawRunning.current = false;
       setRegenPending((prev) => {
         if (prev.size === 0) return prev;
         const n = new Map(prev);
@@ -170,7 +175,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           if (!n.has(s.id)) continue;
           if (s.regenError || (s.generatedImage && s.generatedImage !== n.get(s.id))) n.delete(s.id);
         }
-        if (d.status !== "running") n.clear();
+        if (ended) n.clear();
         return n;
       });
     } catch {
@@ -413,7 +418,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }
 
   // 재생성 요청 컷을 '생성 중'으로 표시(값=요청 시 옛 이미지 url → 새 url 로 바뀌면 해제).
-  function markRegenPending(ids?: string[]) {
+  function markRegenPending(ids?: string[]): string[] {
     const targetIds =
       ids && ids.length
         ? ids
@@ -426,12 +431,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       }
       return n;
     });
+    return targetIds;
+  }
+  function clearRegenPending(ids: string[]) {
+    setRegenPending((prev) => {
+      const n = new Map(prev);
+      for (const id of ids) n.delete(id);
+      return n;
+    });
   }
 
   async function runRegenJob() {
     setBusy(true);
     setError("");
-    markRegenPending();
+    const pend = markRegenPending();
     try {
       const r = await fetch("/api/regen", {
         method: "POST",
@@ -445,6 +458,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         steps: { ...prev.steps, regen: { ...prev.steps.regen, status: "running" } },
       }));
     } catch (e) {
+      clearRegenPending(pend);
       setError(e instanceof Error ? e.message : "재생성 실패");
     } finally {
       setBusy(false);
@@ -528,6 +542,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       }));
       setSelForRegen(new Set());
     } catch (e) {
+      clearRegenPending(ids);
       setError(e instanceof Error ? e.message : "생성 실패");
     }
   }
@@ -556,6 +571,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         steps: { ...prev.steps, regen: { ...prev.steps.regen, status: "running" } },
       }));
     } catch (e) {
+      clearRegenPending(ids);
       setError(e instanceof Error ? e.message : "생성 실패");
     }
   }
@@ -640,6 +656,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         steps: { ...prev.steps, regen: { ...prev.steps.regen, status: "running" } },
       }));
     } catch (e) {
+      clearRegenPending([sceneId]);
       setError(e instanceof Error ? e.message : "생성 실패");
     }
   }
@@ -660,6 +677,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         steps: { ...prev.steps, scene: { ...prev.steps.scene, status: "running" } },
       }));
     } catch (e) {
+      // 적재 실패 시 '생성 중' 해제(안 그러면 스피너가 영영 돎). sceneIds 없으면(전체) 전부.
+      setVidPending((prev) => {
+        if (!sceneIds) return new Set();
+        const n = new Set(prev);
+        for (const id of sceneIds) n.delete(id);
+        return n;
+      });
       setError(e instanceof Error ? e.message : "영상 실패");
     }
   }
