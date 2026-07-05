@@ -83,7 +83,8 @@ export interface CutOntology {
   objects: string[]; // 핵심 사물
   dialogue: string; // 말풍선 텍스트(재생성 제외 → 자막/더빙)
   sfx: string; // 의성어/효과음
-  promptDraft: string; // image-2 재생성용 초안(후속 보강)
+  description: string; // VLM 자유 서술(인물·배경·구도·분위기) → image-2 로 그대로 전달
+  promptDraft: string; // image-2 재생성용 프롬프트 초안(영문)
   motion: string; // I2V 모션 힌트(후속)
   confirmed: boolean; // 사람이 G1 에서 타입 확정했는지
 }

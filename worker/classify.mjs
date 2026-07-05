@@ -1,10 +1,11 @@
 // ============================================================================
 // 컷 온톨로지 분류 — 검출된 각 컷을 타입(중심)으로 분류하고 내용을 뽑는다.
 // ----------------------------------------------------------------------------
-// 대조표(번호 붙은 썸네일 그리드) 한 장을 VLM 에 주고 컷별 {type, textKind,
-// characters, setting, objects, dialogue, sfx} 를 한 번에 받는다(저렴). 타입 목록은
-// config/ontology.json 에서 주입(하드코딩 금지). 키 없거나 실패 시 전부 '미분류'.
-// 결과는 Scene.cut 에 채워져 이후 image-2(재생성)에 레퍼런스+프롬프트로 넘어간다.
+// 대조표(번호 붙은 썸네일 그리드) 한 장을 VLM 에 주고 컷별 구조화 JSON 을 한 번에
+// 받는다(저렴). ★ Structured Outputs(json_schema strict) 로 스키마를 강제 → 모델이
+// enum(타입/textKind)을 반드시 유효값으로만 뱉는다(파싱 뒷수습 불필요, 미분류 방지).
+// 자유 서술(description·promptDraft)도 같은 객체에 담아 image-2(재생성)로 그대로 전달.
+// 타입 어휘는 config/ontology.json 에서 주입(하드코딩 금지). 키 없거나 실패 시 '미분류'.
 // ============================================================================
 
 import { buildContactSheet } from "./group.mjs";
@@ -31,9 +32,48 @@ function blankCut() {
     objects: [],
     dialogue: "",
     sfx: "",
+    description: "",
     promptDraft: "",
     motion: "",
     confirmed: false,
+  };
+}
+
+// 컷별 응답 스키마(Structured Outputs strict). enum 은 온톨로지에서 주입.
+function buildSchema(typeEnum, textKindEnum) {
+  return {
+    name: "cut_classification",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        cuts: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              n: { type: "integer", description: "컷 번호(1-base)" },
+              type: { type: "string", enum: typeEnum },
+              textKind: { type: "string", enum: [...textKindEnum, "none"] },
+              characters: { type: "array", items: { type: "string" } },
+              setting: { type: "string" },
+              objects: { type: "array", items: { type: "string" } },
+              dialogue: { type: "string" },
+              sfx: { type: "string" },
+              description: { type: "string" },
+              promptDraft: { type: "string" },
+            },
+            required: [
+              "n", "type", "textKind", "characters", "setting",
+              "objects", "dialogue", "sfx", "description", "promptDraft",
+            ],
+          },
+        },
+      },
+      required: ["cuts"],
+    },
   };
 }
 
@@ -70,6 +110,7 @@ function resolve(raw, idSet, koToId, syn) {
 function normalizeCut(raw, R) {
   const c = blankCut();
   if (!raw || typeof raw !== "object") return c;
+  // strict 스키마면 이미 유효 enum. resolve 는 비-strict 모델용 안전망.
   c.type = resolve(raw.type, R.typeIdSet, R.koToId, TYPE_SYN);
   if (c.type === "text") {
     c.textKind = resolve(raw.textKind, R.textKindIdSet, R.tkKoToId, TEXTKIND_SYN) || "dialogue";
@@ -79,6 +120,8 @@ function normalizeCut(raw, R) {
   if (Array.isArray(raw.objects)) c.objects = raw.objects.map(String).slice(0, 8);
   if (typeof raw.dialogue === "string") c.dialogue = raw.dialogue.slice(0, 300);
   if (typeof raw.sfx === "string") c.sfx = raw.sfx.slice(0, 120);
+  if (typeof raw.description === "string") c.description = raw.description.slice(0, 800);
+  if (typeof raw.promptDraft === "string") c.promptDraft = raw.promptDraft.slice(0, 800);
   return c;
 }
 
@@ -97,6 +140,7 @@ export async function classifyScenes(canvas, fileBuffers, regions, key, model, l
   const prompt = loadPrompts()
     .classify_task.replace(/\{n\}/g, String(n))
     .replace(/\{types\}/g, typeLines);
+  const schema = buildSchema([...R.typeIdSet], [...R.textKindIdSet]);
 
   let sheet;
   try {
@@ -124,10 +168,10 @@ export async function classifyScenes(canvas, fileBuffers, regions, key, model, l
             ],
           },
         ],
-        response_format: { type: "json_object" },
-        max_tokens: 2000,
+        response_format: { type: "json_schema", json_schema: schema },
+        max_tokens: 4000,
       }),
-      signal: AbortSignal.timeout(90_000),
+      signal: AbortSignal.timeout(120_000),
     });
     if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text().catch(() => "")).slice(0, 160)}`);
     const d = await r.json();

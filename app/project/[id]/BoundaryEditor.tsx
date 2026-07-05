@@ -297,14 +297,16 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
             {laid.map(({ r, i, top }) => {
               const cut = r.cut ?? blankCut();
               const color = (cut.type && TYPE_COLOR[cut.type]) || "var(--muted)";
-              const brief = [
-                cut.characters?.length ? `인물: ${cut.characters.join(", ")}` : "",
-                cut.setting ? `장소: ${cut.setting}` : "",
-                cut.dialogue ? `“${cut.dialogue}”` : "",
-                cut.sfx ? `효과음: ${cut.sfx}` : "",
-              ]
-                .filter(Boolean)
-                .join(" · ");
+              const brief =
+                cut.description ||
+                [
+                  cut.characters?.length ? `인물: ${cut.characters.join(", ")}` : "",
+                  cut.setting ? `장소: ${cut.setting}` : "",
+                  cut.dialogue ? `“${cut.dialogue}”` : "",
+                  cut.sfx ? `효과음: ${cut.sfx}` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
               return (
                 <div
                   key={`card-${i}`}

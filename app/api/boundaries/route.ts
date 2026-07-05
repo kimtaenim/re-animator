@@ -24,7 +24,8 @@ function cleanCut(raw: unknown): CutOntology {
   if (Array.isArray(r.objects)) c.objects = r.objects.map(String).slice(0, 8);
   if (typeof r.dialogue === "string") c.dialogue = r.dialogue.slice(0, 300);
   if (typeof r.sfx === "string") c.sfx = r.sfx.slice(0, 120);
-  if (typeof r.promptDraft === "string") c.promptDraft = r.promptDraft.slice(0, 600);
+  if (typeof r.description === "string") c.description = r.description.slice(0, 800);
+  if (typeof r.promptDraft === "string") c.promptDraft = r.promptDraft.slice(0, 800);
   if (typeof r.motion === "string") c.motion = r.motion.slice(0, 200);
   c.confirmed = r.confirmed === true;
   return c;
