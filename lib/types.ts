@@ -148,6 +148,7 @@ export interface Project {
   virtualCanvas: VirtualCanvas | null; // 분할 전엔 null
   scenes: Scene[]; // 순서 있는 배열. 분할 결과 → G1 편집 → 확정.
   cast?: Character[]; // M2 캐스팅 결과(등장인물). 확정 전엔 미정.
+  composedUrl?: string; // 5단계 합성(이어붙인) 최종 영상 Blob URL
 
   steps: Record<StepKind, StepState>;
 

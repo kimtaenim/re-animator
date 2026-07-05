@@ -22,7 +22,9 @@ export async function POST(req: NextRequest) {
         ? "regen"
         : body.step === "scene"
           ? "scene"
-          : "source";
+          : body.step === "compose"
+            ? "compose"
+            : "source";
   if (!projectId) return NextResponse.json({ ok: false, error: "projectId 필요" }, { status: 400 });
   const project = await getProject(projectId);
   if (!project) return NextResponse.json({ ok: false, error: "프로젝트 없음" }, { status: 404 });
@@ -34,7 +36,9 @@ export async function POST(req: NextRequest) {
         ? project.scenes.some((s) => s.generatedImage)
         : step === "scene"
           ? project.scenes.some((s) => s.videoUrl)
-          : project.scenes.length > 0;
+          : step === "compose"
+            ? !!project.composedUrl
+            : project.scenes.length > 0;
   const restStatus = hasResult ? "review" : "pending";
   setStep(project, step, { status: restStatus, jobId: undefined, error: undefined });
   await saveProject(project);

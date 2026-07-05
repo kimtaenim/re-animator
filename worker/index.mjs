@@ -12,11 +12,12 @@ import {
   runMergeCut,
   runVideo,
 } from "./jobs.mjs";
+import { runCompose } from "./compose.mjs";
 
 const POLL_MS = 3000;
 const JOB_TIMEOUT_MS = 12 * 60 * 1000; // 12분(재생성 배치 여유)
 
-const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen", "video"];
+const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen", "video", "compose"];
 const JOB_FN = {
   split: runSplit,
   resplit: runResplit,
@@ -26,6 +27,7 @@ const JOB_FN = {
   cast: runCast,
   regen: runRegen,
   video: runVideo,
+  compose: runCompose,
 };
 const JOB_STEP = {
   split: "source",
@@ -36,6 +38,7 @@ const JOB_STEP = {
   cast: "cast",
   regen: "regen",
   video: "scene",
+  compose: "compose",
 };
 
 async function runJob(job) {

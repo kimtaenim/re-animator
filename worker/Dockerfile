@@ -1,8 +1,11 @@
-# re-animator 입력단 워커 — sharp(libvips) 로 컷 분할·추출.
-# (ffmpeg 는 M7 합성 워커에서 추가. M1 은 이미지 연산만.)
+# re-animator 워커 — sharp(libvips) 컷 분할·추출 + ffmpeg 합성(영상 이어붙이기).
 FROM node:20-slim
 
-# sharp 는 prebuilt libvips 를 번들하므로 별도 시스템 패키지 불필요.
+# ffmpeg: 5단계 합성(concat·전환·인코딩). sharp 는 prebuilt libvips 번들이라 별도 불필요.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev

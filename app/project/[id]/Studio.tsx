@@ -84,6 +84,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const regenRunning = regenStatus === "running";
   const sceneStatus = project.steps.scene.status; // M4 영상(I2V)
   const sceneRunning = sceneStatus === "running";
+  const composeStatus = project.steps.compose.status; // M7 합성(이어붙이기)
+  const composeRunning = composeStatus === "running";
 
   // ── 분할/추출 진행 폴링 (워커 작업 중일 때만) ──────────────────────────────
   const poll = useCallback(async () => {
@@ -221,6 +223,34 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       clearTimeout(first);
     };
   }, [scenePolling, pollScene]);
+
+  // ── 합성(5단계) 진행 폴링 ───────────────────────────────────────────────────
+  const pollCompose = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/compose?projectId=${project.id}`, { cache: "no-store" });
+      const d = await r.json();
+      if (!d.ok) return;
+      setProgress(d.progress ?? "");
+      setProgressLog(d.progressLog ?? []);
+      setProject((prev) => ({
+        ...prev,
+        composedUrl: d.composedUrl ?? prev.composedUrl,
+        steps: { ...prev.steps, compose: { ...prev.steps.compose, status: d.status, error: d.error } },
+      }));
+    } catch {
+      /* 다음 틱 재시도 */
+    }
+  }, [project.id]);
+
+  useEffect(() => {
+    if (!composeRunning) return;
+    const t = setInterval(pollCompose, 3000);
+    const first = setTimeout(pollCompose, 0);
+    return () => {
+      clearInterval(t);
+      clearTimeout(first);
+    };
+  }, [composeRunning, pollCompose]);
 
   // projectRef 를 최신 project 로 동기화(자동저장 디바운스에서 최신 cut 읽기용).
   useEffect(() => {
@@ -626,8 +656,28 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setSelForVideo(new Set());
   }
 
+  // 5단계 — 씬 영상들을 워커에서 이어붙이기(오디오·자막 없이).
+  async function runComposeJob() {
+    setError("");
+    try {
+      const r = await fetch("/api/compose", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "합성 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, compose: { ...prev.steps.compose, status: "running" } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "합성 실패");
+    }
+  }
+
   // 워커 작업 중지 — 워커 프로세스는 못 죽이지만 UI 가 '진행 중'에 갇히지 않게 단계를 되돌림.
-  async function cancelJob(step: "source" | "cast" | "regen" | "scene") {
+  async function cancelJob(step: "source" | "cast" | "regen" | "scene" | "compose") {
     try {
       const r = await fetch("/api/cancel", {
         method: "POST",
@@ -1160,7 +1210,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         alt="원본"
                         className="h-28 w-auto shrink-0 rounded border border-[var(--border)]"
                       />
-                      <span className="shrink-0 pt-11 text-[var(--muted)]">→</span>
+                      <button
+                        onClick={() => regenOne(s.id)}
+                        disabled={busy || regenRunning}
+                        title={s.generatedImage ? "다시 생성" : "이 컷 생성 시작"}
+                        className="shrink-0 pt-11 text-lg text-[var(--muted)] hover:text-[var(--accent)] disabled:opacity-40"
+                      >
+                        ▶
+                      </button>
                       {s.generatedImage ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -1307,10 +1364,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             </button>
           </div>
 
-          {sceneRunning && (
+          {scenePolling && (
             <p className="mb-3 flex items-center gap-2 text-sm text-[var(--muted)]">
               <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-              동영상 생성 중… {progress && <span className="opacity-70">{progress}</span>}
+              동영상 생성 중{vidPending.size > 0 ? ` (${vidPending.size}컷)` : ""}…{" "}
+              {progress && <span className="opacity-70">{progress}</span>}
               <button
                 onClick={() => cancelJob("scene")}
                 className="ml-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:border-[var(--danger)] hover:text-[var(--danger)]"
@@ -1319,7 +1377,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
             </p>
           )}
-          {sceneRunning && progressLog.length > 0 && (
+          {scenePolling && progressLog.length > 0 && (
             <pre className="mb-3 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
               {progressLog.slice(-14).join("\n")}
             </pre>
@@ -1384,7 +1442,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       alt="생성"
                       className="h-28 w-auto shrink-0 rounded border border-[var(--border)]"
                     />
-                    <span className="shrink-0 pt-11 text-[var(--muted)]">▶</span>
+                    <button
+                      onClick={() => videoOne(s.id)}
+                      disabled={busy || vidPending.has(s.id)}
+                      title={s.videoUrl ? "동영상 다시 생성" : "동영상 생성 시작"}
+                      className="shrink-0 pt-11 text-lg text-[var(--muted)] hover:text-[var(--accent)] disabled:opacity-40"
+                    >
+                      ▶
+                    </button>
                     {s.videoUrl ? (
                       <video
                         src={s.videoUrl}
@@ -1542,6 +1607,62 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 );
               })}
           </div>
+        </section>
+      )}
+
+      {/* ── 5단계: 합성(영상 이어붙이기, 오디오·자막 없이) ── */}
+      {approved && project.scenes.some((s) => s.videoUrl) && (
+        <section className="mb-6">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold">{STEP_LABEL.compose}</h2>
+            <span className="text-xs text-[var(--muted)]">
+              — 영상 {project.scenes.filter((s) => s.videoUrl).length}개를 하나로 이어붙이기(전환 적용 · 오디오·자막은 나중)
+            </span>
+            <button
+              onClick={runComposeJob}
+              disabled={busy || composeRunning}
+              className="ml-auto rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {composeRunning ? "합성 중…" : project.composedUrl ? "다시 합성" : "영상 묶기"}
+            </button>
+          </div>
+
+          {composeRunning && (
+            <p className="mb-3 flex items-center gap-2 text-sm text-[var(--muted)]">
+              <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+              합성 중… {progress && <span className="opacity-70">{progress}</span>}
+              <button
+                onClick={() => cancelJob("compose")}
+                className="ml-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:border-[var(--danger)] hover:text-[var(--danger)]"
+              >
+                작업 중지
+              </button>
+            </p>
+          )}
+          {composeRunning && progressLog.length > 0 && (
+            <pre className="mb-3 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
+              {progressLog.slice(-14).join("\n")}
+            </pre>
+          )}
+          {composeStatus === "error" && (
+            <p className="mb-3 rounded-md border border-[var(--danger)] bg-[var(--panel)] p-3 text-sm text-[var(--danger)]">
+              {project.steps.compose.error ?? "합성 오류"}
+            </p>
+          )}
+          {project.composedUrl && (
+            <div className="space-y-2">
+              <video
+                src={project.composedUrl}
+                controls
+                className="max-h-[60vh] w-auto rounded border border-[var(--ok)]"
+              />
+              <div>
+                <a href={project.composedUrl} download className="text-sm text-[var(--accent)] underline">
+                  ⬇ 최종 영상 다운로드
+                </a>
+              </div>
+            </div>
+          )}
         </section>
       )}
 

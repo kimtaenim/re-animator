@@ -15,7 +15,8 @@ export type JobType =
   | "regen"
   | "splitcut"
   | "mergecut"
-  | "video";
+  | "video"
+  | "compose";
 export type JobStatus = "queued" | "running" | "done" | "error";
 
 export interface Job {
