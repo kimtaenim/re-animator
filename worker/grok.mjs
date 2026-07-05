@@ -38,9 +38,25 @@ function grokError(status, bodyText) {
   return `Grok ${status}: ${String(detail).slice(0, 200)}`;
 }
 
+// ── 글로벌 레이트 게이트 — xAI 초당 1건 제한. 모든 요청을 최소 간격으로 띄워, 여러 컷을
+// 병렬로 생성하면서도(각자 폴링) 제출·폴링이 1 RPS 를 안 넘게 한다. 프로미스 체인으로 직렬화.
+const MIN_INTERVAL_MS = Number(process.env.XAI_MIN_INTERVAL_MS || 1100);
+let lastReqAt = 0;
+let gateChain = Promise.resolve();
+function rateGate() {
+  const p = gateChain.then(async () => {
+    const wait = lastReqAt + MIN_INTERVAL_MS - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastReqAt = Date.now();
+  });
+  gateChain = p.catch(() => {});
+  return p;
+}
+
 // 429(초당 1건 제한) 자동 백오프 재시도. Retry-After 존중, 없으면 2·4·8초.
 async function fetchRetry(url, opts, tries = 4) {
   for (let i = 0; ; i++) {
+    await rateGate();
     const r = await fetch(url, opts);
     if ((r.status === 429 || r.status === 503) && i < tries) {
       const ra = Number(r.headers.get("retry-after"));
