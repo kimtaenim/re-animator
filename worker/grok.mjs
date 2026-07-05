@@ -12,7 +12,8 @@
 const API = "https://api.x.ai/v1";
 const TIMEOUT_MS = 60_000;
 const GROK_VIDEO_MODEL = process.env.XAI_VIDEO_MODEL || "grok-imagine-video";
-export const GROK_VIDEO_COST = Number(process.env.XAI_VIDEO_COST || 0.1);
+// 초당 단가(USD). grok-imagine-video 는 출력 초당 약 $0.05. 길이 × 이 값이 대략 비용.
+export const GROK_VIDEO_COST = Number(process.env.XAI_VIDEO_COST || 0.05);
 
 function key() {
   const k = process.env.XAI_API_KEY;

@@ -29,6 +29,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [progress, setProgress] = useState("");
   const [progressLog, setProgressLog] = useState<string[]>([]);
   const [srcOpen, setSrcOpen] = useState<boolean | null>(null); // null=기본(승인되면 접힘)
+  const [regenOpen, setRegenOpen] = useState(true); // 3단계 컷 목록 접기
   const [genModel, setGenModel] = useState("gpt-image-2"); // 재생성 모델(비교용)
   const [costKrw, setCostKrw] = useState<number | null>(null);
   const [editingName, setEditingName] = useState(false);
@@ -914,7 +915,19 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         <section className="mb-6">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <h2 className="text-sm font-semibold">3. 재생성</h2>
+              <button
+                type="button"
+                onClick={() => setRegenOpen((v) => !v)}
+                className="text-sm font-semibold"
+                title="접기/펼치기"
+              >
+                {regenOpen ? "▾" : "▸"} 3. 재생성
+                {!regenOpen && (
+                  <span className="ml-1 font-normal text-[var(--muted)]">
+                    ({project.scenes.filter((s) => s.originalImage && s.cut?.type !== "text").length}컷)
+                  </span>
+                )}
+              </button>
               <div className="flex items-center gap-1 text-xs">
                 <span className="text-[var(--muted)]">기본 모델:</span>
                 <select
@@ -1054,7 +1067,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             </p>
           )}
 
-          {project.scenes.some((s) => s.originalImage) && (
+          {regenOpen && project.scenes.some((s) => s.originalImage) && (
             <div className="space-y-2">
               {project.scenes
                 .filter((s) => s.originalImage && s.cut?.type !== "text")
@@ -1242,6 +1255,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   ? spkChars.map((c) => c.label).join(", ")
                   : "나레이션/미상";
                 const voiceLabel = spkChars.map((c) => c.voiceName || c.voice).filter(Boolean).join(", ");
+                // 예상 영상 길이(초) — 대사(말풍선+나레이션) 글자 수 기반(한국어 대략 5자/초).
+                const dubText =
+                  (bubs.length ? bubs.map((b) => b.text).join(" ") : s.cut?.dialogue ?? "") +
+                  " " +
+                  (s.cut?.narration ?? "");
+                const estSec = Math.max(
+                  2,
+                  Math.min(6, Math.round(dubText.replace(/\s+/g, "").length / 5) || 2)
+                );
                 return (
                   <div
                     key={s.id}
@@ -1285,7 +1307,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           {s.videoUrl ? "🎬 다시" : "🎬 동영상"}
                         </button>
                         <span className="text-[var(--muted)]">
-                          화자: {speakerLabel}
+                          ~{estSec}s · 화자: {speakerLabel}
                           {voiceLabel ? ` · 목소리: ${voiceLabel}` : " · 목소리 미지정"}
                         </span>
                       </div>

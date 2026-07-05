@@ -641,8 +641,22 @@ export async function runRegen(projectId, payload) {
   return ok;
 }
 
+// 영상 길이(초) 추정 — 대사(말풍선+나레이션) 글자 수 기반(한국어 대략 5자/초).
+// 대사가 그 컷 위로 흐르는 시간에 맞춘다. 나중에 TTS 오디오 실제 길이로 대체.
+function estimateVideoSeconds(cut) {
+  const parts = [];
+  if (cut?.bubbles?.length) for (const b of cut.bubbles) parts.push(b.text || "");
+  else if (cut?.dialogue) parts.push(cut.dialogue);
+  if (cut?.narration) parts.push(cut.narration);
+  const chars = parts.join(" ").replace(/\s+/g, "").length;
+  const CPS = Number(process.env.VIDEO_CHARS_PER_SEC || 5);
+  const MIN = Number(process.env.VIDEO_MIN_SEC || 2);
+  const MAX = Number(process.env.VIDEO_MAX_SEC || 6);
+  return Math.max(MIN, Math.min(MAX, Math.round(chars / CPS) || MIN));
+}
+
 // ── video(M4): 재생성 컷(generatedImage)을 Grok I2V 로 영상화 → Scene.videoUrl ─
-//    scene 단계로 진행 표시. payload.sceneIds 있으면 그 컷만.
+//    scene 단계로 진행 표시. payload.sceneIds 있으면 그 컷만. 길이는 대사 기반 추정.
 export async function runVideo(projectId, payload) {
   await resetProgress(projectId);
   const log = async (m) => {
@@ -696,11 +710,12 @@ export async function runVideo(projectId, payload) {
     await Promise.all(
       chunk.map(async (s) => {
         try {
+          const dur = estimateVideoSeconds(s.cut); // 대사 길이 기반 초
           const prompt =
             String(s.cut?.motion || s.cut?.description || "").trim() || undefined;
           const videoUrl = await grokVideoFromImage(
-            { imageUrl: s.generatedImage, prompt },
-            () => log(`컷 ${s.order + 1} 생성 중…`)
+            { imageUrl: s.generatedImage, prompt, duration: dur },
+            () => log(`컷 ${s.order + 1} 생성 중…(${dur}s)`)
           );
           const buf = await download(videoUrl);
           const { url } = await put(
@@ -709,9 +724,9 @@ export async function runVideo(projectId, payload) {
             { access: "public", contentType: "video/mp4", addRandomSuffix: false }
           );
           byId.set(s.id, { url });
-          costTotal += GROK_VIDEO_COST;
+          costTotal += GROK_VIDEO_COST * dur; // 초당 단가 × 길이
           ok++;
-          await log(`컷 ${s.order + 1} 영상 완료`);
+          await log(`컷 ${s.order + 1} 영상 완료 (${dur}s)`);
         } catch (e) {
           byId.set(s.id, { error: String(e?.message ?? e) });
           await log(`컷 ${s.order + 1} 영상 실패: ${String(e?.message ?? e).slice(0, 120)}`);
