@@ -182,9 +182,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       if (!d.ok) return;
       setProgress(d.progress ?? "");
       setProgressLog(d.progressLog ?? []);
+      // ★ 영상 결과(videoUrl/videoError)만 병합 — 씬 전체를 덮어쓰면 그 사이 사용자가
+      // 편집 중인 대사·모션·길이 등이 되돌려져 타이핑이 씹힌다. 그래서 필드 단위 병합.
+      const vmap = new Map(
+        (d.scenes ?? []).map((x: { id: string; videoUrl?: string; videoError?: string }) => [
+          x.id,
+          x,
+        ])
+      );
       setProject((prev) => ({
         ...prev,
-        scenes: d.scenes ?? prev.scenes,
+        scenes: prev.scenes.map((ps) => {
+          const ss = vmap.get(ps.id) as { videoUrl?: string; videoError?: string } | undefined;
+          return ss ? { ...ps, videoUrl: ss.videoUrl, videoError: ss.videoError } : ps;
+        }),
         steps: { ...prev.steps, scene: { ...prev.steps.scene, status: d.status, error: d.error } },
       }));
       // 완료(영상 있음)·실패한 컷은 '생성 중'에서 해제 → 그 컷 버튼 다시 활성.
@@ -1414,7 +1425,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           길이
                           <button
                             onClick={() => setDur(curDur - 0.5)}
-                            disabled={busy || sceneRunning}
+                            disabled={busy}
                             className="rounded border border-[var(--border)] px-1.5 leading-none disabled:opacity-30"
                           >
                             −
@@ -1422,7 +1433,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           <span className="w-9 text-center tabular-nums text-[var(--text)]">{curDur}s</span>
                           <button
                             onClick={() => setDur(curDur + 0.5)}
-                            disabled={busy || sceneRunning}
+                            disabled={busy}
                             className="rounded border border-[var(--border)] px-1.5 leading-none disabled:opacity-30"
                           >
                             ＋
@@ -1508,7 +1519,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             key={id}
                             type="button"
                             onClick={() => updateCut(s.id, { motion: mprompt })}
-                            disabled={busy || sceneRunning}
+                            disabled={busy}
                             className={`rounded border px-1.5 py-0.5 text-[10px] disabled:opacity-40 ${
                               s.cut?.motion === mprompt
                                 ? "border-[var(--accent)] text-[var(--accent)]"
