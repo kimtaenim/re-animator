@@ -270,6 +270,23 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     };
   }, [composeRunning, pollCompose]);
 
+  // 탭으로 돌아오면 즉시 새로고침 — 백그라운드 탭에선 브라우저가 폴링을 늦춰서, 리로드 없이
+  // 최신 상태를 못 보던 문제. 진행/대기 중인 단계만 그때 한 번 당겨온다.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      if (regenPolling) pollRegen();
+      if (scenePolling) pollScene();
+      if (composeRunning) pollCompose();
+    };
+    window.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [regenPolling, scenePolling, composeRunning, pollRegen, pollScene, pollCompose]);
+
   // projectRef 를 최신 project 로 동기화(자동저장 디바운스에서 최신 cut 읽기용).
   useEffect(() => {
     projectRef.current = project;
@@ -1575,31 +1592,32 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             <span className="text-[10px] opacity-50">자동</span>
                           )}
                         </div>
-                        <label
-                          className="flex items-center gap-1 text-[var(--muted)]"
-                          title="이 컷 → 다음 컷 사이 전환(페이드/암전/디졸브). 개별 컷엔 안 보이고 5단계 '영상 묶기' 결과에 적용됩니다."
-                        >
-                          🎞 전환
-                          <select
-                            value={s.cut?.transition ?? "none"}
-                            onChange={(e) => updateCut(s.id, { transition: e.target.value })}
-                            className={`rounded border bg-[var(--panel-2)] px-1 py-0.5 ${
-                              s.cut?.transition && s.cut.transition !== "none"
-                                ? "border-[var(--accent)] font-medium text-[var(--accent)]"
-                                : "border-[var(--border)]"
-                            }`}
-                          >
-                            {TRANSITIONS.map(([v, t]) => (
-                              <option key={v} value={v}>
-                                {t}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
                         <span className="text-[var(--muted)]">
                           화자: {speakerLabel}
                           {voiceLabel ? ` · 목소리: ${voiceLabel}` : " · 목소리 미지정"}
                         </span>
+                      </div>
+                      {/* 전환 — 카메라워크처럼 칩으로. 이 컷 → 다음 컷 사이(5단계 합성에서 적용). */}
+                      <div
+                        className="flex flex-wrap items-center gap-1"
+                        title="이 컷 → 다음 컷 사이 전환. 5단계 '영상 묶기' 결과에 적용됩니다."
+                      >
+                        <span className="text-[var(--muted)]">🎞 전환</span>
+                        {TRANSITIONS.map(([v, t]) => (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => updateCut(s.id, { transition: v })}
+                            disabled={busy}
+                            className={`rounded border px-1.5 py-0.5 text-[10px] disabled:opacity-40 ${
+                              (s.cut?.transition ?? "none") === v
+                                ? "border-[var(--accent)] font-medium text-[var(--accent)]"
+                                : "border-[var(--border)] hover:bg-[var(--panel-2)]"
+                            }`}
+                          >
+                            {t}
+                          </button>
+                        ))}
                       </div>
                       {/* 대사 직접 편집 — 말풍선별 입력(클릭해서 수정, 자동 저장) */}
                       {bubs.length > 0 ? (
