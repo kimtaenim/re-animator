@@ -298,6 +298,26 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
+  // 컷 하나만 생성/다시 생성 — 배치 전에 싸게 충실도 테스트, 마음에 안 드는 컷 재생성.
+  async function regenOne(sceneId: string) {
+    setError("");
+    try {
+      const r = await fetch("/api/regen", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneIds: [sceneId] }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "생성 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, regen: { ...prev.steps.regen, status: "running" } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "생성 실패");
+    }
+  }
+
   // 워커 작업 중지 — 워커 프로세스는 못 죽이지만 UI 가 '진행 중'에 갇히지 않게 단계를 되돌림.
   async function cancelJob(step: "source" | "cast" | "regen") {
     try {
@@ -697,7 +717,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             </p>
           )}
 
-          {(regenStatus === "review" || regenStatus === "approved" || regenRunning) && (
+          {project.scenes.some((s) => s.originalImage) && (
             <div className="space-y-2">
               {project.scenes
                 .filter((s) => s.originalImage && s.cut?.type !== "text")
@@ -728,6 +748,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         {s.regenError ? `실패: ${s.regenError}` : regenRunning ? "생성 대기…" : "미생성"}
                       </div>
                     )}
+                    <button
+                      onClick={() => regenOne(s.id)}
+                      disabled={busy || regenRunning}
+                      className="ml-auto shrink-0 rounded border border-[var(--border)] px-2 py-1 text-xs disabled:opacity-40"
+                      title="이 컷만 생성(테스트·재생성)"
+                    >
+                      {s.generatedImage ? "다시" : "생성"}
+                    </button>
                   </div>
                 ))}
             </div>

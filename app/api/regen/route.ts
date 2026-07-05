@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 
 // POST — M3 이미지 재생성 잡 적재. 1단계(컷 추출) 완료 후 가능.
 export async function POST(req: NextRequest) {
-  let body: { projectId?: string };
+  let body: { projectId?: string; sceneIds?: string[] };
   try {
     body = await req.json();
   } catch {
@@ -25,12 +25,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "추출된 컷이 없어요" }, { status: 409 });
   }
 
+  const sceneIds = Array.isArray(body.sceneIds)
+    ? body.sceneIds.filter((id) => typeof id === "string")
+    : undefined;
   const now = Date.now();
   const job: Job = {
     id: randomUUID(),
     type: "regen",
     projectId,
-    payload: {},
+    payload: sceneIds && sceneIds.length ? { sceneIds } : {},
     status: "queued",
     createdAt: now,
     updatedAt: now,

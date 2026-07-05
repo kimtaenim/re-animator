@@ -459,7 +459,8 @@ export async function runCast(projectId) {
 }
 
 // ── regen(M3): 각 컷을 gpt-image-1(i2i)로 재생성 → 청크 병렬 → Scene.generatedImage ─
-export async function runRegen(projectId) {
+// payload.sceneIds 주면 그 컷들만(컷 하나씩 테스트/다시생성). 청크마다 저장 → 진행 표시.
+export async function runRegen(projectId, payload) {
   await resetProgress(projectId);
   const log = async (m) => {
     console.error("[regen]", m);
@@ -474,13 +475,43 @@ export async function runRegen(projectId) {
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
   const scenes = (p.scenes ?? []).slice().sort((a, b) => a.order - b.order);
   // 텍스트 오버레이 제외, 추출된 컷만(원본 이미지 필요).
-  const cand = scenes.filter((s) => s.originalImage && s.cut?.type !== "text");
+  let cand = scenes.filter((s) => s.originalImage && s.cut?.type !== "text");
+  if (Array.isArray(payload?.sceneIds) && payload.sceneIds.length) {
+    const set = new Set(payload.sceneIds);
+    cand = cand.filter((s) => set.has(s.id));
+  }
   await log(`재생성 대상 ${cand.length}컷 (전체 ${scenes.length}), 동시 ${REGEN_CONCURRENCY}장`);
   if (cand.length === 0) throw new Error("재생성할 컷이 없어요(컷 추출 먼저)");
 
   const genById = new Map(); // sceneId → { url } | { error }
   let costTotal = 0;
   let ok = 0;
+
+  // 누적 결과를 프로젝트에 반영 저장(청크마다 호출 → 진행되는 대로 화면에 채워짐).
+  const flush = async (finalStep) => {
+    const pp = await getProject(projectId);
+    if (!pp) return;
+    for (const s of pp.scenes ?? []) {
+      const g = genById.get(s.id);
+      if (!g) continue;
+      if (g.url) {
+        s.generatedImage = g.url;
+        s.regenError = undefined;
+      } else {
+        s.regenError = g.error || "생성 실패";
+      }
+    }
+    if (finalStep) {
+      pp.steps.regen = {
+        ...pp.steps.regen,
+        kind: "regen",
+        status: "review",
+        error: undefined,
+        updatedAt: Date.now(),
+      };
+    }
+    await saveProject(pp);
+  };
 
   for (let i = 0; i < cand.length; i += REGEN_CONCURRENCY) {
     const chunk = cand.slice(i, i + REGEN_CONCURRENCY);
@@ -504,7 +535,9 @@ export async function runRegen(projectId) {
         }
       })
     );
-    await log(`진행 ${Math.min(i + chunk.length, cand.length)}/${cand.length} (${Math.round((Math.min(i + chunk.length, cand.length) / cand.length) * 100)}%)`);
+    const doneN = Math.min(i + chunk.length, cand.length);
+    await log(`진행 ${doneN}/${cand.length} (${Math.round((doneN / cand.length) * 100)}%)`);
+    await flush(false); // 청크 결과 즉시 반영
   }
 
   try {
@@ -517,26 +550,7 @@ export async function runRegen(projectId) {
     });
   } catch {}
 
-  const p2 = await getProject(projectId);
-  if (!p2) throw new Error("프로젝트가 사라졌어요");
-  for (const s of p2.scenes ?? []) {
-    const g = genById.get(s.id);
-    if (!g) continue;
-    if (g.url) {
-      s.generatedImage = g.url;
-      s.regenError = undefined;
-    } else {
-      s.regenError = g.error || "생성 실패";
-    }
-  }
-  p2.steps.regen = {
-    ...p2.steps.regen,
-    kind: "regen",
-    status: "review",
-    error: undefined,
-    updatedAt: Date.now(),
-  };
-  await saveProject(p2);
+  await flush(true); // 마지막 반영 + 단계 review
   await log(`재생성 완료: ${ok}/${cand.length} (~$${costTotal.toFixed(3)})`);
   return ok;
 }
