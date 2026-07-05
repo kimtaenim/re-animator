@@ -52,6 +52,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [srcOpen, setSrcOpen] = useState<boolean | null>(null); // null=기본(승인되면 접힘)
   const [regenOpen, setRegenOpen] = useState(true); // 3단계 컷 목록 접기
   const [vidPending, setVidPending] = useState<Set<string>>(() => new Set()); // 영상 생성 중인 컷
+  const [regenPending, setRegenPending] = useState<Map<string, string>>(() => new Map()); // 재생성 중인 컷(값=요청시 옛 이미지 url)
   const [selForVideo, setSelForVideo] = useState<Set<string>>(() => new Set()); // 4단계 다중 선택
   const [genModel, setGenModel] = useState("gpt-image-2"); // 재생성 모델(비교용)
   const [costKrw, setCostKrw] = useState<number | null>(null);
@@ -161,20 +162,32 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         scenes: d.scenes ?? prev.scenes,
         steps: { ...prev.steps, regen: { ...prev.steps.regen, status: d.status, error: d.error } },
       }));
+      // 새 이미지가 나왔거나(옛 url 과 다름) 실패한 컷은 '생성 중' 해제. 잡이 끝나면(running 아님) 전부 해제.
+      setRegenPending((prev) => {
+        if (prev.size === 0) return prev;
+        const n = new Map(prev);
+        for (const s of (d.scenes ?? []) as { id: string; generatedImage?: string; regenError?: string }[]) {
+          if (!n.has(s.id)) continue;
+          if (s.regenError || (s.generatedImage && s.generatedImage !== n.get(s.id))) n.delete(s.id);
+        }
+        if (d.status !== "running") n.clear();
+        return n;
+      });
     } catch {
       /* 다음 틱 재시도 */
     }
   }, [project.id]);
 
+  const regenPolling = regenRunning || regenPending.size > 0;
   useEffect(() => {
-    if (!regenRunning) return;
+    if (!regenPolling) return;
     const t = setInterval(pollRegen, 2500);
     const first = setTimeout(pollRegen, 0);
     return () => {
       clearInterval(t);
       clearTimeout(first);
     };
-  }, [regenRunning, pollRegen]);
+  }, [regenPolling, pollRegen]);
 
   // ── 영상(M4·I2V) 진행 폴링 ───────────────────────────────────────────────────
   const pollScene = useCallback(async () => {
@@ -399,9 +412,26 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setProject((prev) => ({ ...prev, scenes: d.scenes }));
   }
 
+  // 재생성 요청 컷을 '생성 중'으로 표시(값=요청 시 옛 이미지 url → 새 url 로 바뀌면 해제).
+  function markRegenPending(ids?: string[]) {
+    const targetIds =
+      ids && ids.length
+        ? ids
+        : project.scenes.filter((s) => s.originalImage && s.cut?.type !== "text").map((s) => s.id);
+    setRegenPending((prev) => {
+      const n = new Map(prev);
+      for (const id of targetIds) {
+        const sc = project.scenes.find((s) => s.id === id);
+        n.set(id, sc?.generatedImage ?? "");
+      }
+      return n;
+    });
+  }
+
   async function runRegenJob() {
     setBusy(true);
     setError("");
+    markRegenPending();
     try {
       const r = await fetch("/api/regen", {
         method: "POST",
@@ -483,6 +513,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     const ids = [...selForRegen];
     const models: Record<string, string> = {};
     for (const id of ids) models[id] = modelFor(id); // 컷별 선택 반영
+    markRegenPending(ids);
     try {
       const r = await fetch("/api/regen", {
         method: "POST",
@@ -511,6 +542,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setError("");
     const models: Record<string, string> = {};
     for (const id of ids) models[id] = modelFor(id);
+    markRegenPending(ids);
     try {
       const r = await fetch("/api/regen", {
         method: "POST",
@@ -594,6 +626,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 컷 하나만 생성/다시 생성 — 배치 전에 싸게 충실도 테스트, 마음에 안 드는 컷 재생성.
   async function regenOne(sceneId: string) {
     setError("");
+    markRegenPending([sceneId]);
     try {
       const r = await fetch("/api/regen", {
         method: "POST",
@@ -1160,10 +1193,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             </div>
           </div>
 
-          {regenRunning && (
+          {regenPolling && (
             <p className="mb-3 flex items-center gap-2 text-sm text-[var(--muted)]">
               <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-              이미지 생성 중… {progress && <span className="opacity-70">{progress}</span>}
+              이미지 생성 중{regenPending.size > 0 ? ` (${regenPending.size}컷)` : ""}…{" "}
+              {progress && <span className="opacity-70">{progress}</span>}
               <button
                 onClick={() => cancelJob("regen")}
                 className="ml-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:border-[var(--danger)] hover:text-[var(--danger)]"
@@ -1172,7 +1206,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
             </p>
           )}
-          {regenRunning && progressLog.length > 0 && (
+          {regenPolling && progressLog.length > 0 && (
             <pre className="mb-3 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
               {progressLog.slice(-14).join("\n")}
             </pre>
@@ -1218,7 +1252,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       >
                         ▶
                       </button>
-                      {s.generatedImage ? (
+                      {regenPending.has(s.id) ? (
+                        // 재생성 중이면 최우선 — 옛 이미지가 있어도 스피너 표시.
+                        <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--accent)] px-1 text-center text-[10px] text-[var(--accent)]">
+                          <span className="flex flex-col items-center gap-1.5">
+                            <span className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+                            생성 중…
+                          </span>
+                        </div>
+                      ) : s.generatedImage ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={s.generatedImage}
@@ -1227,11 +1269,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         />
                       ) : (
                         <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] px-1 text-center text-[10px] text-[var(--muted)]">
-                          {s.regenError
-                            ? `실패: ${s.regenError}`
-                            : regenRunning
-                              ? "생성 대기…"
-                              : "미생성"}
+                          {s.regenError ? `실패: ${s.regenError}` : "미생성"}
                         </div>
                       )}
                       <div className="flex min-w-0 flex-1 flex-col gap-1">
