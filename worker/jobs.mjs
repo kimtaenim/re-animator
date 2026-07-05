@@ -586,3 +586,152 @@ export async function runRegen(projectId, payload) {
   await log(`재생성 완료: ${ok}/${cand.length} (~$${costTotal.toFixed(3)})`);
   return ok;
 }
+
+// ── splitcut(M3+): 이후 단계에서도 컷 하나를 분할 → 서브컷 추출+글씨읽기까지 →
+//    바로 M3 재생성 준비. source 단계는 approved 유지, regen 단계로 진행 표시.
+export async function runSplitCut(projectId, payload) {
+  await resetProgress(projectId);
+  const log = async (m) => {
+    console.error("[splitcut]", m);
+    await logProgress(projectId, m);
+  };
+  const sceneId = payload?.sceneId;
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  if (!p.virtualCanvas) throw new Error("가상 캔버스가 없어요");
+  const canvas = p.virtualCanvas;
+  const scenes = (p.scenes ?? []).slice().sort((a, b) => a.order - b.order);
+  const target = scenes.find((s) => s.id === sceneId);
+  if (!target) throw new Error("분할할 컷을 찾을 수 없어요");
+
+  const cfg = loadSplitConfig();
+  const files = sortedFiles(p);
+  await log(`소스 ${files.length}개 다운로드…`);
+  const buffers = [];
+  for (const f of files) buffers.push(await download(f.url));
+
+  // 프로파일 → 대상 구간 재검출 + VLM 강제 분할 + 평탄행 폴백(runResplit 과 동일 로직).
+  const global = new Float32Array(canvas.totalHeight);
+  let acc = 0;
+  for (const buf of buffers) {
+    const { profile } = await computeRowProfile(buf, canvas.refWidth);
+    const room = global.length - acc;
+    if (room <= 0) break;
+    global.set(room >= profile.length ? profile : profile.subarray(0, room), acc);
+    acc += profile.length;
+  }
+  const y0 = Math.round(target.sourceRegion.yStart);
+  const y1 = Math.round(target.sourceRegion.yEnd);
+  const cfg2 = {
+    ...cfg,
+    minGapPx: Math.max(12, Math.round((cfg.minGapPx ?? 40) / 2)),
+    minSceneHeightPx: Math.max(30, Math.round((cfg.minSceneHeightPx ?? 60) / 2)),
+  };
+  let subs = detectRegions(global.subarray(y0, y1), cfg2).map((r) => ({
+    yStart: y0 + r.yStart,
+    yEnd: y0 + r.yEnd,
+  }));
+  if (subs.length === 0) subs = [{ yStart: y0, yEnd: y1 }];
+  const key = process.env.OPENAI_API_KEY;
+  const VLM_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
+  if (key) {
+    const out = [];
+    for (const s of subs) {
+      try {
+        out.push(...(await forceSplit(canvas, buffers, s, key, VLM_MODEL, log)));
+      } catch {
+        out.push(s);
+      }
+    }
+    subs = out;
+  }
+  if (subs.length === 1 && subs[0].yEnd - subs[0].yStart >= 120) {
+    const s = subs[0];
+    const lo = s.yStart + Math.round((s.yEnd - s.yStart) * 0.3);
+    const hi = s.yStart + Math.round((s.yEnd - s.yStart) * 0.7);
+    let bestY = -1;
+    let bestStd = Infinity;
+    for (let y = lo; y < hi; y++) {
+      if (global[y] < bestStd) {
+        bestStd = global[y];
+        bestY = y;
+      }
+    }
+    if (bestY > s.yStart + 20 && bestY < s.yEnd - 20) {
+      subs = [
+        { yStart: s.yStart, yEnd: bestY },
+        { yStart: bestY, yEnd: s.yEnd },
+      ];
+    }
+  }
+  await log(`분할 ${subs.length}개 — 추출·글씨읽기…`);
+
+  // 트림 + 추출 + OCR + 분류 → 새 서브컷(originalImage 까지) 만든다.
+  const x0 = target.sourceRegion.xStart ?? 0;
+  const x1 = target.sourceRegion.xEnd ?? canvas.refWidth;
+  const trimmed = [];
+  for (const s of subs) {
+    let box = { yStart: s.yStart, yEnd: s.yEnd, xStart: x0, xEnd: x1 };
+    try {
+      const png = await extractRegion(canvas, buffers, s.yStart, s.yEnd, x0, x1);
+      const t = await trimBox(png);
+      const ny0 = s.yStart + t.top;
+      const ny1 = s.yStart + t.bottom;
+      const nx0 = x0 + t.left;
+      const nx1 = x0 + t.right;
+      if (ny1 - ny0 >= 40 && nx1 - nx0 >= 40) box = { yStart: ny0, yEnd: ny1, xStart: nx0, xEnd: nx1 };
+    } catch {}
+    trimmed.push(box);
+  }
+  let cuts = trimmed.map(() => null);
+  if (key) {
+    try {
+      cuts = await classifyScenes(canvas, buffers, trimmed, key, VLM_MODEL, log, projectId);
+    } catch {}
+  }
+  const newScenes = [];
+  for (let k = 0; k < trimmed.length; k++) {
+    const box = trimmed[k];
+    const png = await extractRegion(canvas, buffers, box.yStart, box.yEnd, box.xStart, box.xEnd);
+    const { url } = await put(`project/${projectId}/cut-split-${Date.now()}-${k}.png`, png, {
+      access: "public",
+      contentType: "image/png",
+      addRandomSuffix: false,
+    });
+    const cut = cuts[k] ?? { type: null, dialogue: "", sfx: "" };
+    if (key) {
+      try {
+        const ocr = await readCutText(png, key, VLM_MODEL);
+        cut.dialogue = ocr.dialogue;
+        if (ocr.sfx) cut.sfx = ocr.sfx;
+        cut.textBoxes = ocr.boxes;
+      } catch {}
+    }
+    newScenes.push({
+      id: randomUUID(),
+      order: 0,
+      sourceRegion: box,
+      cut,
+      originalImage: url,
+      status: "approved",
+    });
+  }
+
+  const p2 = await getProject(projectId);
+  if (!p2) throw new Error("프로젝트가 사라졌어요");
+  const kept = (p2.scenes ?? []).filter((s) => s.id !== target.id);
+  const merged = [...kept, ...newScenes].sort(
+    (a, b) => a.sourceRegion.yStart - b.sourceRegion.yStart
+  );
+  p2.scenes = absorbTextCuts(merged).map((s, i) => ({ ...s, order: i }));
+  p2.steps.regen = {
+    ...p2.steps.regen,
+    kind: "regen",
+    status: "review",
+    error: undefined,
+    updatedAt: Date.now(),
+  };
+  await saveProject(p2);
+  await log(`분할 완료: ${target.order + 1}번 → ${newScenes.length}개`);
+  return newScenes.length;
+}

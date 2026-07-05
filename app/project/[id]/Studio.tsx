@@ -386,6 +386,26 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }).catch(() => {});
   }
 
+  // 이후 단계(M3)에서도 컷 분할 — 서브컷 추출+글씨읽기까지 워커가. regen 폴링으로 반영.
+  async function splitCutM3(sceneId: string) {
+    setError("");
+    try {
+      const r = await fetch("/api/splitcut", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneId }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "분할 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, regen: { ...prev.steps.regen, status: "running" } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "분할 실패");
+    }
+  }
+
   // 컷 하나만 생성/다시 생성 — 배치 전에 싸게 충실도 테스트, 마음에 안 드는 컷 재생성.
   async function regenOne(sceneId: string) {
     setError("");
@@ -916,6 +936,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                                 {m === "mask" ? "마스크" : "재생성"}
                               </button>
                             ))}
+                            <button
+                              onClick={() => splitCutM3(s.id)}
+                              disabled={busy || regenRunning}
+                              className="rounded border border-[var(--border)] px-2 py-0.5 disabled:opacity-40"
+                              title="이 컷을 분할(서브컷 추출까지)"
+                            >
+                              분할
+                            </button>
                             <button
                               onClick={() => regenOne(s.id)}
                               disabled={busy || regenRunning}
