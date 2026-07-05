@@ -64,6 +64,47 @@ export async function computeSideCrop(regionPng, flatStd = 10) {
   return { xStart, xEnd };
 }
 
+// 박스 PNG의 4변에서 "평탄한 여백"(검은/흰/단색/그라데이션)을 트림 → 그려진 내용에 딱 맞게.
+// 반환: 박스 내부 오프셋 { top, bottom, left, right }.
+export async function trimBox(png, flatStd = 11) {
+  const { data, info } = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true });
+  const W = info.width;
+  const H = info.height;
+  const rowStd = (y) => {
+    let s = 0;
+    let s2 = 0;
+    const o = y * W;
+    for (let x = 0; x < W; x++) {
+      const v = data[o + x];
+      s += v;
+      s2 += v * v;
+    }
+    const m = s / W;
+    return Math.sqrt(Math.max(0, s2 / W - m * m));
+  };
+  const colStd = (x) => {
+    let s = 0;
+    let s2 = 0;
+    for (let y = 0; y < H; y++) {
+      const v = data[y * W + x];
+      s += v;
+      s2 += v * v;
+    }
+    const m = s / H;
+    return Math.sqrt(Math.max(0, s2 / H - m * m));
+  };
+  let top = 0;
+  while (top < H && rowStd(top) < flatStd) top++;
+  let bottom = H;
+  while (bottom > top && rowStd(bottom - 1) < flatStd) bottom--;
+  let left = 0;
+  while (left < W && colStd(left) < flatStd) left++;
+  let right = W;
+  while (right > left && colStd(right - 1) < flatStd) right--;
+  if (bottom - top < 30 || right - left < 30) return { top: 0, bottom: H, left: 0, right: W };
+  return { top, bottom, left, right };
+}
+
 // 전역 정규화 [yStart, yEnd) 를 걸친 파일들에서 잘라 세로로 합쳐 PNG 버퍼로.
 // xStart/xEnd 주면 좌우도 크롭. canvas: { refWidth, offsets, normHeights }.
 export async function extractRegion(canvas, fileBuffers, yStart, yEnd, xStart, xEnd) {

@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { put } from "@vercel/blob";
 import { getProject, saveProject, logProgress, resetProgress } from "./store.mjs";
-import { computeRowProfile, extractRegion, computeSideCrop } from "./imaging.mjs";
+import { computeRowProfile, extractRegion, trimBox } from "./imaging.mjs";
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
 import { detectScenesVLM } from "./detect-vlm.mjs";
@@ -77,13 +77,31 @@ export async function runSplit(projectId) {
   if (!regions || !regions.length) {
     await log("경계 검출(알고리즘)…");
     const candidates = detectRegions(global, cfg);
-    regions = [];
-    for (let i = 0; i < candidates.length; i++) {
-      const full = await extractRegion(canvas, buffers, candidates[i].yStart, candidates[i].yEnd);
-      const { xStart, xEnd } = await computeSideCrop(full, cfg.flatStdThreshold);
-      regions.push({ ...candidates[i], xStart, xEnd });
-    }
+    regions = candidates.map((c) => ({ yStart: c.yStart, yEnd: c.yEnd, xStart: 0, xEnd: refWidth }));
   }
+
+  // 여백 트림: 각 박스를 그려진 내용에 4변으로 딱 조인다(검은/단색/그라데이션 여백 제거).
+  await log(`장면 ${regions.length}개 여백 트림…`);
+  const trimmed = [];
+  for (let i = 0; i < regions.length; i++) {
+    const r = regions[i];
+    const x0 = r.xStart ?? 0;
+    const x1 = r.xEnd ?? refWidth;
+    let box = { yStart: r.yStart, yEnd: r.yEnd, xStart: x0, xEnd: x1 };
+    try {
+      const png = await extractRegion(canvas, buffers, r.yStart, r.yEnd, x0, x1);
+      const t = await trimBox(png, cfg.flatStdThreshold);
+      const ny0 = r.yStart + t.top;
+      const ny1 = r.yStart + t.bottom;
+      const nx0 = x0 + t.left;
+      const nx1 = x0 + t.right;
+      if (ny1 - ny0 >= 40 && nx1 - nx0 >= 40) box = { yStart: ny0, yEnd: ny1, xStart: nx0, xEnd: nx1 };
+    } catch (e) {
+      await log(`컷 ${i + 1} 트림 건너뜀: ${e?.message ?? e}`);
+    }
+    trimmed.push(box);
+  }
+  regions = trimmed;
   await log(`최종 장면 ${regions.length}개`);
 
   const scenes = regions.map((r, idx) => ({
