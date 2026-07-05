@@ -48,9 +48,16 @@ export function buildRegenPrompt(scene, project) {
   return p.slice(0, 1400);
 }
 
-// gpt-image-1 이 size 를 안 지킬 수 있어, 출력을 무조건 목표 크기로 리사이즈 → 일관 보장.
-async function normalizeSize(b64, size) {
-  const [TW, TH] = SIZE_WH[size] || [1536, 1024];
+// 프로젝트 비율의 '정확한' 최종 크기(gpt-image-1 3종 크기와 별개 — 진짜 16:9 등).
+function exactSize(project) {
+  const ar = project?.aspectRatio;
+  if (ar === "9:16") return [864, 1536];
+  if (ar === "1:1") return [1024, 1024];
+  return [1536, 864]; // 16:9
+}
+// gpt-image-1 출력(3:2 등)을 목표 비율로 크롭(fit cover) → 모든 컷 정확히 같은 비율·크기.
+async function normalizeSize(b64, project) {
+  const [TW, TH] = exactSize(project);
   return sharp(Buffer.from(b64, "base64")).resize(TW, TH, { fit: "cover" }).png().toBuffer();
 }
 
@@ -74,7 +81,7 @@ export async function regenScene(scene, imgBuf, project, key, model) {
   const d = await r.json();
   const b64 = d.data?.[0]?.b64_json;
   if (!b64) throw new Error("빈 이미지 응답");
-  return { buf: await normalizeSize(b64, size), cost: imageCostUsd() };
+  return { buf: await normalizeSize(b64, project), cost: imageCostUsd() };
 }
 
 // 마스크 재생성 — 원본 픽셀 보존 + [빈 공간 + 글씨 박스]만 채운다(원화 최대 충실).
@@ -140,5 +147,5 @@ export async function regenSceneMasked(scene, imgBuf, project, key, model) {
   const d = await r.json();
   const b64 = d.data?.[0]?.b64_json;
   if (!b64) throw new Error("빈 이미지 응답");
-  return { buf: await normalizeSize(b64, size), cost: imageCostUsd() };
+  return { buf: await normalizeSize(b64, project), cost: imageCostUsd() };
 }

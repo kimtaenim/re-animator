@@ -549,7 +549,7 @@ export async function runRegen(projectId, payload) {
       chunk.map(async (s) => {
         try {
           const imgBuf = await download(s.originalImage);
-          const mode = s.regenMode || "mask";
+          const mode = s.regenMode || p.regenMode || "mask";
           const gen = mode === "mask" ? regenSceneMasked : regenScene;
           const { buf, cost } = await gen(s, imgBuf, p, key, model);
           costTotal += cost;

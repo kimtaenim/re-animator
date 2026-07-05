@@ -125,6 +125,7 @@ export interface Project {
   id: string;
   name: string;
   aspectRatio: AspectRatio;
+  regenMode?: "mask" | "full"; // M3 기본 재생성 방식(프로젝트 공통). 기본 mask.
   stylePrompt: string; // 프로젝트층 프롬프트(화풍). M1 에선 설정만 보관.
   negativePrompt: string; // 기본: 말풍선·글자·텍스트 금지
 
