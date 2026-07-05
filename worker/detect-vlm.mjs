@@ -12,8 +12,8 @@ import { extractRegion } from "./imaging.mjs";
 import { recordCost } from "./store.mjs";
 import { loadPrompts } from "./config.mjs";
 
-const CHUNK = 1800;
-const OVERLAP = 300;
+const CHUNK = 2800; // 청크 높이 — 큰 인물이 한 청크에 온전히 들어오게 크게.
+const OVERLAP = 800; // 겹침 — 경계에 걸친 장면이 최소 한 청크엔 온전히 보이게.
 const GRID = 100;
 
 const PRICING = {
