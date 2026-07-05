@@ -22,3 +22,9 @@ export function loadPrompts() {
   const path = fileURLToPath(new URL("../config/prompts.json", import.meta.url));
   return JSON.parse(readFileSync(path, "utf8"));
 }
+
+// 만화 컷 온톨로지(config/ontology.json). 타입·textKind·스키마. 앱/워커 공통.
+export function loadOntology() {
+  const path = fileURLToPath(new URL("../config/ontology.json", import.meta.url));
+  return JSON.parse(readFileSync(path, "utf8"));
+}

@@ -2,7 +2,33 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { getProject, saveProject, setStep } from "@/lib/projectStore";
 import { enqueueJob, type Job } from "@/lib/jobQueue";
-import { type Scene } from "@/lib/types";
+import { type Scene, type CutOntology } from "@/lib/types";
+import { CUT_TYPES, TEXT_KINDS, blankCut } from "@/lib/ontology";
+
+const TYPE_IDS = new Set(CUT_TYPES.map((t) => t.id));
+const TEXTKIND_IDS = new Set(TEXT_KINDS.map((t) => t.id));
+
+// 클라 cut 을 신뢰 최소화로 정규화(타입/textKind 검증, 문자열 길이 제한).
+function cleanCut(raw: unknown): CutOntology {
+  const c = blankCut();
+  if (!raw || typeof raw !== "object") return c;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.type === "string" && TYPE_IDS.has(r.type as CutOntology["type"] as never)) {
+    c.type = r.type as CutOntology["type"];
+  }
+  if (c.type === "text" && typeof r.textKind === "string" && TEXTKIND_IDS.has(r.textKind as never)) {
+    c.textKind = r.textKind as CutOntology["textKind"];
+  }
+  if (Array.isArray(r.characters)) c.characters = r.characters.map(String).slice(0, 6);
+  if (typeof r.setting === "string") c.setting = r.setting.slice(0, 200);
+  if (Array.isArray(r.objects)) c.objects = r.objects.map(String).slice(0, 8);
+  if (typeof r.dialogue === "string") c.dialogue = r.dialogue.slice(0, 300);
+  if (typeof r.sfx === "string") c.sfx = r.sfx.slice(0, 120);
+  if (typeof r.promptDraft === "string") c.promptDraft = r.promptDraft.slice(0, 600);
+  if (typeof r.motion === "string") c.motion = r.motion.slice(0, 200);
+  c.confirmed = r.confirmed === true;
+  return c;
+}
 
 export const runtime = "nodejs";
 
@@ -11,7 +37,13 @@ export const runtime = "nodejs";
 export async function PUT(req: NextRequest) {
   let body: {
     projectId?: string;
-    regions?: { yStart: number; yEnd: number; xStart?: number; xEnd?: number }[];
+    regions?: {
+      yStart: number;
+      yEnd: number;
+      xStart?: number;
+      xEnd?: number;
+      cut?: unknown;
+    }[];
   };
   try {
     body = await req.json();
@@ -38,9 +70,16 @@ export async function PUT(req: NextRequest) {
   // 정규화·검증: 범위 클램프 + yStart<yEnd 인 것만 + 순서 정렬.
   const clean = regions
     .map((r) => {
-      const reg: { yStart: number; yEnd: number; xStart?: number; xEnd?: number } = {
+      const reg: {
+        yStart: number;
+        yEnd: number;
+        xStart?: number;
+        xEnd?: number;
+        cut: CutOntology;
+      } = {
         yStart: Math.max(0, Math.min(total, Math.round(r.yStart))),
         yEnd: Math.max(0, Math.min(total, Math.round(r.yEnd))),
+        cut: cleanCut(r.cut),
       };
       if (r.xStart != null && r.xEnd != null && r.xEnd > r.xStart) {
         reg.xStart = Math.round(r.xStart);
@@ -55,10 +94,11 @@ export async function PUT(req: NextRequest) {
   }
 
   // 기존 originalImage 는 경계가 바뀌면 무효 → 재추출 필요하므로 비운다.
-  const scenes: Scene[] = clean.map((r, i) => ({
+  const scenes: Scene[] = clean.map(({ cut, ...region }, i) => ({
     id: randomUUID(),
     order: i,
-    sourceRegion: r,
+    sourceRegion: region,
+    cut,
     status: "review",
   }));
   project.scenes = scenes;

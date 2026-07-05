@@ -9,18 +9,27 @@
 // ============================================================================
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { SourceFile, VirtualCanvas, Scene } from "@/lib/types";
+import type { SourceFile, VirtualCanvas, Scene, CutOntology, CutType } from "@/lib/types";
+import { CUT_TYPES, cutTypeKo, textKindKo, blankCut } from "@/lib/ontology";
+
+export type SavedRegion = {
+  yStart: number;
+  yEnd: number;
+  xStart?: number;
+  xEnd?: number;
+  cut?: CutOntology;
+};
 
 interface Props {
   sourceFiles: SourceFile[];
   canvas: VirtualCanvas;
   scenes: Scene[];
-  onSave: (regions: { yStart: number; yEnd: number }[]) => Promise<void>;
+  onSave: (regions: SavedRegion[]) => Promise<void>;
 }
 
-type Region = { yStart: number; yEnd: number; xStart?: number; xEnd?: number };
+type Region = SavedRegion;
 
-// scenes → 정렬된 region 배열(좌우 크롭 포함).
+// scenes → 정렬된 region 배열(좌우 크롭 + 컷 온톨로지 포함).
 function scenesToRegions(scenes: Scene[]): Region[] {
   return [...scenes]
     .sort((a, b) => a.order - b.order)
@@ -29,8 +38,20 @@ function scenesToRegions(scenes: Scene[]): Region[] {
       yEnd: s.sourceRegion.yEnd,
       xStart: s.sourceRegion.xStart,
       xEnd: s.sourceRegion.xEnd,
+      cut: s.cut ?? blankCut(),
     }));
 }
+
+// 타입별 색(중심 구분용). 캐릭터=액센트 계열, 맥락=중립, 텍스트=경고.
+const TYPE_COLOR: Record<string, string> = {
+  lead: "#1e90ff",
+  reaction: "#3aa0ff",
+  characters: "#5bb0ff",
+  crowd_space: "#12b886",
+  object: "#e0a021",
+  action: "#e0574d",
+  text: "#8a8f98",
+};
 
 const MIN_PX = 8; // 화면 픽셀 기준 최소 컷 높이
 
@@ -120,7 +141,22 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
       }
     }
     if (hi - lo < minH) return;
-    setRegions((prev) => [...prev, { yStart: lo, yEnd: hi }].sort((a, b) => a.yStart - b.yStart));
+    setRegions((prev) =>
+      [...prev, { yStart: lo, yEnd: hi, cut: blankCut() }].sort((a, b) => a.yStart - b.yStart)
+    );
+    setDirty(true);
+  }
+
+  // 컷 타입(중심) 확정 — 사람이 드롭다운으로 선택. confirmed=true 로 표시.
+  function setCutType(i: number, type: CutType) {
+    setRegions((prev) =>
+      prev.map((r, idx) => {
+        if (idx !== i) return r;
+        const cut = { ...(r.cut ?? blankCut()), type, confirmed: true };
+        if (type !== "text") cut.textKind = null;
+        return { ...r, cut };
+      })
+    );
     setDirty(true);
   }
 
@@ -190,19 +226,25 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
           {regions.map((r, i) => {
             const xs = r.xStart ?? 0;
             const xe = r.xEnd ?? canvas.refWidth;
+            const color = (r.cut?.type && TYPE_COLOR[r.cut.type]) || "var(--accent)";
             return (
             <div
               key={`reg-${i}`}
-              className="glow-accent absolute border-2 border-[var(--accent)]"
+              className="absolute border-2"
               style={{
                 top: r.yStart * scale,
                 height: (r.yEnd - r.yStart) * scale,
                 left: xs * scale,
                 width: (xe - xs) * scale,
+                borderColor: color,
+                boxShadow: `0 0 8px ${color}, 0 0 3px ${color}`,
               }}
             >
-              <div className="pointer-events-none absolute left-0.5 top-0.5 rounded bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                {i + 1}
+              <div
+                className="pointer-events-none absolute left-0.5 top-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                style={{ backgroundColor: color }}
+              >
+                {i + 1} · {cutTypeKo(r.cut?.type)}
               </div>
               <button
                 onClick={() => deleteRegion(i)}
@@ -235,6 +277,69 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
         밝은 박스 = 컷(패널 내용만). 어두운 띠 = 컷 사이 거터·여백(제외됨). 배경이 이어져 자동
         분할이 놓친 곳은 빈 곳을 더블클릭해 컷을 추가하세요.
       </p>
+
+      {/* 컷 중심(타입) 확정 — 사람이 각 컷의 중심을 고른다. 나중에 image-2 재생성에 쓰임. */}
+      <div className="mt-4">
+        <h3 className="mb-2 text-sm font-semibold">
+          컷 중심 확정{" "}
+          <span className="font-normal text-[var(--muted)]">
+            — 각 컷이 무엇 중심인지 (재생성·자막에 사용)
+          </span>
+        </h3>
+        <div className="max-h-[40vh] space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2">
+          {regions.map((r, i) => {
+            const cut = r.cut ?? blankCut();
+            const color = (cut.type && TYPE_COLOR[cut.type]) || "var(--muted)";
+            const brief =
+              [
+                cut.characters?.length ? `인물: ${cut.characters.join(", ")}` : "",
+                cut.setting ? `장소: ${cut.setting}` : "",
+                cut.dialogue ? `“${cut.dialogue}”` : "",
+                cut.sfx ? `효과음: ${cut.sfx}` : "",
+              ]
+                .filter(Boolean)
+                .join(" · ") || "내용 미검출";
+            return (
+              <div
+                key={`row-${i}`}
+                className="flex items-center gap-2 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1.5 text-xs"
+              >
+                <span
+                  className="grid h-5 w-6 shrink-0 place-items-center rounded text-[10px] font-bold text-white"
+                  style={{ backgroundColor: color }}
+                >
+                  {i + 1}
+                </span>
+                <select
+                  value={cut.type ?? ""}
+                  onChange={(e) => setCutType(i, e.target.value as CutType)}
+                  className="shrink-0 rounded border border-[var(--border)] bg-[var(--panel)] px-1.5 py-1 text-xs"
+                >
+                  <option value="" disabled>
+                    미분류
+                  </option>
+                  {CUT_TYPES.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.ko}
+                    </option>
+                  ))}
+                </select>
+                {cut.type === "text" && (
+                  <span className="shrink-0 text-[var(--muted)]">{textKindKo(cut.textKind) || "말풍선?"}</span>
+                )}
+                <span className="truncate text-[var(--muted)]" title={brief}>
+                  {brief}
+                </span>
+                {!cut.confirmed && cut.type && (
+                  <span className="ml-auto shrink-0 rounded bg-[var(--panel)] px-1 text-[10px] text-[var(--muted)]">
+                    AI
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

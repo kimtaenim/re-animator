@@ -61,10 +61,38 @@ export interface SourceRegion {
   xEnd?: number; // 없으면 refWidth.
 }
 
+// ── 컷 온톨로지 — 컷의 "중심"(타입) + 내용. config/ontology.json 이 어휘의 원천. ──
+// 분할 시 VLM 이 채우고 사람이 G1 에서 확정한다. 이후 image-2(재생성)에 레퍼런스+
+// 프롬프트로 넘어간다. regenerate=false 타입(text)은 자막/음향/타이틀로 라우팅.
+export type CutType =
+  | "lead" // 중심인물
+  | "reaction" // 반응인물
+  | "characters" // 인물들
+  | "crowd_space" // 군중 및 공간
+  | "object" // 사물
+  | "action" // 액션
+  | "text"; // 말풍선·효과음·타이틀 (재생성 X)
+
+export type TextKind = "dialogue" | "sfx" | "title";
+
+export interface CutOntology {
+  type: CutType | null; // null = 미분류(사람이 채움)
+  textKind: TextKind | null; // type=text 일 때만
+  characters: string[]; // 초점 인물 서술 → M2 캐스팅이 엔티티로 해소
+  setting: string; // 장소/배경 한 줄
+  objects: string[]; // 핵심 사물
+  dialogue: string; // 말풍선 텍스트(재생성 제외 → 자막/더빙)
+  sfx: string; // 의성어/효과음
+  promptDraft: string; // image-2 재생성용 초안(후속 보강)
+  motion: string; // I2V 모션 힌트(후속)
+  confirmed: boolean; // 사람이 G1 에서 타입 확정했는지
+}
+
 export interface Scene {
   id: string;
   order: number;
   sourceRegion: SourceRegion; // 가상 캔버스 전역 좌표
+  cut?: CutOntology; // 컷 온톨로지(타입+내용). 미분류면 type=null.
   originalImage?: string; // 추출된 원본 컷 Blob URL (확정 후 워커가 채움)
   status: StepStatus; // M1 에선 경계 확정 여부 관리에만 사용
 }

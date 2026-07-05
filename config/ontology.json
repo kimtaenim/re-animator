@@ -1,0 +1,33 @@
+{
+  "$comment": "만화 컷 온톨로지 — 컷 타입(중심)과 컷별 내용 스키마. 하드코딩 금지, 여기서만 튜닝. 컷 검출 후 VLM 이 각 컷을 type 으로 분류하고 내용을 뽑아 Scene.cut 에 채운다. 나중에 image-2(재생성)에 레퍼런스+프롬프트로 넘어간다. regenerate=false 는 그림 재생성 대신 자막/음향/타이틀로 처리.",
+
+  "cutTypes": [
+    { "id": "lead",        "ko": "중심인물",     "regenerate": true,  "entityRole": "character", "desc": "한 인물이 이 순간의 서사 중심(주인공의 동작·결정). 그 인물이 머리~발끝 온전히." },
+    { "id": "reaction",    "ko": "반응인물",     "regenerate": true,  "entityRole": "character", "desc": "한 인물의 반응 컷(표정·놀람 클로즈업). 대사보다 표정이 핵심." },
+    { "id": "characters",  "ko": "인물들",       "regenerate": true,  "entityRole": "character", "desc": "이름 있는 두셋 인물이 함께(대화·상호작용). 각 인물 온전히." },
+    { "id": "crowd_space", "ko": "군중 및 공간", "regenerate": true,  "entityRole": "context",   "desc": "익명 군중 또는 장소·배경이 주체(전경 설정샷·거리·군중). 개별 얼굴 일관성 불필요." },
+    { "id": "object",      "ko": "사물",         "regenerate": true,  "entityRole": "prop",      "desc": "특정 사물이 초점(돈·기기·화면·소품)." },
+    { "id": "action",      "ko": "액션",         "regenerate": true,  "entityRole": "context",   "desc": "움직임·충돌·역동 효과가 핵심인 컷." },
+    { "id": "text",        "ko": "텍스트",       "regenerate": false, "entityRole": null,        "desc": "말풍선·효과음·타이틀처럼 글자가 핵심. 그림 재생성 대신 자막/음향/타이틀로. textKind 로 세분." }
+  ],
+
+  "textKinds": [
+    { "id": "dialogue", "ko": "말풍선", "route": "subtitle_dub", "desc": "대사 → 자막·더빙" },
+    { "id": "sfx",      "ko": "효과음", "route": "sound",        "desc": "의성어 → 음향" },
+    { "id": "title",    "ko": "타이틀", "route": "title",        "desc": "표지·제목·크레딧 → 그대로/리스타일" }
+  ],
+
+  "$cutSchema": "Scene.cut 에 채워지는 필드 설명(문서용). type/textKind 는 위 id.",
+  "cutSchema": {
+    "type": "cutTypes.id 중 하나",
+    "textKind": "type=text 일 때 textKinds.id, 아니면 null",
+    "characters": "초점 인물 짧은 서술 배열 — M2 캐스팅이 엔티티(고정 레퍼런스)로 해소",
+    "setting": "장소/배경 한 줄",
+    "objects": "핵심 사물 배열",
+    "dialogue": "말풍선 안 텍스트(재생성 제외 → 자막/더빙). 없으면 빈 문자열",
+    "sfx": "의성어/효과음 텍스트. 없으면 빈 문자열",
+    "promptDraft": "image-2 재생성용 초안 프롬프트(후속 단계에서 보강)",
+    "motion": "I2V 모션 힌트(후속 단계)",
+    "confirmed": "사람이 G1 에서 타입을 확정했는지(boolean)"
+  }
+}

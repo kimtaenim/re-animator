@@ -10,6 +10,7 @@ import { computeRowProfile, extractRegion, trimBox } from "./imaging.mjs";
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
 import { splitTallRegions } from "./group.mjs";
+import { classifyScenes } from "./classify.mjs";
 import { loadSplitConfig } from "./config.mjs";
 
 async function download(url) {
@@ -105,10 +106,21 @@ export async function runSplit(projectId) {
   regions = trimmed;
   await log(`최종 장면 ${regions.length}개`);
 
+  // 4) 컷 온톨로지 분류 — 각 컷의 타입(중심)+내용. 사람이 G1 에서 확정.
+  let cuts = regions.map(() => null);
+  if (key) {
+    try {
+      cuts = await classifyScenes(canvas, buffers, regions, key, VLM_MODEL, log, projectId);
+    } catch (e) {
+      await log(`컷 분류 실패(미분류): ${e?.message ?? e}`);
+    }
+  }
+
   const scenes = regions.map((r, idx) => ({
     id: randomUUID(),
     order: idx,
     sourceRegion: { yStart: r.yStart, yEnd: r.yEnd, xStart: r.xStart, xEnd: r.xEnd },
+    cut: cuts[idx] ?? undefined,
     status: "review",
   }));
 

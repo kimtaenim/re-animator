@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { type Project, type StepKind, STEP_ORDER } from "@/lib/types";
-import BoundaryEditor from "./BoundaryEditor";
+import BoundaryEditor, { type SavedRegion } from "./BoundaryEditor";
 
 const STEP_LABEL: Record<StepKind, string> = {
   source: "1. 소스 · 컷 분할",
@@ -205,7 +205,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
-  async function saveRegions(regions: { yStart: number; yEnd: number }[]) {
+  async function saveRegions(regions: SavedRegion[]) {
     const r = await fetch("/api/boundaries", {
       method: "PUT",
       headers: { "content-type": "application/json" },
