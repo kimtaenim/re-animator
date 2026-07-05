@@ -373,13 +373,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
-  // 재생성 방식(프로젝트 공통): 마스크=원본보존+빈공간/글씨만, full=통째 재생성.
-  function setProjectRegenMode(mode: "mask" | "full") {
-    setProject((prev) => ({ ...prev, regenMode: mode }));
-    fetch(`/api/project/${project.id}`, {
+  // 컷별 재생성 방식(마스크=원본보존+빈공간/글씨만, full=통째 재생성). 드롭다운으로.
+  function setRegenMode(sceneId: string, mode: "mask" | "full") {
+    setProject((prev) => ({
+      ...prev,
+      scenes: prev.scenes.map((s) => (s.id === sceneId ? { ...s, regenMode: mode } : s)),
+    }));
+    fetch("/api/cut", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ regenMode: mode }),
+      body: JSON.stringify({ projectId: project.id, sceneId, regenMode: mode }),
     }).catch(() => {});
   }
 
@@ -804,28 +807,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     {o.t} {o.v}
                   </button>
                 ))}
-                <span className="ml-2 text-[var(--muted)]">방식:</span>
-                {(
-                  [
-                    { v: "mask", t: "마스크" },
-                    { v: "full", t: "전체" },
-                  ] as const
-                ).map((o) => (
-                  <button
-                    key={o.v}
-                    onClick={() => setProjectRegenMode(o.v)}
-                    title={
-                      o.v === "mask" ? "원본 보존 + 빈 공간·글씨만 채움" : "통째 재생성(재해석)"
-                    }
-                    className={`rounded border px-2 py-0.5 ${
-                      (project.regenMode || "mask") === o.v
-                        ? "border-[var(--accent)] text-[var(--accent)]"
-                        : "border-[var(--border)] text-[var(--muted)]"
-                    }`}
-                  >
-                    {o.t}
-                  </button>
-                ))}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -935,6 +916,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px]"
                         />
                         <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
+                          <select
+                            value={s.regenMode || "mask"}
+                            onChange={(e) => setRegenMode(s.id, e.target.value as "mask" | "full")}
+                            title="이 컷 재생성 방식"
+                            className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
+                          >
+                            <option value="mask">마스크</option>
+                            <option value="full">전체</option>
+                          </select>
                           {speaker && <span>화자: {speaker}</span>}
                           <div className="ml-auto flex items-center gap-1">
                             <button
@@ -948,10 +938,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             <button
                               onClick={() => regenOne(s.id)}
                               disabled={busy || regenRunning}
-                              className="rounded border border-[var(--border)] px-2 py-0.5 disabled:opacity-40"
+                              className="rounded bg-[var(--accent)] px-3 py-0.5 font-medium text-white disabled:opacity-40"
                               title="이 컷만 생성(테스트·재생성)"
                             >
-                              {s.generatedImage ? "다시" : "생성"}
+                              {s.generatedImage ? "다시 생성" : "생성"}
                             </button>
                           </div>
                         </div>
