@@ -529,15 +529,16 @@ export async function runRegen(projectId, payload) {
           );
           genById.set(s.id, { url });
           ok++;
+          await log(`컷 ${s.order + 1} 완료`);
         } catch (e) {
           genById.set(s.id, { error: String(e?.message ?? e) });
           await log(`컷 ${s.order + 1} 실패: ${String(e?.message ?? e).slice(0, 120)}`);
         }
+        await flush(false); // ★ 이미지 하나 끝날 때마다 반영 → 그때그때 화면에
       })
     );
     const doneN = Math.min(i + chunk.length, cand.length);
     await log(`진행 ${doneN}/${cand.length} (${Math.round((doneN / cand.length) * 100)}%)`);
-    await flush(false); // 청크 결과 즉시 반영
   }
 
   try {

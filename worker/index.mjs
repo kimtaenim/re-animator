@@ -57,8 +57,8 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m2-cast-v1");
-console.log("[worker] 시작 — jobq:split / extract / cast 폴링 중…");
+console.log("[worker] BUILD = m3-regen-v2");
+console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();
   await new Promise((r) => setTimeout(r, POLL_MS));
