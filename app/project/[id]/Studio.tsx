@@ -52,6 +52,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [srcOpen, setSrcOpen] = useState<boolean | null>(null); // null=기본(승인되면 접힘)
   const [regenOpen, setRegenOpen] = useState(true); // 3단계 컷 목록 접기
   const [vidPending, setVidPending] = useState<Set<string>>(() => new Set()); // 영상 생성 중인 컷
+  const [selForVideo, setSelForVideo] = useState<Set<string>>(() => new Set()); // 4단계 다중 선택
   const [genModel, setGenModel] = useState("gpt-image-2"); // 재생성 모델(비교용)
   const [costKrw, setCostKrw] = useState<number | null>(null);
   const [editingName, setEditingName] = useState(false);
@@ -592,6 +593,27 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setVidPending((prev) => new Set(prev).add(sceneId));
     runVideoJob([sceneId]);
   };
+  // 4단계 다중 선택 — 여러 컷 골라 한 번에 동영상 생성.
+  function toggleVideoSel(id: string) {
+    setSelForVideo((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+  function toggleSelectAllVideo() {
+    const ids = project.scenes.filter((s) => s.generatedImage).map((s) => s.id);
+    const all = ids.length > 0 && ids.every((id) => selForVideo.has(id));
+    setSelForVideo(all ? new Set() : new Set(ids));
+  }
+  function videoSelected() {
+    if (selForVideo.size === 0) return;
+    const ids = [...selForVideo];
+    setVidPending((prev) => new Set([...prev, ...ids]));
+    runVideoJob(ids);
+    setSelForVideo(new Set());
+  }
 
   // 워커 작업 중지 — 워커 프로세스는 못 죽이지만 UI 가 '진행 중'에 갇히지 않게 단계를 되돌림.
   async function cancelJob(step: "source" | "cast" | "regen" | "scene") {
@@ -1240,6 +1262,27 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             <span className="text-xs text-[var(--muted)]">
               — 재생성 컷 {project.scenes.filter((s) => s.generatedImage).length}개 · Grok I2V(초당 $0.05)
             </span>
+            {(() => {
+              const ids = project.scenes.filter((s) => s.generatedImage).map((s) => s.id);
+              const all = ids.length > 0 && ids.every((id) => selForVideo.has(id));
+              return (
+                <button
+                  onClick={toggleSelectAllVideo}
+                  className="ml-auto rounded border border-[var(--border)] px-2 py-2 text-sm"
+                >
+                  {all ? "선택 해제" : "전체 선택"}
+                </button>
+              );
+            })()}
+            {selForVideo.size > 0 && (
+              <button
+                onClick={videoSelected}
+                disabled={busy}
+                className="rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                선택 {selForVideo.size}개 생성
+              </button>
+            )}
             <button
               onClick={() => {
                 const ids = project.scenes.filter((s) => s.generatedImage).map((s) => s.id);
@@ -1247,7 +1290,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 runVideoJob();
               }}
               disabled={busy || sceneRunning}
-              className="ml-auto rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50"
+              className="rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50"
             >
               {sceneRunning ? "생성 중…" : "전체 동영상 생성"}
             </button>
@@ -1315,9 +1358,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     key={s.id}
                     className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2"
                   >
-                    <span className="w-6 shrink-0 pt-11 text-center text-xs text-[var(--muted)]">
-                      {s.order + 1}
-                    </span>
+                    <div className="flex w-6 shrink-0 flex-col items-center gap-1 pt-8">
+                      <input
+                        type="checkbox"
+                        checked={selForVideo.has(s.id)}
+                        onChange={() => toggleVideoSel(s.id)}
+                        title="다중 선택 생성용"
+                      />
+                      <span className="text-xs text-[var(--muted)]">{s.order + 1}</span>
+                    </div>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={s.generatedImage}
