@@ -3,10 +3,10 @@
 // ============================================================================
 // G1 컷 경계 편집기 — 스펙 §5.3 (콘텐츠-박스 방식)
 // ----------------------------------------------------------------------------
-// 웹툰은 세로로 길고 좁다 → 왼쪽에 좁은 스트립(원본+컷 박스), 낭비되던 오른쪽 가로
-// 공간에 각 컷의 "중심(타입)" 컨트롤을 컷의 세로 위치에 맞춰 배치. 사람은 그림 옆에서
-// 바로 판단·조정한다. 박스 모서리 드래그=크기, ✕=삭제, 빈 곳 더블클릭=추가.
-// 저장 시 regions({yStart,yEnd,xStart?,xEnd?,cut?}[])를 상위(Studio)의 onSave 로 넘긴다.
+// 웹툰은 세로로 길고 좁다. 좌: 좁은 스트립(원본+컷 박스, 드래그로 경계 조정).
+// 우: 넓은 가로 공간을 채우는 컷 카드 갤러리 — 각 컷 썸네일(원본에서 클립) + 중심
+// (타입) 선택 + 묘사. 두 열은 각자 독립 스크롤. 사람은 카드에서 그림 보며 확정한다.
+// 저장 시 regions({yStart,yEnd,xStart?,xEnd?,cut?}[])를 상위(Studio)의 onSave 로.
 // ============================================================================
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -55,10 +55,61 @@ const TYPE_COLOR: Record<string, string> = {
 };
 
 const MIN_PX = 8; // 화면 픽셀 기준 최소 컷 높이
+const THUMB_W = 150;
+const THUMB_H = 116;
+
+// 컷 영역을 원본에서 클립해 작은 썸네일로. 별도 추출 없이 CSS 로 잘라 보여준다.
+function CutThumb({
+  canvas,
+  files,
+  region,
+}: {
+  canvas: VirtualCanvas;
+  files: SourceFile[];
+  region: Region;
+}) {
+  const x0 = region.xStart ?? 0;
+  const x1 = region.xEnd ?? canvas.refWidth;
+  const regW = Math.max(1, x1 - x0);
+  const regH = Math.max(1, region.yEnd - region.yStart);
+  const scale = Math.min(THUMB_W / regW, THUMB_H / regH);
+  const tw = Math.max(1, regW * scale);
+  const th = Math.max(1, regH * scale);
+  return (
+    <div className="relative overflow-hidden rounded bg-black/50" style={{ width: tw, height: th }}>
+      <div
+        className="absolute"
+        style={{
+          width: canvas.refWidth * scale,
+          height: canvas.totalHeight * scale,
+          left: -x0 * scale,
+          top: -region.yStart * scale,
+        }}
+      >
+        {files.map((f, i) => {
+          const top = canvas.offsets[i];
+          const bottom = top + canvas.normHeights[i];
+          if (bottom <= region.yStart || top >= region.yEnd) return null; // 이 컷과 안 겹침
+          return (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={f.id}
+              src={f.url}
+              alt=""
+              draggable={false}
+              className="absolute left-0 w-full select-none"
+              style={{ top: top * scale, height: canvas.normHeights[i] * scale }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
-  const [displayW, setDisplayW] = useState(300);
+  const [displayW, setDisplayW] = useState(220);
   // regions 는 항상 yStart 오름차순 유지(렌더 인덱스=드래그 인덱스 일치).
   const [regions, setRegions] = useState<Region[]>(() => scenesToRegions(scenes));
   const [drag, setDrag] = useState<{ index: number; edge: "top" | "bottom" } | null>(null);
@@ -76,7 +127,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
   useLayoutEffect(() => {
     const el = boxRef.current;
     if (!el) return;
-    const measure = () => setDisplayW(el.clientWidth || 300);
+    const measure = () => setDisplayW(el.clientWidth || 220);
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -189,20 +240,10 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
   }
   if (cur < canvas.totalHeight) dims.push({ top: cur, height: canvas.totalHeight - cur });
 
-  // 컨트롤 레인 카드 위치 — 컷 y 에 맞추되, 짧은 컷들이 겹치지 않게 아래로 밀어 쌓는다.
-  // (렌더 중 가변 변수 재할당 금지 → 직전 카드 bottom 을 배열에서 유도.)
-  const CARD_H = 32;
-  const laid = regions.reduce<{ r: Region; i: number; top: number }[]>((acc, r, i) => {
-    const prevBottom = acc.length ? acc[acc.length - 1].top + CARD_H : 0;
-    const top = Math.max(r.yStart * scale, prevBottom);
-    return [...acc, { r, i, top }];
-  }, []);
-  const laneH = Math.max(totalPx, laid.length ? laid[laid.length - 1].top + CARD_H : 0);
-
   return (
     <div>
       <div className="mb-2 flex items-center justify-between text-xs text-[var(--muted)]">
-        <span>박스 모서리 드래그=크기 · ✕=삭제 · 빈 곳 더블클릭=추가 · 오른쪽에서 중심 선택</span>
+        <span>왼쪽: 박스 드래그=경계 · 빈 곳 더블클릭=추가 · 오른쪽 카드에서 중심 선택</span>
         <button
           onClick={save}
           disabled={!dirty || saving}
@@ -212,14 +253,14 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
         </button>
       </div>
 
-      <div className="max-h-[80vh] overflow-y-auto rounded-lg border border-[var(--border)] bg-black/40">
-        <div className="relative flex items-start gap-3 p-2" style={{ minHeight: laneH }}>
-          {/* 왼쪽: 좁은 웹툰 스트립 (세로로 긴 원본 + 컷 박스) */}
+      <div className="flex gap-3">
+        {/* 왼쪽: 경계 편집 스트립 (세로 원본 + 컷 박스, 드래그로 경계 조정) */}
+        <div className="max-h-[80vh] shrink-0 overflow-y-auto rounded-lg border border-[var(--border)] bg-black/40">
           <div
             ref={boxRef}
             onDoubleClick={addAt}
-            className="relative shrink-0"
-            style={{ width: "clamp(180px, 28vw, 300px)", height: totalPx }}
+            className="relative"
+            style={{ width: "clamp(140px, 18vw, 220px)", height: totalPx }}
           >
             {files.map((f, i) => (
               // eslint-disable-next-line @next/next/no-img-element
@@ -233,7 +274,6 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
               />
             ))}
 
-            {/* 컷 밖(거터·여백) 어둡게 */}
             {dims.map((d, i) => (
               <div
                 key={`dim-${i}`}
@@ -242,7 +282,6 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
               />
             ))}
 
-            {/* 컷 박스 */}
             {regions.map((r, i) => {
               const xs = r.xStart ?? 0;
               const xe = r.xEnd ?? canvas.refWidth;
@@ -257,7 +296,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
                     left: xs * scale,
                     width: (xe - xs) * scale,
                     borderColor: color,
-                    boxShadow: `0 0 6px ${color}`,
+                    boxShadow: `0 0 5px ${color}`,
                   }}
                 >
                   <div
@@ -266,13 +305,6 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
                   >
                     {i + 1}
                   </div>
-                  <button
-                    onClick={() => deleteRegion(i)}
-                    className="absolute right-0 top-0 grid h-4 w-4 place-items-center rounded-bl bg-[var(--danger)] text-[9px] leading-none text-white"
-                    title="이 컷 삭제"
-                  >
-                    ✕
-                  </button>
                   <div
                     onPointerDown={(e) => {
                       e.preventDefault();
@@ -291,10 +323,15 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
               );
             })}
           </div>
+        </div>
 
-          {/* 오른쪽: 컷 중심 컨트롤 레인 — 각 컷의 세로 위치에 맞춰(낭비되던 가로 공간 사용) */}
-          <div className="relative min-w-0 flex-1" style={{ height: laneH }}>
-            {laid.map(({ r, i, top }) => {
+        {/* 오른쪽: 컷 카드 갤러리 (썸네일 + 중심 + 묘사) — 넓은 가로 공간을 채운다 */}
+        <div className="max-h-[80vh] min-w-0 flex-1 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2">
+          <div
+            className="grid gap-2"
+            style={{ gridTemplateColumns: "repeat(auto-fill, minmax(158px, 1fr))" }}
+          >
+            {regions.map((r, i) => {
               const cut = r.cut ?? blankCut();
               const color = (cut.type && TYPE_COLOR[cut.type]) || "var(--muted)";
               const brief =
@@ -310,53 +347,76 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
               return (
                 <div
                   key={`card-${i}`}
-                  className="absolute left-0 right-0 flex items-center gap-1.5"
-                  style={{ top }}
+                  className="flex flex-col overflow-hidden rounded-lg border bg-[var(--panel-2)]"
+                  style={{ borderColor: cut.type ? color : "var(--border)" }}
                 >
-                  <span
-                    className="grid h-5 w-5 shrink-0 place-items-center rounded text-[10px] font-bold text-white"
-                    style={{ backgroundColor: color }}
+                  <div
+                    className="relative flex items-center justify-center bg-black/40"
+                    style={{ height: THUMB_H + 8 }}
                   >
-                    {i + 1}
-                  </span>
-                  <select
-                    value={cut.type ?? ""}
-                    onChange={(e) => setCutType(i, e.target.value as CutType)}
-                    className="shrink-0 rounded border bg-[var(--panel)] px-1 py-0.5 text-xs font-medium"
-                    style={{ borderColor: color, color }}
-                  >
-                    <option value="" disabled>
-                      미분류
-                    </option>
-                    {CUT_TYPES.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.ko}
-                      </option>
-                    ))}
-                  </select>
-                  {cut.type === "text" && (
-                    <select
-                      value={cut.textKind ?? "dialogue"}
-                      onChange={(e) => setTextKind(i, e.target.value as TextKind)}
-                      className="shrink-0 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-xs"
+                    <CutThumb canvas={canvas} files={files} region={r} />
+                    <span
+                      className="absolute left-1 top-1 rounded px-1 text-[10px] font-bold text-white"
+                      style={{ backgroundColor: color }}
                     >
-                      {TEXT_KINDS.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.ko}
+                      {i + 1}
+                    </span>
+                    <button
+                      onClick={() => deleteRegion(i)}
+                      className="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-[var(--danger)] text-[9px] leading-none text-white"
+                      title="이 컷 삭제"
+                    >
+                      ✕
+                    </button>
+                    {cut.type && !cut.confirmed && (
+                      <span
+                        className="absolute bottom-1 right-1 rounded bg-black/60 px-1 text-[9px] text-white"
+                        title="AI 제안(미확정)"
+                      >
+                        AI
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1 p-1.5">
+                    <div className="flex items-center gap-1">
+                      <select
+                        value={cut.type ?? ""}
+                        onChange={(e) => setCutType(i, e.target.value as CutType)}
+                        className="min-w-0 flex-1 rounded border bg-[var(--panel)] px-1 py-0.5 text-xs font-medium"
+                        style={{ borderColor: color, color: cut.type ? color : "var(--muted)" }}
+                      >
+                        <option value="" disabled>
+                          미분류
                         </option>
-                      ))}
-                    </select>
-                  )}
-                  {cut.type && !cut.confirmed && (
-                    <span className="shrink-0 text-[10px] text-[var(--muted)]" title="AI 제안(미확정)">
-                      AI
-                    </span>
-                  )}
-                  {brief && (
-                    <span className="truncate text-xs text-[var(--muted)]" title={brief}>
-                      {brief}
-                    </span>
-                  )}
+                        {CUT_TYPES.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.ko}
+                          </option>
+                        ))}
+                      </select>
+                      {cut.type === "text" && (
+                        <select
+                          value={cut.textKind ?? "dialogue"}
+                          onChange={(e) => setTextKind(i, e.target.value as TextKind)}
+                          className="shrink-0 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-xs"
+                        >
+                          {TEXT_KINDS.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.ko}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    {brief && (
+                      <p
+                        className="line-clamp-2 text-[11px] leading-tight text-[var(--muted)]"
+                        title={brief}
+                      >
+                        {brief}
+                      </p>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -365,8 +425,8 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, onSave }: 
       </div>
 
       <p className="mt-2 text-xs text-[var(--muted)]">
-        왼쪽 밝은 박스 = 컷(패널 내용만). 어두운 띠 = 거터·여백(제외). 오른쪽에서 각 컷의 <b>중심</b>을
-        고르면(재생성·자막에 사용) 박스 색이 바뀝니다. 자동 분할이 놓친 곳은 빈 곳을 더블클릭해 추가.
+        왼쪽 스트립에서 박스 모서리 드래그로 경계 조정, 빈 곳 더블클릭으로 컷 추가. 오른쪽 카드에서 각
+        컷의 <b>중심</b>을 확정하세요(재생성·자막에 사용). 고르면 카드·박스 색이 바뀝니다.
       </p>
     </div>
   );
