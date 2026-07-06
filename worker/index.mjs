@@ -89,7 +89,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m6-textregion-ocr-v1 (대사밴드 별도 OCR·이미지 안 합침)");
+console.log("[worker] BUILD = m6-extract-oom-fix-v1 (추출 PNG 누적 제거·OCR 재추출)");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();

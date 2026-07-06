@@ -907,6 +907,21 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     (s) => s.cut?.type === "person" || s.cut?.type === "action"
   ).length;
 
+  // 현재 도는 워커 작업 라벨(플로팅 표시용) — 스크롤/화면 전환과 무관하게 계속 보이게.
+  const workLabel = running
+    ? "컷 분할·추출"
+    : castRunning
+      ? "캐스팅"
+      : regenPolling
+        ? "이미지 재생성"
+        : scenePolling
+          ? "동영상 생성"
+          : composeRunning
+            ? "합성"
+            : portraitPending.size > 0
+              ? "실사 초상"
+              : "";
+
   // 진행 바 — 로그의 "(N%)" 를 뽑아 표시(없으면 안 그림). 모든 워커 단계 공용.
   const progressBar = () => {
     const m = progress.match(/\((\d+)%\)/);
@@ -1843,6 +1858,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         </span>{" "}
         <span className="opacity-60">(환율 1,500원 기준)</span>
       </footer>
+
+      {/* 워커 작업 플로팅 표시 — 스크롤·화면 전환과 무관하게 항상 보임 */}
+      {workLabel && (
+        <div className="fixed bottom-4 right-4 z-40 flex max-w-[90vw] items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-xs shadow-lg">
+          <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+          <span className="font-medium">{workLabel} 중</span>
+          {progress && <span className="truncate text-[var(--muted)]">· {progress}</span>}
+        </div>
+      )}
 
       {/* 클릭 확대(라이트박스) — 배경 클릭/✕ 로 닫기 */}
       {lightbox && (

@@ -252,40 +252,53 @@ export async function runExtract(projectId) {
   await log(`추출 대상 ${todo.length}컷 (전체 ${scenes.length}, 기존 유지 ${scenes.length - todo.length})`);
   for (const s of scenes) if (s.originalImage) s.status = "approved";
 
-  const pngById = new Map(); // 이번에 새로 추출한 풀해상도 컷 png (OCR 재사용)
+  // ★ 메모리: 추출 PNG 를 전부 들고 있지 않는다(예전 pngById 41장 누적 → raw 캔버스+소스와
+  // 겹쳐 OOM 크래시=먹통). 컷당 추출→업로드만 하고 버림. OCR 은 아래에서 그 영역만 다시 추출.
   for (let i = 0; i < todo.length; i++) {
     const s = todo[i];
-    await log(`컷 추출·업로드 ${i + 1}/${todo.length}…`);
-    const png = await extractRegion(
-      p.virtualCanvas,
-      buffers,
-      s.sourceRegion.yStart,
-      s.sourceRegion.yEnd,
-      s.sourceRegion.xStart,
-      s.sourceRegion.xEnd
-    );
-    pngById.set(s.id, png);
-    const { url } = await put(
-      `project/${projectId}/cut-${s.order}-${Date.now()}.png`,
-      png,
-      { access: "public", contentType: "image/png", addRandomSuffix: false }
-    );
-    s.originalImage = url;
-    s.status = "approved";
+    await log(`컷 추출·업로드 ${i + 1}/${todo.length}… (${Math.round((i / todo.length) * 100)}%)`);
+    try {
+      const png = await extractRegion(
+        p.virtualCanvas,
+        buffers,
+        s.sourceRegion.yStart,
+        s.sourceRegion.yEnd,
+        s.sourceRegion.xStart,
+        s.sourceRegion.xEnd
+      );
+      const { url } = await put(
+        `project/${projectId}/cut-${s.order}-${Date.now()}.png`,
+        png,
+        { access: "public", contentType: "image/png", addRandomSuffix: false }
+      );
+      s.originalImage = url;
+      s.status = "approved";
+    } catch (e) {
+      await log(`컷 ${s.order + 1} 추출 실패: ${String(e?.message ?? e).slice(0, 100)}`);
+    }
   }
 
-  // 글씨 읽기(OCR) — 이번에 새로 추출한 컷만. 풀해상도 컷으로 정확히.
+  // 글씨 읽기(OCR) — 추출 성공한 컷만. 메모리 절감 위해 그 영역만 다시 추출해서 읽는다.
   const key = process.env.OPENAI_API_KEY;
-  if (key && todo.length > 0) {
+  const ocrTodo = todo.filter((s) => s.originalImage);
+  if (key && ocrTodo.length > 0) {
     const OCR_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
-    const C = 4;
+    const C = Number(process.env.OCR_CONCURRENCY || 2); // 업스케일 이미지가 커서 동시성 낮게
     let done = 0;
-    for (let i = 0; i < todo.length; i += C) {
-      const chunk = todo.slice(i, i + C);
+    for (let i = 0; i < ocrTodo.length; i += C) {
+      const chunk = ocrTodo.slice(i, i + C);
       await Promise.all(
         chunk.map(async (s) => {
           try {
-            const own = await readCutText(pngById.get(s.id), key, OCR_MODEL);
+            const png = await extractRegion(
+              p.virtualCanvas,
+              buffers,
+              s.sourceRegion.yStart,
+              s.sourceRegion.yEnd,
+              s.sourceRegion.xStart,
+              s.sourceRegion.xEnd
+            );
+            const own = await readCutText(png, key, OCR_MODEL);
             if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
             // ★ OCR(풀해상도)이 이 컷 대사의 유일 정답. 자기 이미지 안 글자 = own.
             let allBubbles = [...(own.bubbles || [])];
@@ -320,8 +333,8 @@ export async function runExtract(projectId) {
           }
         })
       );
-      done = Math.min(i + C, todo.length);
-      await log(`글씨 읽기 ${done}/${todo.length}`);
+      done = Math.min(i + C, ocrTodo.length);
+      await log(`글씨 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%)`);
     }
   }
 
