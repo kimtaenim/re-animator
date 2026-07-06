@@ -818,12 +818,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     cast: Character[],
     speakers: Record<string, string>,
     bubbleSpeakers: Record<string, string>,
+    narrationSpeakers: Record<string, string>,
     approve: boolean
   ) {
     const r = await fetch("/api/cast", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ projectId: project.id, cast, speakers, bubbleSpeakers, approve }),
+      body: JSON.stringify({
+        projectId: project.id,
+        cast,
+        speakers,
+        bubbleSpeakers,
+        narrationSpeakers,
+        approve,
+      }),
     });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error ?? "저장 실패");
@@ -1327,14 +1335,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           placeholder="대사 (이 칸에 들어갈 자막·더빙)"
                           className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px]"
                         />
-                        {(s.cut?.narration ?? "") !== "" && (
-                          <input
-                            value={s.cut?.narration ?? ""}
-                            onChange={(e) => updateCut(s.id, { narration: e.target.value })}
-                            placeholder="나레이션/자막(위·아래 흡수됨)"
-                            className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px] text-[var(--muted)]"
-                          />
-                        )}
+                        <input
+                          value={s.cut?.narration ?? ""}
+                          onChange={(e) => updateCut(s.id, { narration: e.target.value })}
+                          placeholder="나레이션/자막 (없으면 직접 입력)"
+                          className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px] text-[var(--muted)]"
+                        />
                         <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
                           {speaker && <span>화자: {speaker}</span>}
                           <div className="ml-auto flex items-center gap-1">

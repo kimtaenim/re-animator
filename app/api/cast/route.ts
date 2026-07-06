@@ -71,6 +71,7 @@ export async function PUT(req: NextRequest) {
     cast?: unknown;
     speakers?: unknown;
     bubbleSpeakers?: unknown;
+    narrationSpeakers?: unknown;
     approve?: boolean;
   };
   try {
@@ -143,6 +144,16 @@ export async function PUT(req: NextRequest) {
       const m = bySceneIdx.get(s.id);
       if (!m || !s.cut?.bubbles) continue;
       s.cut.bubbles = s.cut.bubbles.map((b, i) => (m.has(i) ? { ...b, speakerId: m.get(i) } : b));
+    }
+  }
+
+  // 내레이션 화자: { sceneId: charId | "" } → cut.narrationSpeakerId.
+  if (body.narrationSpeakers && typeof body.narrationSpeakers === "object") {
+    const ns = body.narrationSpeakers as Record<string, unknown>;
+    for (const s of project.scenes) {
+      if (!s.cut || !Object.prototype.hasOwnProperty.call(ns, s.id)) continue;
+      const v = ns[s.id];
+      s.cut.narrationSpeakerId = typeof v === "string" && castIds.has(v) ? v : null;
     }
   }
 

@@ -98,6 +98,7 @@ export interface CutOntology {
   dialogue: string; // 이 컷 대사 합침(하위호환·표시용). 풍선별은 bubbles 가 정답.
   bubbles?: DialogueBubble[]; // 말풍선 단위 대사+화자. OCR 이 풍선별로 채움.
   narration?: string; // 흡수된 위·아래 나레이션/자막(별도 — OCR 이 안 건드림)
+  narrationSpeakerId?: string | null; // 이 내레이션을 읽는 화자(나레이터). null=미상/기본
   speakerId?: string | null; // (레거시) 컷 단위 화자. bubbles 있으면 풍선별 speakerId 우선.
   textBoxes?: TextBox[]; // 글씨(말풍선·자막·효과음) 영역들(0~1 정규화) — 마스크 재생성용
   sfx: string; // 의성어/효과음
