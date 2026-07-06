@@ -964,8 +964,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         </p>
       )}
 
-      {/* 1) 소스 업로드 */}
-      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4">
+      {/* 1) 소스(좌) + 워커 상태(우) — 소스가 세로로 좁아 나란히 두면 스크롤이 줄어든다 */}
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start">
+      <section className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 lg:flex-1">
         <button
           type="button"
           onClick={() => setSrcOpen(!showSrc)}
@@ -1036,9 +1037,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         )}
       </section>
 
-      {/* 진행 표시 */}
+      {/* 워커 작업 상태 — 오른쪽 패널 */}
       {running && (
-        <div className="mb-6">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 lg:w-96 lg:shrink-0">
           <p className="flex items-center gap-2 text-sm text-[var(--muted)]">
             <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
             워커 작업 중… {progress && <span className="opacity-70">{progress}</span>}
@@ -1069,6 +1070,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           )}
         </div>
       )}
+      </div>
 
       {/* 2) G1 경계 편집 (검수 대기) */}
       {!running && canvas && hasCuts && sourceStatus === "review" && (
