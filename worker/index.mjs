@@ -89,7 +89,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m6-per-file-extract-v1 (거대 raw캔버스 제거·파일별 LRU 디코드)");
+console.log("[worker] BUILD = m6-ocr-all-cuts-v1 (OCR 전 컷 재실행·증분 아님)");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();

@@ -280,9 +280,10 @@ export async function runExtract(projectId) {
     }
   }
 
-  // 글씨 읽기(OCR) — 추출 성공한 컷만. 메모리 절감 위해 그 영역만 다시 추출해서 읽는다.
+  // 글씨 읽기(OCR) — ★ 증분 아님. 이미지 있는 '모든' 컷을 매번 다시 읽는다(예전엔 새 컷만
+  // 읽어서, 재추출해도 옛 컷 대사가 안 갱신됐음). 메모리 위해 그 영역만 다시 추출해서 읽음.
   const key = process.env.OPENAI_API_KEY;
-  const ocrTodo = todo.filter((s) => s.originalImage);
+  const ocrTodo = scenes.filter((s) => s.originalImage);
   if (key && ocrTodo.length > 0) {
     const OCR_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
     const C = Number(process.env.OCR_CONCURRENCY || 2); // 업스케일 이미지가 커서 동시성 낮게
