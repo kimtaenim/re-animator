@@ -26,6 +26,8 @@ interface Props {
     narrationSpeakers: Record<string, string>,
     approve: boolean
   ) => Promise<void>;
+  onDesignPortrait: (charId: string, prompt?: string) => void;
+  portraitPending: Map<string, string>;
 }
 
 // 컷의 대사 단위 목록 — bubbles 있으면 풍선별(idx≥0), 없으면 레거시 통대사(idx=-1).
@@ -83,7 +85,13 @@ function relabel(list: Character[]): Character[] {
     }));
 }
 
-export default function CastReview({ scenes, cast: initial, onSave }: Props) {
+export default function CastReview({
+  scenes,
+  cast: initial,
+  onSave,
+  onDesignPortrait,
+  portraitPending,
+}: Props) {
   const [cast, setCast] = useState<Character[]>(initial);
   const [saving, setSaving] = useState<null | "save" | "approve">(null);
 
@@ -182,6 +190,9 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
   }
   function setDescription(charId: string, description: string) {
     setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, description } : c)));
+  }
+  function setRealPrompt(charId: string, realPrompt: string) {
+    setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, realPrompt } : c)));
   }
   function setRef(charId: string, sceneId: string) {
     setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, refSceneId: sceneId } : c)));
@@ -352,6 +363,38 @@ export default function CastReview({ scenes, cast: initial, onSave }: Props) {
                 )}
               </div>
               <span className="ml-auto shrink-0 text-xs text-[var(--muted)]">{c.sceneIds.length}컷</span>
+            </div>
+            {/* 실사화 얼굴 고정용 초상 — 3단계 '실사화' 재생성에서 이 캐릭터 얼굴 레퍼런스로 쓰임 */}
+            <div className="mb-2 flex items-center gap-2">
+              {c.realImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={c.realImage}
+                  alt="실사"
+                  className="h-14 w-14 shrink-0 rounded border border-[var(--accent)] object-cover"
+                />
+              ) : (
+                <div className="grid h-14 w-14 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] text-center text-[9px] text-[var(--muted)]">
+                  실사 초상
+                </div>
+              )}
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <button
+                  onClick={() => onDesignPortrait(c.id, c.realPrompt)}
+                  disabled={portraitPending.has(c.id)}
+                  className="self-start rounded bg-[var(--accent)] px-2 py-0.5 text-xs font-medium text-white disabled:opacity-40"
+                  title="대표 컷 → 실사 인물 초상(실사화 재생성 얼굴 고정)"
+                >
+                  {portraitPending.has(c.id) ? "생성 중…" : c.realImage ? "🧑 실사 다시" : "🧑 실사화"}
+                </button>
+                <input
+                  value={c.realPrompt ?? ""}
+                  onChange={(e) => setRealPrompt(c.id, e.target.value)}
+                  onBlur={scheduleSave}
+                  placeholder="실사 지시(선택): 예 30대, 부드러운 인상"
+                  className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-[11px] text-[var(--muted)]"
+                />
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               {c.sceneIds.map((sid) => {

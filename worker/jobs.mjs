@@ -19,7 +19,13 @@ import { detectRegions } from "./detect.mjs";
 import { splitTallRegions, forceSplit } from "./group.mjs";
 import { classifyScenes } from "./classify.mjs";
 import { classifyCast } from "./cast.mjs";
-import { regenScene, regenSceneMasked, REGEN_CONCURRENCY } from "./regen.mjs";
+import {
+  regenScene,
+  regenSceneMasked,
+  regenScenePhoto,
+  makePortrait,
+  REGEN_CONCURRENCY,
+} from "./regen.mjs";
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { readCutText } from "./ocr.mjs";
@@ -597,14 +603,28 @@ export async function runRegen(projectId, payload) {
         try {
           let buf, cost;
           const sel = resolveModel(s.id);
-          const useFal = sel === "fal" || sel.startsWith("flux");
+          const photoreal = sel === "photoreal"; // 실사화(image-2 + 캐릭터 실사 레퍼런스)
+          const useFal = !photoreal && (sel === "fal" || sel.startsWith("flux"));
           const openaiModel = sel.startsWith("gpt-image")
             ? sel
             : process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
           if (useFal && !falKey) throw new Error("FAL_KEY 없음(Render 워커 환경변수)");
           if (!useFal && !key) throw new Error("OPENAI_API_KEY 없음");
           const mode = s.regenMode || p.regenMode || "mask";
-          if (useFal) {
+          if (photoreal) {
+            const imgBuf = await download(s.originalImage);
+            // 이 컷에 등장하는 캐릭터의 실사 초상을 얼굴 고정 레퍼런스로(최대 3장).
+            const refBufs = [];
+            for (const c of p.cast ?? []) {
+              if (refBufs.length >= 3) break;
+              if (c.realImage && (c.sceneIds ?? []).includes(s.id)) {
+                try {
+                  refBufs.push(await download(c.realImage));
+                } catch {}
+              }
+            }
+            ({ buf, cost } = await regenScenePhoto(s, imgBuf, p, key, refBufs));
+          } else if (useFal) {
             if (mode === "mask") {
               const imgBuf = await download(s.originalImage);
               ({ buf, cost } = await regenSceneMaskedFal(s, imgBuf, p, falKey));
@@ -649,6 +669,48 @@ export async function runRegen(projectId, payload) {
   await flush(true); // 마지막 반영 + 단계 review
   await log(`재생성 완료: ${ok}/${cand.length} (~$${costTotal.toFixed(3)})`);
   return ok;
+}
+
+// ── portrait: 캐릭터 대표 컷 → 실사 인물 초상 생성 → Character.realImage. 캐스팅 얼굴 고정용.
+//    payload { charId }. cast 단계 상태는 안 건드림(캐스팅 UI 유지) — 앱이 cast 를 폴링해 반영.
+export async function runPortrait(projectId, payload) {
+  await resetProgress(projectId);
+  const log = async (m) => {
+    console.error("[portrait]", m);
+    await logProgress(projectId, m);
+  };
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENAI_API_KEY 없음");
+  const charId = payload?.charId;
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  const ch = (p.cast ?? []).find((c) => c.id === charId);
+  if (!ch) throw new Error("캐릭터를 찾을 수 없어요");
+  // 대표 컷(refSceneId) 원본 이미지. 없으면 첫 sceneId.
+  const refSid = ch.refSceneId || ch.sceneIds?.[0];
+  const refScene = (p.scenes ?? []).find((s) => s.id === refSid);
+  const srcUrl = refScene?.originalImage;
+  if (!srcUrl) throw new Error("대표 컷 이미지가 없어요(컷 추출 먼저)");
+  await log(`${ch.label} 실사 초상 생성…`);
+  const refBuf = await download(srcUrl);
+  const { buf } = await makePortrait(refBuf, key, ch.realPrompt);
+  const { url } = await put(`project/${projectId}/portrait-${charId}-${Date.now()}.png`, buf, {
+    access: "public",
+    contentType: "image/png",
+    addRandomSuffix: false,
+  });
+  // 최신 상태 재읽기 후 그 캐릭터만 realImage 반영(다른 편집 안 덮게).
+  const pp = (await getProject(projectId)) ?? p;
+  const c2 = (pp.cast ?? []).find((c) => c.id === charId);
+  if (c2) {
+    c2.realImage = url;
+    await saveProject(pp);
+  }
+  try {
+    await recordCost({ projectId, vendor: "openai", model: "gpt-image-2", costUsd: 0.04, meta: { kind: "portrait", charId } });
+  } catch {}
+  await log(`${ch.label} 실사 초상 완료`);
+  return 1;
 }
 
 // 영상 길이(초) 추정. 우선순위: ①사람 지정(cut.durationSec) → ②대사 글자 수(한국어 ~5자/초)

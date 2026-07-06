@@ -134,6 +134,8 @@ export interface Character {
   sceneIds: string[]; // 이 인물이 나오는 컷 id 들
   voice?: string; // 더빙 목소리 — Typecast voice_id(tc_…). M4 더빙에 사용.
   voiceName?: string; // 표시용 목소리 이름(선택). 목록 재조회 없이 라벨 표시.
+  realImage?: string; // 실사화 인물 초상 Blob URL — 실사화 재생성 시 얼굴 고정 레퍼런스.
+  realPrompt?: string; // 실사 초상 디자인용 추가 지시(선택).
 }
 
 // ── 프로젝트 ──────────────────────────────────────────────────────────────────

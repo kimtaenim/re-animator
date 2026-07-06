@@ -109,6 +109,8 @@ export async function PUT(req: NextRequest) {
       sceneIds,
       voice: typeof r.voice === "string" && r.voice ? r.voice.slice(0, 80) : undefined,
       voiceName: typeof r.voiceName === "string" ? r.voiceName.slice(0, 60) : undefined,
+      realImage: typeof r.realImage === "string" && r.realImage ? r.realImage : undefined,
+      realPrompt: typeof r.realPrompt === "string" ? r.realPrompt.slice(0, 400) : undefined,
     });
   }
 

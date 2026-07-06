@@ -91,6 +91,74 @@ export async function regenScene(scene, imgBuf, project, key, model) {
   return { buf: await normalizeSize(b64, project), cost: imageCostUsd() };
 }
 
+// ── 실사화(photorealistic) — 만화 컷을 실사 영화 스틸로. 얼굴 고정을 위해 캐릭터 실사 초상
+// (refBufs)을 추가 레퍼런스로 함께 넣는다. gpt-image-2 edits(멀티 이미지). ──────────────
+export function buildPhotoPrompt(scene, project, nRefs) {
+  const cut = scene.cut ?? {};
+  let p =
+    "Turn this comic/webtoon panel into a PHOTOREALISTIC live-action film still — real human skin and hair, real fabrics, natural cinematic lighting and depth of field, as if shot on a camera. Not a drawing or 3D render. " +
+    "Keep the SAME composition, camera angle, poses, gestures, expressions, clothing, setting and mood as the input panel. Do not add or remove people. Remove ALL text (speech bubbles, captions, lettering) and fill behind naturally.";
+  if (nRefs > 0) {
+    p +=
+      " The extra reference image(s) show the REAL-LIFE face/appearance of the main character(s) in this scene — render the matching person(s) to look like those references (same face, hair, age, identity), consistently.";
+  }
+  const content = String(cut.description || "").trim();
+  if (content) p += ` Scene: ${content}`;
+  p += ` Compose to completely fill ${frameDesc(project)}, edge to edge — no black bars, margins, or borders.`;
+  const style = String(project.stylePrompt || "").trim();
+  if (style) p += ` Extra note: ${style}.`;
+  return p.slice(0, 1400);
+}
+
+export async function regenScenePhoto(scene, imgBuf, project, key, refBufs = []) {
+  const [W, H] = reqSize(project, "gpt-image-2");
+  const form = new FormData();
+  form.append("model", process.env.OPENAI_IMAGE_MODEL || "gpt-image-2");
+  // 멀티 이미지: 첫째=컷, 이후=캐릭터 실사 레퍼런스(얼굴 고정). 필드명 image[] 반복.
+  form.append("image[]", new Blob([imgBuf], { type: "image/png" }), "cut.png");
+  refBufs.forEach((b, i) => form.append("image[]", new Blob([b], { type: "image/png" }), `ref${i}.png`));
+  form.append("prompt", buildPhotoPrompt(scene, project, refBufs.length));
+  form.append("size", `${W}x${H}`);
+  form.append("n", "1");
+  form.append("quality", REGEN_QUALITY);
+  const r = await fetch("https://api.openai.com/v1/images/edits", {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}` },
+    body: form,
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
+  const d = await r.json();
+  const b64 = d.data?.[0]?.b64_json;
+  if (!b64) throw new Error("빈 이미지 응답");
+  return { buf: await normalizeSize(b64, project), cost: imageCostUsd() };
+}
+
+// 캐릭터 대표 컷 → 실사 인물 초상(정사각). 캐스팅에서 '실사화 디자인'용.
+export async function makePortrait(refBuf, key, extraPrompt) {
+  const form = new FormData();
+  form.append("model", process.env.OPENAI_IMAGE_MODEL || "gpt-image-2");
+  form.append("image", new Blob([refBuf], { type: "image/png" }), "ref.png");
+  let p =
+    "From this drawn comic character, generate a PHOTOREALISTIC portrait of the SAME person as a real human — head and shoulders, facing camera, neutral soft background, natural lighting. Keep their hair style/color, face shape, age, skin tone, clothing and distinctive features faithful to the drawing. Photorealistic, not illustration. No text, no border.";
+  if (extraPrompt && extraPrompt.trim()) p += ` ${extraPrompt.trim()}`;
+  form.append("prompt", p);
+  form.append("size", "1024x1024");
+  form.append("n", "1");
+  form.append("quality", REGEN_QUALITY);
+  const r = await fetch("https://api.openai.com/v1/images/edits", {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}` },
+    body: form,
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
+  const d = await r.json();
+  const b64 = d.data?.[0]?.b64_json;
+  if (!b64) throw new Error("빈 초상 응답");
+  return { buf: Buffer.from(b64, "base64"), cost: imageCostUsd() };
+}
+
 // 마스크 입력(합성 이미지 + 마스크 2종 + 프롬프트) 생성 — OpenAI edits · fal Fill 공용.
 // 목표 비율 캔버스에 컷을 contain 배치. 마스크는 두 관례가 반대라 각각 만든다:
 //   OpenAI(RGBA alpha): 0=채움, 255=보존.   fal Fill(그레이): 흰(255)=채움, 검정(0)=보존.

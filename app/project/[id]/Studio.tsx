@@ -56,6 +56,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const regenSawRunning = useRef(false); // 재생성 잡이 실제 running 을 거쳤는지(스피너 조기 해제 방지)
   const [selForVideo, setSelForVideo] = useState<Set<string>>(() => new Set()); // 4단계 다중 선택
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
+  const [portraitPending, setPortraitPending] = useState<Map<string, string>>(() => new Map()); // 실사 초상 생성 중(값=옛 realImage url)
   const [genModel, setGenModel] = useState("gpt-image-2"); // 재생성 모델(비교용)
   const [costKrw, setCostKrw] = useState<number | null>(null);
   const [editingName, setEditingName] = useState(false);
@@ -844,6 +845,59 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }));
   }
 
+  // 캐스팅 — 캐릭터 실사 초상 디자인(얼굴 고정용). 잡 적재 → cast 폴링으로 realImage 반영.
+  async function designPortrait(charId: string, prompt?: string) {
+    setPortraitPending((prev) => {
+      const n = new Map(prev);
+      n.set(charId, project.cast?.find((c) => c.id === charId)?.realImage ?? "");
+      return n;
+    });
+    try {
+      const r = await fetch("/api/portrait", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, charId, prompt }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "실사화 실패");
+    } catch (e) {
+      setPortraitPending((prev) => {
+        const n = new Map(prev);
+        n.delete(charId);
+        return n;
+      });
+      setError(e instanceof Error ? e.message : "실사화 실패");
+    }
+  }
+  const pollPortraits = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/cast?projectId=${project.id}`, { cache: "no-store" });
+      const d = await r.json();
+      if (!d.ok) return;
+      setProgress(d.progress ?? "");
+      setProject((prev) => ({ ...prev, cast: d.cast ?? prev.cast }));
+      setPortraitPending((prev) => {
+        if (prev.size === 0) return prev;
+        const n = new Map(prev);
+        for (const c of (d.cast ?? []) as { id: string; realImage?: string }[]) {
+          if (n.has(c.id) && c.realImage && c.realImage !== n.get(c.id)) n.delete(c.id);
+        }
+        return n;
+      });
+    } catch {
+      /* 다음 틱 */
+    }
+  }, [project.id]);
+  useEffect(() => {
+    if (portraitPending.size === 0) return;
+    const t = setInterval(pollPortraits, 3000);
+    const first = setTimeout(pollPortraits, 0);
+    return () => {
+      clearInterval(t);
+      clearTimeout(first);
+    };
+  }, [portraitPending.size, pollPortraits]);
+
   const canvas = project.virtualCanvas;
   const hasCuts = project.scenes.length > 0;
   const approved = sourceStatus === "approved";
@@ -1104,7 +1158,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   ✓ 캐스팅 확정됨 — 이후 재생성(M3)에서 인물별 레퍼런스로 사용
                 </p>
               )}
-              <CastReview scenes={project.scenes} cast={project.cast ?? []} onSave={saveCast} />
+              <CastReview
+                scenes={project.scenes}
+                cast={project.cast ?? []}
+                onSave={saveCast}
+                onDesignPortrait={designPortrait}
+                portraitPending={portraitPending}
+              />
             </>
           )}
         </section>
@@ -1138,6 +1198,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 >
                   <option value="gpt-image-2">gpt-image-2</option>
                   <option value="fal">Flux (fal.ai)</option>
+                  <option value="photoreal">실사화 (image-2)</option>
                 </select>
                 <span className="ml-1 text-[var(--muted)]">비율:</span>
                 {(
@@ -1390,6 +1451,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             >
                               <option value="gpt-image-2">gpt-image-2</option>
                               <option value="fal">Flux</option>
+                              <option value="photoreal">실사화</option>
                             </select>
                             <button
                               onClick={() => regenOne(s.id)}

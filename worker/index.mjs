@@ -11,13 +11,14 @@ import {
   runSplitCut,
   runMergeCut,
   runVideo,
+  runPortrait,
 } from "./jobs.mjs";
 import { runCompose } from "./compose.mjs";
 
 const POLL_MS = 3000;
 const JOB_TIMEOUT_MS = 12 * 60 * 1000; // 12분(재생성 배치 여유)
 
-const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen", "video", "compose"];
+const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen", "video", "compose", "portrait"];
 const JOB_FN = {
   split: runSplit,
   resplit: runResplit,
@@ -28,6 +29,7 @@ const JOB_FN = {
   regen: runRegen,
   video: runVideo,
   compose: runCompose,
+  portrait: runPortrait,
 };
 const JOB_STEP = {
   split: "source",
@@ -39,6 +41,7 @@ const JOB_STEP = {
   regen: "regen",
   video: "scene",
   compose: "compose",
+  portrait: "cast",
 };
 
 async function runJob(job) {
@@ -86,7 +89,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m5-video-compose-v2 (grok int-duration x2, ffmpeg optional)");
+console.log("[worker] BUILD = m6-photoreal-subtitle-v1 (실사화·자막·초상)");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();
