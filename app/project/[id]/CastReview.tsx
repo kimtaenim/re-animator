@@ -28,6 +28,7 @@ interface Props {
   ) => Promise<void>;
   onDesignPortrait: (charId: string, prompt?: string) => void;
   portraitPending: Map<string, string>;
+  onZoom: (src: string) => void;
 }
 
 // 컷의 대사 단위 목록 — bubbles 있으면 풍선별(idx≥0), 없으면 레거시 통대사(idx=-1).
@@ -91,6 +92,7 @@ export default function CastReview({
   onSave,
   onDesignPortrait,
   portraitPending,
+  onZoom,
 }: Props) {
   const [cast, setCast] = useState<Character[]>(initial);
   const [saving, setSaving] = useState<null | "save" | "approve">(null);
@@ -371,7 +373,8 @@ export default function CastReview({
                 <img
                   src={c.realImage}
                   alt="실사"
-                  className="h-14 w-14 shrink-0 rounded border border-[var(--accent)] object-cover"
+                  onClick={() => onZoom(c.realImage!)}
+                  className="h-14 w-14 shrink-0 cursor-zoom-in rounded border border-[var(--accent)] object-cover"
                 />
               ) : (
                 <div className="grid h-14 w-14 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] text-center text-[9px] text-[var(--muted)]">
