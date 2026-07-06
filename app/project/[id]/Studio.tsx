@@ -55,6 +55,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [regenPending, setRegenPending] = useState<Map<string, string>>(() => new Map()); // 재생성 중인 컷(값=요청시 옛 이미지 url)
   const regenSawRunning = useRef(false); // 재생성 잡이 실제 running 을 거쳤는지(스피너 조기 해제 방지)
   const [selForVideo, setSelForVideo] = useState<Set<string>>(() => new Set()); // 4단계 다중 선택
+  const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
   const [genModel, setGenModel] = useState("gpt-image-2"); // 재생성 모델(비교용)
   const [costKrw, setCostKrw] = useState<number | null>(null);
   const [editingName, setEditingName] = useState(false);
@@ -1291,7 +1292,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       <img
                         src={s.originalImage}
                         alt="원본"
-                        className="h-28 w-auto shrink-0 rounded border border-[var(--border)]"
+                        onClick={() => setLightbox({ type: "image", src: s.originalImage! })}
+                        className="h-28 w-auto shrink-0 cursor-zoom-in rounded border border-[var(--border)]"
                       />
                       <button
                         onClick={() => regenOne(s.id)}
@@ -1314,7 +1316,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         <img
                           src={s.generatedImage}
                           alt="생성"
-                          className="glow-accent h-28 w-auto shrink-0 rounded border border-[var(--accent)]"
+                          onClick={() => setLightbox({ type: "image", src: s.generatedImage! })}
+                          className="glow-accent h-28 w-auto shrink-0 cursor-zoom-in rounded border border-[var(--accent)]"
                         />
                       ) : (
                         <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] px-1 text-center text-[10px] text-[var(--muted)]">
@@ -1525,7 +1528,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     <img
                       src={s.generatedImage}
                       alt="생성"
-                      className="h-28 w-auto shrink-0 rounded border border-[var(--border)]"
+                      onClick={() => s.generatedImage && setLightbox({ type: "image", src: s.generatedImage })}
+                      className="h-28 w-auto shrink-0 cursor-zoom-in rounded border border-[var(--border)]"
                     />
                     <button
                       onClick={() => videoOne(s.id)}
@@ -1550,7 +1554,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         loop
                         muted
                         playsInline
-                        className="h-28 w-auto shrink-0 rounded border border-[var(--ok)] object-cover"
+                        onClick={() => s.videoUrl && setLightbox({ type: "video", src: s.videoUrl })}
+                        className="h-28 w-auto shrink-0 cursor-zoom-in rounded border border-[var(--ok)] object-cover"
                       />
                     ) : (
                       <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] px-1 text-center text-[10px] text-[var(--muted)]">
@@ -1768,6 +1773,38 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         </span>{" "}
         <span className="opacity-60">(환율 1,500원 기준)</span>
       </footer>
+
+      {/* 클릭 확대(라이트박스) — 배경 클릭/✕ 로 닫기 */}
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+        >
+          {lightbox.type === "image" ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={lightbox.src}
+              alt=""
+              className="max-h-[92vh] max-w-[92vw] rounded object-contain"
+            />
+          ) : (
+            <video
+              src={lightbox.src}
+              controls
+              autoPlay
+              loop
+              onClick={(e) => e.stopPropagation()}
+              className="max-h-[92vh] max-w-[92vw] rounded"
+            />
+          )}
+          <button
+            onClick={() => setLightbox(null)}
+            className="absolute right-4 top-4 rounded-md bg-white/20 px-3 py-1 text-sm text-white hover:bg-white/30"
+          >
+            ✕ 닫기
+          </button>
+        </div>
+      )}
     </div>
   );
 }
