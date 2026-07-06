@@ -37,10 +37,10 @@ const VIDEO_CONCURRENCY = Number(process.env.VIDEO_CONCURRENCY || 6);
 // 캐스팅 대상 = 인물이 담긴 컷. person(정지·반응) + action(동작 중 인물) 모두 포함.
 const CHARACTER_TYPES = new Set(["person", "action"]);
 
-// 말풍선·효과음 등 '글자만' 컷(text, textKind≠title)은 독립 컷으로 두지 않는다.
-// ★ 지우지 말고, y 로 가장 가까운 실제 장면의 '영역'을 이 글자 밴드까지 넓힌다 → 추출·OCR
-// 때 말풍선이 그 컷 이미지에 들어와 bubbles(대사)로 잡히고, 캐스팅에서 말풍선별 화자 지정 가능.
-// (예전엔 글자 컷을 지우고 저해상도 분류 대사만 나레이션으로 옮겨 → 텍스트 유실·부정확했음.)
+// 말풍선·효과음 등 '글자만' 컷(text, textKind≠title)은 독립 이미지 컷으로 두지 않는다.
+// ★ 이미지 컷 영역은 안 건드린다(깨끗하게 자기 영역만). 대신 그 글자 밴드의 '영역'을 y 로
+// 가장 가까운 실제 컷의 cut.textRegions 에 기록 → 추출(extract) 때 그 밴드만 따로 OCR 해서
+// 대사를 이웃 컷에 붙인다(이미지엔 말풍선을 합치지 않음). 유실·부정확 방지.
 function absorbTextCuts(scenes) {
   const arr = scenes.slice().sort((a, b) => a.sourceRegion.yStart - b.sourceRegion.yStart);
   const h = (s) => s.sourceRegion.yEnd - s.sourceRegion.yStart;
@@ -63,20 +63,15 @@ function absorbTextCuts(scenes) {
         best = r;
       }
     }
-    if (!best) continue;
-    // 실제 컷 영역을 이 글자 밴드 span 까지 넓힘(union) → 그 컷 이미지에 말풍선 포함.
-    const bu = best.sourceRegion;
-    const su = s.sourceRegion;
-    bu.yStart = Math.min(bu.yStart, su.yStart);
-    bu.yEnd = Math.max(bu.yEnd, su.yEnd);
-    // x 크롭: 하나라도 전체폭(undefined)이면 전체폭으로 — 말풍선이 옆으로 안 잘리게.
-    if (bu.xStart === undefined || su.xStart === undefined) {
-      bu.xStart = undefined;
-      bu.xEnd = undefined;
-    } else {
-      bu.xStart = Math.min(bu.xStart, su.xStart);
-      bu.xEnd = Math.max(bu.xEnd, su.xEnd);
-    }
+    if (!best || !best.cut) continue;
+    // 이미지 컷 영역은 그대로. 이 글자 밴드 영역만 이웃 컷에 기록(추출 때 따로 OCR).
+    if (!best.cut.textRegions) best.cut.textRegions = [];
+    best.cut.textRegions.push({
+      yStart: s.sourceRegion.yStart,
+      yEnd: s.sourceRegion.yEnd,
+      xStart: s.sourceRegion.xStart,
+      xEnd: s.sourceRegion.xEnd,
+    });
   }
   return reals;
 }
@@ -290,14 +285,36 @@ export async function runExtract(projectId) {
       await Promise.all(
         chunk.map(async (s) => {
           try {
-            const { bubbles, dialogue, sfx, boxes } = await readCutText(pngById.get(s.id), key, OCR_MODEL);
+            const own = await readCutText(pngById.get(s.id), key, OCR_MODEL);
             if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
-            // ★ OCR(풀해상도)이 이 컷 대사의 유일 정답 — 저해상도 분류 대사를 깨끗이 덮어씀.
-            // 풍선별 speakerId 는 기존 값(있으면 텍스트 매칭) 보존해 화자 귀속이 안 날아가게.
-            s.cut.bubbles = mergeBubbleSpeakers(bubbles, s.cut.bubbles, s.cut.speakerId);
-            s.cut.dialogue = (dialogue || "").trim();
+            // ★ OCR(풀해상도)이 이 컷 대사의 유일 정답. 자기 이미지 안 글자 = own.
+            let allBubbles = [...(own.bubbles || [])];
+            let sfx = own.sfx || "";
+            // 흡수된 '대사만' 밴드: 그 영역만 따로 추출·OCR → 대사를 이 컷에 붙인다(이미지엔 안 합침).
+            for (const tr of s.cut.textRegions ?? []) {
+              try {
+                const tpng = await extractRegion(
+                  p.virtualCanvas,
+                  buffers,
+                  tr.yStart,
+                  tr.yEnd,
+                  tr.xStart,
+                  tr.xEnd
+                );
+                const t = await readCutText(tpng, key, OCR_MODEL);
+                if (t.bubbles?.length) allBubbles = allBubbles.concat(t.bubbles);
+                if (t.sfx) sfx = sfx ? `${sfx} ${t.sfx}` : t.sfx;
+              } catch {}
+            }
+            // 풍선별 speakerId 는 기존 값(텍스트 매칭)으로 보존해 화자 귀속이 안 날아가게.
+            s.cut.bubbles = mergeBubbleSpeakers(allBubbles, s.cut.bubbles, s.cut.speakerId);
+            s.cut.dialogue = allBubbles
+              .map((b) => (b.text || "").trim())
+              .filter(Boolean)
+              .join("\n")
+              .slice(0, 500);
             if (sfx) s.cut.sfx = sfx;
-            s.cut.textBoxes = boxes;
+            s.cut.textBoxes = own.boxes; // 마스크는 '이 컷 이미지 안' 글자만(흡수 밴드는 이미지에 없음)
           } catch (e) {
             await log(`컷 ${s.order + 1} 글씨읽기 실패: ${String(e?.message ?? e).slice(0, 100)}`);
           }

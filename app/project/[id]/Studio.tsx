@@ -16,7 +16,7 @@ import CastReview from "./CastReview";
 const STEP_LABEL: Record<StepKind, string> = {
   source: "1. 소스 · 컷 분할",
   cast: "2. 캐스팅",
-  regen: "3. 재생성",
+  regen: "3. 이미지 재생성",
   scene: "4. 동영상 생성 및 더빙",
   compose: "5. 합성",
 };
@@ -1183,7 +1183,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 className="text-sm font-semibold"
                 title="접기/펼치기"
               >
-                {regenOpen ? "▾" : "▸"} 3. 재생성
+                {regenOpen ? "▾" : "▸"} 3. 이미지 재생성
                 {!regenOpen && (
                   <span className="ml-1 font-normal text-[var(--muted)]">
                     ({project.scenes.filter((s) => s.originalImage && s.cut?.type !== "text").length}컷)

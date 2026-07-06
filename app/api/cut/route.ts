@@ -56,6 +56,17 @@ function cleanCut(raw: unknown): CutOntology {
       }))
       .slice(0, 12);
   }
+  if (Array.isArray(r.textRegions)) {
+    c.textRegions = r.textRegions
+      .filter((b): b is Record<string, number> => !!b && typeof b === "object")
+      .map((b) => ({
+        yStart: Number(b.yStart) || 0,
+        yEnd: Number(b.yEnd) || 0,
+        ...(b.xStart != null ? { xStart: Number(b.xStart) } : {}),
+        ...(b.xEnd != null ? { xEnd: Number(b.xEnd) } : {}),
+      }))
+      .slice(0, 8);
+  }
   if (typeof r.sfx === "string") c.sfx = r.sfx.slice(0, 120);
   if (typeof r.description === "string") c.description = r.description.slice(0, 800);
   if (typeof r.promptDraft === "string") c.promptDraft = r.promptDraft.slice(0, 800);

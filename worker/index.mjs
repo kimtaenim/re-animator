@@ -89,7 +89,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m6-photoreal-subtitle-v1 (실사화·자막·초상)");
+console.log("[worker] BUILD = m6-textregion-ocr-v1 (대사밴드 별도 OCR·이미지 안 합침)");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();
