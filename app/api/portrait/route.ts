@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { getProject, saveProject } from "@/lib/projectStore";
+import { getProject } from "@/lib/projectStore";
 import { enqueueJob, type Job } from "@/lib/jobQueue";
 
 export const runtime = "nodejs";
@@ -24,18 +24,16 @@ export async function POST(req: NextRequest) {
   const ch = (project.cast ?? []).find((c) => c.id === charId);
   if (!ch) return NextResponse.json({ ok: false, error: "캐릭터 없음" }, { status: 404 });
 
-  // 프롬프트 편집분 저장(있으면).
-  if (typeof body.prompt === "string") {
-    ch.realPrompt = body.prompt.slice(0, 400);
-    await saveProject(project);
-  }
+  // prompt = 인종+자유지시 조합(이번 생성용). realPrompt/realEthnicity 자체는 캐스팅 저장이
+  // 따로 보존하므로 여기선 안 덮는다. payload 로 넘겨 worker 가 그대로 씀.
+  const prompt = typeof body.prompt === "string" ? body.prompt.slice(0, 500) : undefined;
 
   const now = Date.now();
   const job: Job = {
     id: randomUUID(),
     type: "portrait",
     projectId,
-    payload: { charId },
+    payload: { charId, ...(prompt ? { prompt } : {}) },
     status: "queued",
     createdAt: now,
     updatedAt: now,

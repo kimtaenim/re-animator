@@ -16,6 +16,18 @@ const CHARACTER_TYPES = new Set(["person", "action"]);
 
 type VoiceOpt = { id: string; name: string; language?: string };
 
+// 실사 초상 인종 칩 — [프롬프트용 영문, 표시 라벨]. 클릭 시 realEthnicity 에 영문 저장.
+const ETHNICITIES: [string, string][] = [
+  ["Korean", "한국"],
+  ["East Asian", "동양"],
+  ["White / Caucasian", "서양"],
+  ["Black / African", "흑인"],
+  ["Hispanic / Latino", "히스패닉"],
+  ["South Asian", "남아시아"],
+  ["Southeast Asian", "동남아"],
+  ["Middle Eastern", "중동"],
+];
+
 interface Props {
   scenes: Scene[];
   cast: Character[];
@@ -196,6 +208,16 @@ export default function CastReview({
   function setRealPrompt(charId: string, realPrompt: string) {
     setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, realPrompt } : c)));
   }
+  function setRealEthnicity(charId: string, realEthnicity: string) {
+    setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, realEthnicity } : c)));
+    scheduleSave();
+  }
+  // 실사화에 넘길 지시 = 인종 + 자유 지시 조합.
+  const buildRealInstr = (c: Character) =>
+    [c.realEthnicity ? `The person is ${c.realEthnicity}.` : "", c.realPrompt || ""]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
   function setRef(charId: string, sceneId: string) {
     setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, refSceneId: sceneId } : c)));
     scheduleSave();
@@ -383,13 +405,29 @@ export default function CastReview({
               )}
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <button
-                  onClick={() => onDesignPortrait(c.id, c.realPrompt)}
+                  onClick={() => onDesignPortrait(c.id, buildRealInstr(c))}
                   disabled={portraitPending.has(c.id)}
                   className="self-start rounded bg-[var(--accent)] px-2 py-0.5 text-xs font-medium text-white disabled:opacity-40"
                   title="대표 컷 → 실사 인물 초상(실사화 재생성 얼굴 고정)"
                 >
                   {portraitPending.has(c.id) ? "생성 중…" : c.realImage ? "🧑 실사 다시" : "🧑 실사화"}
                 </button>
+                <div className="flex flex-wrap gap-1">
+                  {ETHNICITIES.map(([val, label]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setRealEthnicity(c.id, c.realEthnicity === val ? "" : val)}
+                      className={`rounded border px-1.5 py-0.5 text-[10px] ${
+                        c.realEthnicity === val
+                          ? "border-[var(--accent)] font-medium text-[var(--accent)]"
+                          : "border-[var(--border)] hover:bg-[var(--panel-2)]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <input
                   value={c.realPrompt ?? ""}
                   onChange={(e) => setRealPrompt(c.id, e.target.value)}

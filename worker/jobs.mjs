@@ -752,7 +752,7 @@ export async function runPortrait(projectId, payload) {
   if (!srcUrl) throw new Error("대표 컷 이미지가 없어요(컷 추출 먼저)");
   await log(`${ch.label} 실사 초상 생성…`);
   const refBuf = await download(srcUrl);
-  const { buf } = await makePortrait(refBuf, key, ch.realPrompt);
+  const { buf } = await makePortrait(refBuf, key, payload?.prompt ?? ch.realPrompt);
   const { url } = await put(`project/${projectId}/portrait-${charId}-${Date.now()}.png`, buf, {
     access: "public",
     contentType: "image/png",

@@ -111,6 +111,7 @@ export async function PUT(req: NextRequest) {
       voiceName: typeof r.voiceName === "string" ? r.voiceName.slice(0, 60) : undefined,
       realImage: typeof r.realImage === "string" && r.realImage ? r.realImage : undefined,
       realPrompt: typeof r.realPrompt === "string" ? r.realPrompt.slice(0, 400) : undefined,
+      realEthnicity: typeof r.realEthnicity === "string" ? r.realEthnicity.slice(0, 60) : undefined,
     });
   }
 
