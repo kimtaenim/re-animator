@@ -37,43 +37,66 @@ const VIDEO_CONCURRENCY = Number(process.env.VIDEO_CONCURRENCY || 6);
 // 캐스팅 대상 = 인물이 담긴 컷. person(정지·반응) + action(동작 중 인물) 모두 포함.
 const CHARACTER_TYPES = new Set(["person", "action"]);
 
-// 말풍선·효과음 등 '글자만' 컷(text, textKind≠title)은 독립 이미지 컷으로 두지 않는다.
-// ★ 이미지 컷 영역은 안 건드린다(깨끗하게 자기 영역만). 대신 그 글자 밴드의 '영역'을 y 로
-// 가장 가까운 실제 컷의 cut.textRegions 에 기록 → 추출(extract) 때 그 밴드만 따로 OCR 해서
-// 대사를 이웃 컷에 붙인다(이미지엔 말풍선을 합치지 않음). 유실·부정확 방지.
+// 말풍선·효과음 등 '글자만' 작은 컷(text)은 독립 이미지 컷으로 두지 않고 제거한다.
+// 제거로 생긴 '틈'과 원래 컷 사이 빈 구간의 텍스트(내레이션 등)는 아래 addGapTextRegions 가
+// 이웃 컷의 textRegions 로 잡아 추출 때 따로 OCR 한다(이미지엔 안 합침).
 function absorbTextCuts(scenes) {
   const arr = scenes.slice().sort((a, b) => a.sourceRegion.yStart - b.sourceRegion.yStart);
   const h = (s) => s.sourceRegion.yEnd - s.sourceRegion.yStart;
   const heights = arr.map(h).sort((a, b) => a - b);
   const median = heights[Math.floor(heights.length / 2)] || 300;
-  // 흡수 대상: 타이틀 아닌 text 이면서 '작은' 컷(말풍선·자막 크기). 큰 패널이 text 로
-  // 오분류돼도 통째로 사라지지 않게 — 큰 text 는 실제 컷으로 남긴다(사람이 재분류).
   const isAbsorbable = (s) => s.cut?.type === "text" && h(s) < Math.max(280, median * 0.5);
   const reals = arr.filter((s) => !isAbsorbable(s));
-  if (reals.length === 0) return arr; // 전부 흡수대상이면 안전하게 그대로 둔다
-  const center = (s) => (s.sourceRegion.yStart + s.sourceRegion.yEnd) / 2;
-  for (const s of arr) {
-    if (!isAbsorbable(s) || !s.cut) continue;
+  return reals.length ? reals : arr; // 전부 흡수대상이면 그대로
+}
+
+// ★ 컷이 아닌 '빈 구간'(내레이션 밴드 등)도 텍스트가 있을 수 있다. 컷들이 안 덮은 y 구간 중
+// '내용 있는'(행별 평탄도 프로파일이 높은) 곳을 가장 가까운 컷의 textRegions 로 추가 → 추출 때
+// 따로 OCR 해 대사/내레이션을 그 컷에 붙인다. 평탄한 거터(내용 없음)는 건너뛴다.
+function addGapTextRegions(scenes, profile, totalHeight, log) {
+  if (!scenes.length) return 0;
+  const sorted = scenes.slice().sort((a, b) => a.sourceRegion.yStart - b.sourceRegion.yStart);
+  const gaps = [];
+  let cursor = 0;
+  const push = (a, b) => {
+    if (b - a > 24) gaps.push({ yStart: a, yEnd: b });
+  };
+  for (const s of sorted) {
+    push(cursor, s.sourceRegion.yStart);
+    cursor = Math.max(cursor, s.sourceRegion.yEnd);
+  }
+  push(cursor, totalHeight);
+  const avgStd = (a, b) => {
+    let sum = 0;
+    let n = 0;
+    for (let y = Math.max(0, Math.floor(a)); y < Math.min(profile.length, Math.ceil(b)); y++) {
+      sum += profile[y];
+      n++;
+    }
+    return n ? sum / n : 0;
+  };
+  let added = 0;
+  for (const g of gaps) {
+    if (added >= 24) break;
+    if (avgStd(g.yStart, g.yEnd) < 6) continue; // 평탄 = 거터, 텍스트 없음 → 스킵
+    const gc = (g.yStart + g.yEnd) / 2;
     let best = null;
-    let bestD = Infinity;
-    for (const r of reals) {
-      const d = Math.abs(center(r) - center(s));
-      if (d < bestD) {
-        bestD = d;
-        best = r;
+    let bd = Infinity;
+    for (const s of scenes) {
+      const c = (s.sourceRegion.yStart + s.sourceRegion.yEnd) / 2;
+      const d = Math.abs(c - gc);
+      if (d < bd) {
+        bd = d;
+        best = s;
       }
     }
-    if (!best || !best.cut) continue;
-    // 이미지 컷 영역은 그대로. 이 글자 밴드 영역만 이웃 컷에 기록(추출 때 따로 OCR).
+    if (!best) continue;
+    if (!best.cut) best.cut = { dialogue: "", sfx: "", type: null };
     if (!best.cut.textRegions) best.cut.textRegions = [];
-    best.cut.textRegions.push({
-      yStart: s.sourceRegion.yStart,
-      yEnd: s.sourceRegion.yEnd,
-      xStart: s.sourceRegion.xStart,
-      xEnd: s.sourceRegion.xEnd,
-    });
+    best.cut.textRegions.push({ yStart: g.yStart, yEnd: g.yEnd });
+    added++;
   }
-  return reals;
+  return added;
 }
 
 // 재추출/분할/합병 시 풍선별 화자(speakerId) 보존 — 새 OCR 풍선을 옛 풍선과 글자로 매칭해
@@ -214,6 +237,9 @@ export async function runSplit(projectId) {
   const before = rawScenes.length;
   const scenes = absorbTextCuts(rawScenes).map((s, i) => ({ ...s, order: i }));
   if (scenes.length !== before) await log(`말풍선 컷 흡수: ${before} → ${scenes.length}컷`);
+  // 컷 밖 빈 구간(내레이션 등)도 OCR 잡히게 이웃 컷 textRegions 로 예약.
+  const gapN = addGapTextRegions(scenes, global, canvas.totalHeight, log);
+  if (gapN) await log(`컷 밖 텍스트 구간 ${gapN}개 → 이웃 컷에 OCR 예약`);
 
   // 최신 프로젝트를 다시 읽어 결과만 병합(중간에 다른 갱신 있었을 수 있음).
   const p2 = await getProject(projectId);

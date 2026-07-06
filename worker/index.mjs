@@ -89,7 +89,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m6-ocr-all-cuts-v1 (OCR 전 컷 재실행·증분 아님)");
+console.log("[worker] BUILD = m6-gap-ocr-v1 (컷 밖 빈구간 OCR·내레이션)");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();
