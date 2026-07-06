@@ -32,8 +32,9 @@ const VIDEO_CONCURRENCY = Number(process.env.VIDEO_CONCURRENCY || 6);
 const CHARACTER_TYPES = new Set(["person", "action"]);
 
 // 말풍선·효과음 등 '글자만' 컷(text, textKind≠title)은 독립 컷으로 두지 않는다.
-// 대사·효과음 텍스트를 y 로 가장 가까운 실제 장면에 붙이고, 그 글자 컷은 제거.
-// (타이틀은 실제 디자인 화면이라 유지.) → 말풍선은 장면 위 오버레이일 뿐, 장면이 아님.
+// ★ 지우지 말고, y 로 가장 가까운 실제 장면의 '영역'을 이 글자 밴드까지 넓힌다 → 추출·OCR
+// 때 말풍선이 그 컷 이미지에 들어와 bubbles(대사)로 잡히고, 캐스팅에서 말풍선별 화자 지정 가능.
+// (예전엔 글자 컷을 지우고 저해상도 분류 대사만 나레이션으로 옮겨 → 텍스트 유실·부정확했음.)
 function absorbTextCuts(scenes) {
   const arr = scenes.slice().sort((a, b) => a.sourceRegion.yStart - b.sourceRegion.yStart);
   const h = (s) => s.sourceRegion.yEnd - s.sourceRegion.yStart;
@@ -56,12 +57,20 @@ function absorbTextCuts(scenes) {
         best = r;
       }
     }
-    if (!best || !best.cut) continue;
-    // 흡수된 위·아래 나레이션/자막은 별도 narration 으로 → 이후 OCR(dialogue)이 안 덮음.
-    const d = (s.cut.dialogue || "").trim();
-    const fx = (s.cut.sfx || "").trim();
-    if (d) best.cut.narration = (best.cut.narration ? best.cut.narration + "\n" : "") + d;
-    if (fx) best.cut.sfx = (best.cut.sfx ? best.cut.sfx + " " : "") + fx;
+    if (!best) continue;
+    // 실제 컷 영역을 이 글자 밴드 span 까지 넓힘(union) → 그 컷 이미지에 말풍선 포함.
+    const bu = best.sourceRegion;
+    const su = s.sourceRegion;
+    bu.yStart = Math.min(bu.yStart, su.yStart);
+    bu.yEnd = Math.max(bu.yEnd, su.yEnd);
+    // x 크롭: 하나라도 전체폭(undefined)이면 전체폭으로 — 말풍선이 옆으로 안 잘리게.
+    if (bu.xStart === undefined || su.xStart === undefined) {
+      bu.xStart = undefined;
+      bu.xEnd = undefined;
+    } else {
+      bu.xStart = Math.min(bu.xStart, su.xStart);
+      bu.xEnd = Math.max(bu.xEnd, su.xEnd);
+    }
   }
   return reals;
 }
