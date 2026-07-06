@@ -9,15 +9,25 @@ import sharp from "sharp";
 
 const PRICING = { "gpt-4o": { input: 2.5, output: 10 } };
 
-// OCR 전 컷을 확대 — 작은 말풍선 글자를 키워 gpt-4o 타일링에서 더 잘 읽히게.
-// 폭이 좁으면 최대 1600px까지 업스케일(정보는 안 늘지만 타일당 디테일↑).
+// OCR 전 리사이즈 — '긴 변'을 2048(gpt-4o high-detail 창 최대치)에 맞춘다. 작으면 확대,
+// 크면 lanczos 로 깔끔히 축소. ★ 예전엔 '폭'만 1600으로 키워서, 세로로 긴 컷은 높이가
+// 6000+ 가 되고 OpenAI 가 2048로 되축소 → 글자가 더 작아져 OCR 엉터리였음. 긴 변 기준이면
+// 특히 대사 밴드(짧고 넓음)가 크게 확대돼 정확. + 샤픈으로 글자 또렷하게.
 async function upscaleForOcr(pngBuf) {
   try {
     const m = await sharp(pngBuf).metadata();
     const w = m.width || 0;
-    if (w > 0 && w < 1600) {
+    const h = m.height || 0;
+    if (!w || !h) return pngBuf;
+    const TARGET = Number(process.env.OCR_MAX_SIDE || 2048);
+    const longest = Math.max(w, h);
+    if (Math.abs(longest - TARGET) > 8) {
+      const scale = TARGET / longest;
       return await sharp(pngBuf)
-        .resize({ width: 1600, withoutEnlargement: false, kernel: "lanczos3" })
+        .resize(Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale)), {
+          kernel: "lanczos3",
+        })
+        .sharpen()
         .png()
         .toBuffer();
     }
