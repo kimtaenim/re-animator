@@ -140,7 +140,7 @@ export async function makePortrait(refBuf, key, extraPrompt) {
   form.append("model", process.env.OPENAI_IMAGE_MODEL || "gpt-image-2");
   form.append("image", new Blob([refBuf], { type: "image/png" }), "ref.png");
   let p =
-    "From this drawn comic character, generate a PHOTOREALISTIC portrait of the SAME person as a real human — head and shoulders, facing camera, neutral soft background, natural lighting. Keep their hair style/color, face shape, age, skin tone, clothing and distinctive features faithful to the drawing. Photorealistic, not illustration. No text, no border.";
+    "From this drawn comic character, generate a PHOTOREALISTIC portrait of the SAME character as if it were a real photograph — head and shoulders, facing camera, neutral soft background, natural lighting. Keep their hair style/color, face shape, age, clothing and distinctive features faithful to the drawing. Photorealistic, not illustration. No text, no border.";
   if (extraPrompt && extraPrompt.trim()) p += ` ${extraPrompt.trim()}`;
   form.append("prompt", p);
   form.append("size", "1024x1024");

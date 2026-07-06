@@ -16,16 +16,13 @@ const CHARACTER_TYPES = new Set(["person", "action"]);
 
 type VoiceOpt = { id: string; name: string; language?: string };
 
-// 실사 초상 인종 칩 — [프롬프트용 영문, 표시 라벨]. 클릭 시 realEthnicity 에 영문 저장.
+// 실사 초상 인종/유형 칩 — [프롬프트용 영문, 표시 라벨]. 판타지(엘프·로봇)도 포함.
 const ETHNICITIES: [string, string][] = [
-  ["Korean", "한국"],
-  ["East Asian", "동양"],
-  ["White / Caucasian", "서양"],
-  ["Black / African", "흑인"],
-  ["Hispanic / Latino", "히스패닉"],
-  ["South Asian", "남아시아"],
-  ["Southeast Asian", "동남아"],
-  ["Middle Eastern", "중동"],
+  ["East Asian", "황인"],
+  ["White / Caucasian", "백인"],
+  ["Black", "흑인"],
+  ["an elf with pointed ears (fantasy)", "엘프"],
+  ["a robot / android (mechanical, sci-fi)", "로봇"],
 ];
 
 interface Props {
