@@ -102,36 +102,38 @@ export async function trimBox(png) {
   return { top, bottom, left, right };
 }
 
-// 소스들을 refWidth 로 정규화한 '가상 캔버스'의 RGB 원시 픽셀로 1회만 펼쳐 캐시.
-// 컷 추출은 이 버퍼에서 잘라내는 memcpy — 컷마다 원본을 재디코드/인코드하지 않는다
-// (수십~수백 컷에서 sharp 재처리가 병목이었음). fileBuffers 배열이 GC 되면 캐시도 해제.
-const _rawCanvas = new WeakMap();
-async function rawCanvasFor(canvas, fileBuffers) {
-  const cached = _rawCanvas.get(fileBuffers);
-  if (cached && cached.refWidth === canvas.refWidth) return cached;
-  const { refWidth, totalHeight, offsets } = canvas;
-  const data = Buffer.alloc(refWidth * totalHeight * 3, 255); // 빈 곳(파일 사이 등)은 흰색
-  const rowBytes = refWidth * 3;
-  for (let i = 0; i < fileBuffers.length; i++) {
-    const { data: raw, info } = await sharp(fileBuffers[i])
-      .resize({ width: refWidth })
-      .removeAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    const startRow = Math.round(offsets[i]);
-    const maxRows = Math.min(info.height, totalHeight - startRow);
-    for (let r = 0; r < maxRows; r++) {
-      raw.copy(data, (startRow + r) * rowBytes, r * rowBytes, r * rowBytes + rowBytes);
-    }
+// ★ 메모리 안전: 소스 전체를 하나의 거대한 raw 캔버스로 펼치지 않는다(100장이면 수백 MB
+// 단일 할당 → OOM). 대신 파일별 raw(refWidth 정규화)를 작은 LRU 캐시(기본 3장)에만 두고,
+// 컷 추출은 그 컷이 걸치는 파일만 디코드해서 잘라낸다 → 파일 수와 무관하게 메모리 상한.
+const _fileRawCache = new WeakMap(); // fileBuffers → Map<idx, {data,width,height}> (LRU)
+const RAW_CACHE_MAX = Number(process.env.RAW_FILE_CACHE || 3);
+
+async function fileRawAt(canvas, fileBuffers, idx) {
+  let cache = _fileRawCache.get(fileBuffers);
+  if (!cache) {
+    cache = new Map();
+    _fileRawCache.set(fileBuffers, cache);
   }
-  const rc = { data, refWidth, totalHeight };
-  _rawCanvas.set(fileBuffers, rc);
-  return rc;
+  const hit = cache.get(idx);
+  if (hit) {
+    cache.delete(idx); // LRU: 최근 사용을 맨 뒤로
+    cache.set(idx, hit);
+    return hit;
+  }
+  const { data, info } = await sharp(fileBuffers[idx])
+    .resize({ width: canvas.refWidth })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const rec = { data, width: info.width, height: info.height };
+  cache.set(idx, rec);
+  while (cache.size > RAW_CACHE_MAX) cache.delete(cache.keys().next().value); // 오래된 것 방출
+  return rec;
 }
 
-// 전역 정규화 [yStart, yEnd) × [xStart, xEnd) 를 잘라 PNG 버퍼로. 원시 캔버스에서 memcpy.
+// 전역 정규화 [yStart, yEnd) × [xStart, xEnd) 를 잘라 PNG 버퍼로. 걸친 소스 파일만 디코드.
 export async function extractRegion(canvas, fileBuffers, yStart, yEnd, xStart, xEnd) {
-  const { refWidth, totalHeight } = canvas;
+  const { refWidth, totalHeight, offsets } = canvas;
   const y0 = Math.max(0, Math.min(totalHeight, Math.round(yStart)));
   const y1 = Math.max(y0 + 1, Math.min(totalHeight, Math.round(yEnd)));
   const h = y1 - y0;
@@ -141,13 +143,20 @@ export async function extractRegion(canvas, fileBuffers, yStart, yEnd, xStart, x
   const x1 = hasX ? Math.min(refWidth, Math.round(xEnd)) : refWidth;
   const w = Math.max(1, x1 - x0);
 
-  const rc = await rawCanvasFor(canvas, fileBuffers);
-  const srcRow = refWidth * 3;
   const outRow = w * 3;
-  const out = Buffer.alloc(outRow * h);
-  for (let r = 0; r < h; r++) {
-    const srcOff = (y0 + r) * srcRow + x0 * 3;
-    rc.data.copy(out, r * outRow, srcOff, srcOff + outRow);
+  const out = Buffer.alloc(outRow * h, 255); // 파일 사이 빈 곳은 흰색
+  for (let i = 0; i < fileBuffers.length; i++) {
+    const fStart = Math.round(offsets[i]);
+    const fEnd = i + 1 < offsets.length ? Math.round(offsets[i + 1]) : totalHeight;
+    if (fEnd <= y0 || fStart >= y1) continue; // 이 컷과 안 겹치는 파일은 디코드도 안 함
+    const rec = await fileRawAt(canvas, fileBuffers, i);
+    const srcRow = rec.width * 3;
+    const gTop = Math.max(y0, fStart);
+    const gBot = Math.min(y1, fStart + rec.height);
+    for (let gy = gTop; gy < gBot; gy++) {
+      const srcOff = (gy - fStart) * srcRow + x0 * 3;
+      rec.data.copy(out, (gy - y0) * outRow, srcOff, srcOff + outRow);
+    }
   }
   return sharp(out, { raw: { width: w, height: h, channels: 3 } })
     .png()

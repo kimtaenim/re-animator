@@ -171,6 +171,8 @@ export async function runSplit(projectId) {
   await log(`장면 ${regions.length}개 여백 트림…`);
   const trimmed = [];
   for (let i = 0; i < regions.length; i++) {
+    if (i % 2 === 0 || i === regions.length - 1)
+      await log(`여백 트림 ${i + 1}/${regions.length}… (${Math.round((i / regions.length) * 100)}%)`);
     const r = regions[i];
     const x0 = r.xStart ?? 0;
     const x1 = r.xEnd ?? refWidth;

@@ -89,7 +89,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m6-extract-oom-fix-v1 (추출 PNG 누적 제거·OCR 재추출)");
+console.log("[worker] BUILD = m6-per-file-extract-v1 (거대 raw캔버스 제거·파일별 LRU 디코드)");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();
