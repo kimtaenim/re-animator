@@ -138,7 +138,9 @@ export async function runCompose(projectId) {
     const norm = [];
     for (let i = 0; i < scenes.length; i++) {
       const s = scenes[i];
-      await log(`영상 정규화 ${i + 1}/${scenes.length}…`);
+      await log(
+        `영상 정규화 ${i + 1}/${scenes.length}… (${Math.round((i / scenes.length) * 100)}%)`
+      );
       const raw = join(dir, `raw${i}.mp4`);
       await download(s.videoUrl, raw);
       const dur = (await probeDuration(raw)) || 3;

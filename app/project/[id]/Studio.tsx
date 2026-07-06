@@ -907,6 +907,21 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     (s) => s.cut?.type === "person" || s.cut?.type === "action"
   ).length;
 
+  // 진행 바 — 로그의 "(N%)" 를 뽑아 표시(없으면 안 그림). 모든 워커 단계 공용.
+  const progressBar = () => {
+    const m = progress.match(/\((\d+)%\)/);
+    const pct = m ? Number(m[1]) : null;
+    if (pct === null) return null;
+    return (
+      <div className="mb-3 h-1.5 w-full max-w-md overflow-hidden rounded-full bg-[var(--panel-2)]">
+        <div
+          className="h-full bg-[var(--accent)] transition-all duration-300"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    );
+  };
+
   return (
     <div>
       {/* 헤더 */}
@@ -1050,19 +1065,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               작업 중지
             </button>
           </p>
-          {(() => {
-            const m = progress.match(/\((\d+)%\)/);
-            const pct = m ? Number(m[1]) : null;
-            if (pct === null) return null;
-            return (
-              <div className="mt-2 h-1.5 w-full max-w-md overflow-hidden rounded-full bg-[var(--panel-2)]">
-                <div
-                  className="h-full bg-[var(--accent)] transition-all duration-300"
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-            );
-          })()}
+          {progressBar()}
           {progressLog.length > 0 && (
             <pre className="mt-2 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
               {progressLog.slice(-14).join("\n")}
@@ -1319,6 +1322,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
             </p>
           )}
+          {regenPolling && progressBar()}
           {regenPolling && progressLog.length > 0 && (
             <pre className="mb-3 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
               {progressLog.slice(-14).join("\n")}
@@ -1529,6 +1533,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
             </p>
           )}
+          {scenePolling && progressBar()}
           {scenePolling && progressLog.length > 0 && (
             <pre className="mb-3 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
               {progressLog.slice(-14).join("\n")}
@@ -1803,6 +1808,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
             </p>
           )}
+          {composeRunning && progressBar()}
           {composeRunning && progressLog.length > 0 && (
             <pre className="mb-3 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
               {progressLog.slice(-14).join("\n")}
