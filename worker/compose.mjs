@@ -13,6 +13,8 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pickSubtitleBand } from "./subtitle-place.mjs";
+import { renderSubtitle } from "./subtitle-render.mjs";
 
 // ffmpeg 바이너리 경로 — 합성할 때만 '지연' 로드한다(워커 시작 때 import 하면 ffmpeg-static
 // 설치 문제가 워커 전체를 죽인다). Render node 런타임엔 시스템 ffmpeg 가 없어 npm 정적
@@ -76,6 +78,16 @@ async function download(url, dest) {
   if (!r.ok) throw new Error(`영상 다운로드 실패 ${r.status}`);
   await writeFile(dest, Buffer.from(await r.arrayBuffer()));
 }
+// 버퍼로 다운로드(자막 배치 분석용 생성 이미지). 실패 시 null.
+async function download2(url) {
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!r.ok) return null;
+    return Buffer.from(await r.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
 
 function targetDims(project) {
   const ar = project?.aspectRatio;
@@ -86,6 +98,22 @@ function targetDims(project) {
 
 const FADES_OUT = new Set(["fadeout", "black", "dissolve"]);
 const FADES_IN = new Set(["fadein", "black", "dissolve"]);
+const SUB_FRAC = Number(process.env.SUBTITLE_HEIGHT_FRAC || 0.18); // 자막 띠 높이(프레임 대비)
+
+// 이 컷 자막 텍스트 = 대사(말풍선 합침) + 나레이션. 씬마다 이걸 얹는다.
+function subtitleText(cut) {
+  const parts = [];
+  if (cut?.bubbles?.length) {
+    for (const b of cut.bubbles) {
+      const t = (b.text || "").trim();
+      if (t) parts.push(t);
+    }
+  } else if (cut?.dialogue) {
+    parts.push(cut.dialogue.trim());
+  }
+  if (cut?.narration?.trim()) parts.push(cut.narration.trim());
+  return parts.filter(Boolean).join("  ").trim();
+}
 
 // projectId 의 씬 영상들을 이어붙여 project.composedUrl 로. compose 단계 진행 표시.
 export async function runCompose(projectId) {
@@ -129,13 +157,52 @@ export async function runCompose(projectId) {
       if (fadeIn) vf.push(`fade=t=in:st=0:d=${FADE}`);
       if (fadeOut) vf.push(`fade=t=out:st=${Math.max(0, dur - FADE).toFixed(2)}:d=${FADE}`);
 
+      // 자막 — 씬마다 대사+나레이션을 '빈 곳'에 얹는다(폰트/canvas 없으면 자막만 skip).
+      const subText = subtitleText(s.cut);
+      let subPath = null;
+      let bandY = H - Math.round(H * SUB_FRAC); // 기본 하단
+      const bandH = Math.round(H * SUB_FRAC);
+      if (subText) {
+        try {
+          if (s.generatedImage) {
+            const genBuf = await download2(s.generatedImage);
+            if (genBuf) {
+              const band = await pickSubtitleBand(genBuf, {
+                frameW: W,
+                frameH: H,
+                heightFrac: SUB_FRAC,
+              });
+              bandY = band.y;
+            }
+          }
+          const png = await renderSubtitle(subText, { frameW: W, bandH });
+          if (png) {
+            subPath = join(dir, `sub${i}.png`);
+            await writeFile(subPath, png);
+          }
+        } catch {
+          /* 자막 실패 → 자막 없이 진행 */
+        }
+      }
+
       const out = join(dir, `n${i}.mp4`);
-      await run(FFMPEG, [
-        "-y", "-i", raw,
-        "-vf", vf.join(","),
-        "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-pix_fmt", "yuv420p", "-movflags", "+faststart", out,
-      ]);
+      if (subPath) {
+        await run(FFMPEG, [
+          "-y", "-i", raw, "-loop", "1", "-i", subPath,
+          "-filter_complex",
+          `[0:v]${vf.join(",")}[base];[base][1:v]overlay=0:${bandY}:shortest=1[v]`,
+          "-map", "[v]",
+          "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+          "-pix_fmt", "yuv420p", "-movflags", "+faststart", out,
+        ]);
+      } else {
+        await run(FFMPEG, [
+          "-y", "-i", raw,
+          "-vf", vf.join(","),
+          "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+          "-pix_fmt", "yuv420p", "-movflags", "+faststart", out,
+        ]);
+      }
       norm.push(out);
     }
 
@@ -143,7 +210,7 @@ export async function runCompose(projectId) {
     const listFile = join(dir, "list.txt");
     await writeFile(listFile, norm.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"));
     const finalPath = join(dir, "final.mp4");
-    await run("ffmpeg", [
+    await run(FFMPEG, [
       "-y", "-f", "concat", "-safe", "0", "-i", listFile,
       "-c", "copy", "-movflags", "+faststart", finalPath,
     ]);
