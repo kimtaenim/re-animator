@@ -47,7 +47,34 @@ function absorbTextCuts(scenes) {
   const median = heights[Math.floor(heights.length / 2)] || 300;
   const isAbsorbable = (s) => s.cut?.type === "text" && h(s) < Math.max(280, median * 0.5);
   const reals = arr.filter((s) => !isAbsorbable(s));
-  return reals.length ? reals : arr; // 전부 흡수대상이면 그대로
+  if (!reals.length) return arr; // 전부 흡수대상이면 그대로
+  // ★제거되는 '텍스트만' 컷(말풍선·내레이션 밴드)의 영역을 가장 가까운 살아남은 컷의
+  //   textRegions 로 확실히 넘긴다(검출 임계값에 안 의존 → 안 놓침). 추출이 그 영역만 따로
+  //   OCR 해 그 컷 대사에 붙인다(영역엔 안 합침 → 재생성 이미지 오염 없음).
+  for (const t of arr) {
+    if (!isAbsorbable(t)) continue;
+    const tc = (t.sourceRegion.yStart + t.sourceRegion.yEnd) / 2;
+    let best = null;
+    let bd = Infinity;
+    for (const s of reals) {
+      const c = (s.sourceRegion.yStart + s.sourceRegion.yEnd) / 2;
+      const d = Math.abs(c - tc);
+      if (d < bd) {
+        bd = d;
+        best = s;
+      }
+    }
+    if (!best) continue;
+    if (!best.cut) best.cut = { dialogue: "", sfx: "", type: null };
+    if (!best.cut.textRegions) best.cut.textRegions = [];
+    best.cut.textRegions.push({
+      yStart: t.sourceRegion.yStart,
+      yEnd: t.sourceRegion.yEnd,
+      xStart: t.sourceRegion.xStart,
+      xEnd: t.sourceRegion.xEnd,
+    });
+  }
+  return reals;
 }
 
 // ★ 컷이 아닌 '빈 구간'(내레이션 밴드 등)도 텍스트가 있을 수 있다. 컷들이 안 덮은 y 구간 중
@@ -71,6 +98,10 @@ function addGapTextRegions(scenes, profile, totalHeight, log) {
   // 글자 행의 위·아래 끝을 찾아 그 밴드로 좁혀 저장 → 추출이 그 부분만 OCR 해 이웃 컷에 붙인다.
   const TEXT_STD = Number(process.env.GAP_TEXT_STD || 8); // 이 이상 = 글자(잉크) 있는 행
   const MIN_ROWS = Number(process.env.GAP_MIN_ROWS || 4); // 글자 행이 이만큼은 있어야 텍스트
+  // absorbTextCuts 가 이미 넘긴 밴드는 건너뛴다(중복 OCR·중복 대사 방지).
+  const existing = [];
+  for (const s of scenes) for (const tr of s.cut?.textRegions ?? []) existing.push([tr.yStart, tr.yEnd]);
+  const overlapsExisting = (a, b) => existing.some(([x, y]) => Math.min(b, y) - Math.max(a, x) > 8);
   const textyBand = (a, b) => {
     const y0 = Math.max(0, Math.floor(a));
     const y1 = Math.min(profile.length, Math.ceil(b));
@@ -92,6 +123,7 @@ function addGapTextRegions(scenes, profile, totalHeight, log) {
     if (added >= 24) break;
     const band = textyBand(g.yStart, g.yEnd);
     if (!band) continue; // 글자 행 없음 = 순수 거터 → 스킵
+    if (overlapsExisting(band.yStart, band.yEnd)) continue; // 이미 흡수로 넘어간 밴드
     const gc = (band.yStart + band.yEnd) / 2;
     let best = null;
     let bd = Infinity;
