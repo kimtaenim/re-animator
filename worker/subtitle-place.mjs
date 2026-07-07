@@ -7,22 +7,26 @@
 
 import sharp from "sharp";
 
-// A) 자막 넣기 좋은 가로 띠 { x, y, w, h }(frame px). 이미지를 작게 축소해 '행별 밝기 분산'
-// (디테일)을 재고, 자막 높이만큼의 창을 슬라이드해 분산합이 최소인(가장 빈) 위치를 고른다.
-// preferBottom: 하단을 선호(자막이 매 컷 튀지 않게) — 하단이 확실히 바쁠 때만 위로 이동.
+// A) 자막 넣기 좋은 가로 띠 { x, y, w, h }(frame px).
+//   원칙(사용자 지정): ① 인물 얼굴을 가리지 말 것(최우선) ② 가능하면 손도 ③ 바닥·상단에
+//   붙이지 말 것(가운데 영역에 띄움). 그 다음, 남는 후보 중 가장 한산한(디테일 낮은) 띠.
+//   faces/hands = 0~1 정규화 박스 배열(worker/vision-boxes 로 감지). 없으면 디테일만으로.
+const FACE_W = 9; // 얼굴 겹침 벌점(사실상 하드 회피)
+const HAND_W = 2.5; // 손 겹침 벌점(소프트)
 export async function pickSubtitleBand(
   imgBuf,
-  { frameW, frameH, heightFrac = 0.16, preferBottom = true } = {}
+  { frameW, frameH, heightFrac = 0.16, faces = [], hands = [], edgeMarginFrac = 0.1 } = {}
 ) {
   const bandH = Math.max(1, Math.round(frameH * heightFrac));
   const SAMPLE_H = 120; // 세로 샘플 해상도(행별 대표값)
   const W = 16; // 가로는 좁게 — 행의 복잡도만 본다
+  // 폴백: 바닥/상단이 아닌 하단 1/3쯤(가장자리 여백 안).
+  const fallbackY = Math.max(0, Math.min(Math.round(frameH * 0.6), frameH - bandH));
   let g;
   try {
     g = await sharp(imgBuf).resize(W, SAMPLE_H, { fit: "fill" }).greyscale().raw().toBuffer();
   } catch {
-    // 분석 실패 시 안전 폴백: 하단.
-    return { x: 0, y: Math.max(0, frameH - bandH), w: frameW, h: bandH };
+    return { x: 0, y: fallbackY, w: frameW, h: bandH };
   }
 
   // 행별 분산(디테일). 복잡한 그림일수록 큼.
@@ -43,15 +47,39 @@ export async function pickSubtitleBand(
   const pre = new Array(SAMPLE_H + 1).fill(0);
   for (let y = 0; y < SAMPLE_H; y++) pre[y + 1] = pre[y] + rowBusy[y];
   const avgBusy = pre[SAMPLE_H] / SAMPLE_H;
+  // 벌점을 디테일과 같은 스케일로 맞춰(얼굴 벌점이 디테일보다 확실히 크게) 곱한다.
+  const unit = avgBusy * winH + 1;
 
-  let bestY = SAMPLE_H - winH;
-  let bestCost = Infinity;
-  for (let y = 0; y <= SAMPLE_H - winH; y++) {
-    let cost = pre[y + winH] - pre[y]; // 이 띠의 디테일 총합(작을수록 빈 곳)
-    if (preferBottom) {
-      const distFromBottom = (SAMPLE_H - winH - y) / (SAMPLE_H - winH || 1); // 0=하단,1=상단
-      cost += distFromBottom * avgBusy * winH * 0.6; // 하단 선호 바이어스
+  // 자막은 가운데 정렬 → 화면 중앙에 걸친 얼굴/손일수록 실제로 가린다. 중앙성 가중.
+  const boxPenalty = (y0, y1, boxes, weight) => {
+    let pen = 0;
+    for (const b of boxes) {
+      const bt = b.top * SAMPLE_H;
+      const bb = b.bottom * SAMPLE_H;
+      const ov = Math.max(0, Math.min(y1, bb) - Math.max(y0, bt)); // 세로 겹침(샘플 행)
+      if (ov <= 0) continue;
+      const cx = (b.left + b.right) / 2;
+      const central = Math.max(0, 1 - Math.abs(cx - 0.5) * 2); // 중앙=1, 가장자리=0
+      pen += (ov / winH) * (0.5 + 0.5 * central) * weight;
     }
+    return pen;
+  };
+
+  // 가장자리 여백: 이 범위 밖(상단/하단 붙는 위치)은 후보에서 뺀다.
+  const margin = Math.round(SAMPLE_H * edgeMarginFrac);
+  let loY = Math.min(margin, SAMPLE_H - winH);
+  let hiY = Math.max(loY, SAMPLE_H - winH - margin);
+  if (hiY < loY) {
+    loY = 0;
+    hiY = SAMPLE_H - winH;
+  }
+
+  let bestY = fallbackY / frameH * SAMPLE_H;
+  let bestCost = Infinity;
+  for (let y = loY; y <= hiY; y++) {
+    let cost = pre[y + winH] - pre[y]; // 디테일(작을수록 빈 곳)
+    cost += boxPenalty(y, y + winH, faces, FACE_W) * unit; // 얼굴 회피(하드)
+    cost += boxPenalty(y, y + winH, hands, HAND_W) * unit; // 손 회피(소프트)
     if (cost < bestCost) {
       bestCost = cost;
       bestY = y;

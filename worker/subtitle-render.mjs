@@ -16,6 +16,9 @@ const DEFAULT_FONT_URL =
   process.env.SUBTITLE_FONT_URL ||
   "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf";
 const FAMILY = "SubtitleKR";
+// 디폴트: 글씨 작게 + 검은 바탕(거의 불투명) + 하얀 글씨. env 로 미세조정.
+const FONT_FRAC = Number(process.env.SUBTITLE_FONT_FRAC || 0.3); // 띠 대비 글자 크기(작게)
+const BG_ALPHA = Number(process.env.SUBTITLE_BG_ALPHA || 0.9); // 검은 바탕 불투명도
 
 let _canvas = null; // { createCanvas, GlobalFonts } | false(불가)
 let _fontReady = false;
@@ -113,12 +116,12 @@ export async function renderSubtitle(text, { frameW, bandH }) {
     const ctx = canvas.getContext("2d");
     const pad = Math.round(bandH * 0.14);
     const maxW = frameW - pad * 2 - Math.round(frameW * 0.06);
-    let fontPx = Math.round(bandH * 0.42);
+    let fontPx = Math.round(bandH * FONT_FRAC);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     // 폰트 크기 낮춰가며 2줄 안에 맞춤.
     let lines;
-    for (; fontPx >= 14; fontPx -= 2) {
+    for (; fontPx >= 12; fontPx -= 2) {
       ctx.font = `700 ${fontPx}px ${FAMILY}, sans-serif`;
       lines = wrap(ctx, t, maxW, 2);
       const lineH = fontPx * 1.25;
@@ -135,7 +138,7 @@ export async function renderSubtitle(text, { frameW, bandH }) {
       frameW - pad,
       Math.max(...lines.map((l) => ctx.measureText(l).width)) + pad * 2
     );
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillStyle = `rgba(0,0,0,${BG_ALPHA})`;
     const bx = cx - boxW / 2;
     const by = bandH / 2 - totalH / 2 - pad * 0.4;
     const bh = totalH + pad * 0.8;
@@ -151,7 +154,7 @@ export async function renderSubtitle(text, { frameW, bandH }) {
 
     // 글자: 검은 외곽선 + 흰 채움.
     ctx.lineJoin = "round";
-    ctx.lineWidth = Math.max(2, Math.round(fontPx * 0.14));
+    ctx.lineWidth = Math.max(1, Math.round(fontPx * 0.1)); // 검은 바탕이라 외곽선 얇게
     ctx.strokeStyle = "rgba(0,0,0,0.95)";
     ctx.fillStyle = "#ffffff";
     for (const l of lines) {

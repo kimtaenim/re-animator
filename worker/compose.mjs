@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pickSubtitleBand } from "./subtitle-place.mjs";
 import { renderSubtitle } from "./subtitle-render.mjs";
+import { detectFaceHandBoxes } from "./vision-boxes.mjs";
 
 // ffmpeg 바이너리 경로 — 합성할 때만 '지연' 로드한다(워커 시작 때 import 하면 ffmpeg-static
 // 설치 문제가 워커 전체를 죽인다). Render node 런타임엔 시스템 ffmpeg 가 없어 npm 정적
@@ -37,6 +38,7 @@ async function resolveFf() {
 
 const FADE = Number(process.env.COMPOSE_FADE_SEC || 0.5);
 const FPS = Number(process.env.COMPOSE_FPS || 30);
+const OPENAI_KEY = process.env.OPENAI_API_KEY; // 자막 얼굴/손 회피용(없으면 감지 skip)
 
 function run(cmd, args, timeoutMs = 180_000) {
   return new Promise((res, rej) => {
@@ -162,17 +164,26 @@ export async function runCompose(projectId) {
       // 자막 — 씬마다 대사+나레이션을 '빈 곳'에 얹는다(폰트/canvas 없으면 자막만 skip).
       const subText = subtitleText(s.cut);
       let subPath = null;
-      let bandY = H - Math.round(H * SUB_FRAC); // 기본 하단
       const bandH = Math.round(H * SUB_FRAC);
+      let bandY = Math.round(H * 0.6); // 기본: 바닥이 아닌 하단 1/3(가장자리 회피)
       if (subText) {
         try {
           if (s.generatedImage) {
             const genBuf = await download2(s.generatedImage);
             if (genBuf) {
+              // 얼굴·손 위치를 물어(gpt-4o, 실패해도 자막 정상) 그 위를 피해 빈 띠 선택.
+              const fh = await detectFaceHandBoxes(genBuf, OPENAI_KEY);
+              if (fh.cost) {
+                try {
+                  await recordCost({ projectId, vendor: "openai", model: "gpt-4o", costUsd: fh.cost, meta: { kind: "subtitle-faces" } });
+                } catch {}
+              }
               const band = await pickSubtitleBand(genBuf, {
                 frameW: W,
                 frameH: H,
                 heightFrac: SUB_FRAC,
+                faces: fh.faces,
+                hands: fh.hands,
               });
               bandY = band.y;
             }

@@ -89,7 +89,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m6-gap-ocr-v1 (컷 밖 빈구간 OCR·내레이션)");
+console.log("[worker] BUILD = m6-subtitle-faceavoid-v1 (자막 얼굴/손 회피·검은바탕·중앙)");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();
