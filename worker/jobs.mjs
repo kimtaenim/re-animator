@@ -66,20 +66,33 @@ function addGapTextRegions(scenes, profile, totalHeight, log) {
     cursor = Math.max(cursor, s.sourceRegion.yEnd);
   }
   push(cursor, totalHeight);
-  const avgStd = (a, b) => {
-    let sum = 0;
-    let n = 0;
-    for (let y = Math.max(0, Math.floor(a)); y < Math.min(profile.length, Math.ceil(b)); y++) {
-      sum += profile[y];
-      n++;
+  // ★핵심 수정: 갭이 텍스트인지 '평균'이 아니라 '글자 있는 행(피크)'으로 판정한다. 여백에
+  // 둘러싸인 얇은 내레이션 밴드는 평균을 내면 임계 아래로 깔려 통째로 스킵됐다(= 못 잡던 원인).
+  // 글자 행의 위·아래 끝을 찾아 그 밴드로 좁혀 저장 → 추출이 그 부분만 OCR 해 이웃 컷에 붙인다.
+  const TEXT_STD = Number(process.env.GAP_TEXT_STD || 8); // 이 이상 = 글자(잉크) 있는 행
+  const MIN_ROWS = Number(process.env.GAP_MIN_ROWS || 4); // 글자 행이 이만큼은 있어야 텍스트
+  const textyBand = (a, b) => {
+    const y0 = Math.max(0, Math.floor(a));
+    const y1 = Math.min(profile.length, Math.ceil(b));
+    let first = -1;
+    let last = -1;
+    let count = 0;
+    for (let y = y0; y < y1; y++) {
+      if (profile[y] > TEXT_STD) {
+        if (first < 0) first = y;
+        last = y;
+        count++;
+      }
     }
-    return n ? sum / n : 0;
+    if (count < MIN_ROWS || first < 0) return null;
+    return { yStart: Math.max(y0, first - 6), yEnd: Math.min(y1, last + 6) }; // 상하 6px 여유
   };
   let added = 0;
   for (const g of gaps) {
     if (added >= 24) break;
-    if (avgStd(g.yStart, g.yEnd) < 6) continue; // 평탄 = 거터, 텍스트 없음 → 스킵
-    const gc = (g.yStart + g.yEnd) / 2;
+    const band = textyBand(g.yStart, g.yEnd);
+    if (!band) continue; // 글자 행 없음 = 순수 거터 → 스킵
+    const gc = (band.yStart + band.yEnd) / 2;
     let best = null;
     let bd = Infinity;
     for (const s of scenes) {
@@ -93,7 +106,7 @@ function addGapTextRegions(scenes, profile, totalHeight, log) {
     if (!best) continue;
     if (!best.cut) best.cut = { dialogue: "", sfx: "", type: null };
     if (!best.cut.textRegions) best.cut.textRegions = [];
-    best.cut.textRegions.push({ yStart: g.yStart, yEnd: g.yEnd });
+    best.cut.textRegions.push({ yStart: band.yStart, yEnd: band.yEnd });
     added++;
   }
   return added;

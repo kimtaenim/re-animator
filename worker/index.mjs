@@ -89,7 +89,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m6-subtitle-faceavoid-v1 (자막 얼굴/손 회피·검은바탕·중앙)");
+console.log("[worker] BUILD = m6-gap-peak-v2 (내레이션 갭 피크검출·대사경로 그대로)");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();
