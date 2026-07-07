@@ -4,7 +4,6 @@
 // ============================================================================
 
 import { randomUUID } from "node:crypto";
-import sharp from "sharp";
 import { put } from "@vercel/blob";
 import {
   getProject,
@@ -30,7 +29,6 @@ import {
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { readCutText } from "./ocr.mjs";
-import { decideAttachSide } from "./attach-decide.mjs";
 
 // 영상(I2V)은 여러 컷을 병렬로 생성(각자 submit→poll). xAI 초당 1건 제한은 grok.mjs
 // 레이트 게이트가 처리하므로, 여기선 병렬 개수만 정한다(제출은 1초 간격으로 자동 스로틀).
@@ -52,9 +50,9 @@ function absorbTextCuts(scenes) {
   return reals.length ? reals : arr; // 전부 흡수대상이면 그대로
 }
 
-// ★ 컷이 아닌 '빈 구간'(내레이션 밴드 등)도 텍스트가 있을 수 있다. 컷들이 안 덮은 y 구간에서
-// ★평균이 아니라 '글자 있는 행(피크)'으로★ 텍스트 밴드를 찾아(여백에 묻히지 않게) 그 밴드에 딱
-// 맞춰 저장한다. 앞/뒤 컷 id 를 함께 달아(추출 때 VLM 이 어느 쪽인지 결정) 이웃 컷 textRegions 로.
+// ★ 컷이 아닌 '빈 구간'(내레이션 밴드 등)도 텍스트가 있을 수 있다. 컷들이 안 덮은 y 구간 중
+// '내용 있는'(행별 평탄도 프로파일이 높은) 곳을 가장 가까운 컷의 textRegions 로 추가 → 추출 때
+// 따로 OCR 해 대사/내레이션을 그 컷에 붙인다. 평탄한 거터(내용 없음)는 건너뛴다.
 function addGapTextRegions(scenes, profile, totalHeight, log) {
   if (!scenes.length) return 0;
   const sorted = scenes.slice().sort((a, b) => a.sourceRegion.yStart - b.sourceRegion.yStart);
@@ -68,49 +66,34 @@ function addGapTextRegions(scenes, profile, totalHeight, log) {
     cursor = Math.max(cursor, s.sourceRegion.yEnd);
   }
   push(cursor, totalHeight);
-
-  const TEXT_STD = Number(process.env.GAP_TEXT_STD || 10); // 이 이상 = '글자(잉크) 있는 행'
-  const MIN_ROWS = Number(process.env.GAP_MIN_ROWS || 6); // 글자 행이 이만큼은 있어야 텍스트 갭
-  // 갭 안에서 '글자 있는 행'의 위·아래 끝을 찾아 그 밴드로 좁힌다. 없으면 null(순수 거터).
-  const textyBand = (a, b) => {
-    const y0 = Math.max(0, Math.floor(a));
-    const y1 = Math.min(profile.length, Math.ceil(b));
-    let first = -1;
-    let last = -1;
-    let count = 0;
-    for (let y = y0; y < y1; y++) {
-      if (profile[y] > TEXT_STD) {
-        if (first < 0) first = y;
-        last = y;
-        count++;
-      }
+  const avgStd = (a, b) => {
+    let sum = 0;
+    let n = 0;
+    for (let y = Math.max(0, Math.floor(a)); y < Math.min(profile.length, Math.ceil(b)); y++) {
+      sum += profile[y];
+      n++;
     }
-    if (count < MIN_ROWS || first < 0) return null;
-    return { yStart: Math.max(y0, first - 6), yEnd: Math.min(y1, last + 6) }; // 상하 6px 여유
+    return n ? sum / n : 0;
   };
-
   let added = 0;
   for (const g of gaps) {
     if (added >= 24) break;
-    const band = textyBand(g.yStart, g.yEnd);
-    if (!band) continue; // 글자 행 없음 = 순수 거터 → 스킵
-    // 이 밴드의 바로 위(prev)·아래(next) 컷.
-    let prev = null;
-    let next = null;
-    for (const s of sorted) {
-      if (s.sourceRegion.yEnd <= band.yStart + 1) prev = s; // 위에서 가장 아래
-      if (s.sourceRegion.yStart >= band.yEnd - 1 && !next) next = s; // 아래에서 가장 위
+    if (avgStd(g.yStart, g.yEnd) < 6) continue; // 평탄 = 거터, 텍스트 없음 → 스킵
+    const gc = (g.yStart + g.yEnd) / 2;
+    let best = null;
+    let bd = Infinity;
+    for (const s of scenes) {
+      const c = (s.sourceRegion.yStart + s.sourceRegion.yEnd) / 2;
+      const d = Math.abs(c - gc);
+      if (d < bd) {
+        bd = d;
+        best = s;
+      }
     }
-    const owner = prev || next; // 저장 소유주(추출 때 앞/뒤 재결정). 둘 다 없으면 스킵.
-    if (!owner) continue;
-    if (!owner.cut) owner.cut = { dialogue: "", sfx: "", type: null };
-    if (!owner.cut.textRegions) owner.cut.textRegions = [];
-    owner.cut.textRegions.push({
-      yStart: band.yStart,
-      yEnd: band.yEnd,
-      prevId: prev?.id ?? null,
-      nextId: next?.id ?? null,
-    });
+    if (!best) continue;
+    if (!best.cut) best.cut = { dialogue: "", sfx: "", type: null };
+    if (!best.cut.textRegions) best.cut.textRegions = [];
+    best.cut.textRegions.push({ yStart: g.yStart, yEnd: g.yEnd });
     added++;
   }
   return added;
@@ -326,9 +309,9 @@ export async function runExtract(projectId) {
   // 글씨 읽기(OCR) — ★ 증분 아님. 이미지 있는 '모든' 컷을 매번 다시 읽는다(예전엔 새 컷만
   // 읽어서, 재추출해도 옛 컷 대사가 안 갱신됐음). 메모리 위해 그 영역만 다시 추출해서 읽음.
   const key = process.env.OPENAI_API_KEY;
-  const OCR_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
   const ocrTodo = scenes.filter((s) => s.originalImage);
   if (key && ocrTodo.length > 0) {
+    const OCR_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
     const C = Number(process.env.OCR_CONCURRENCY || 2); // 업스케일 이미지가 커서 동시성 낮게
     let done = 0;
     for (let i = 0; i < ocrTodo.length; i += C) {
@@ -346,15 +329,34 @@ export async function runExtract(projectId) {
             );
             const own = await readCutText(png, key, OCR_MODEL);
             if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
-            // ★ OCR(풀해상도)이 이 컷 대사의 유일 정답. 자기 이미지 안 말풍선 = own(대사).
-            s.cut.bubbles = mergeBubbleSpeakers(own.bubbles || [], s.cut.bubbles, s.cut.speakerId);
-            s.cut.dialogue = (own.bubbles || [])
+            // ★ OCR(풀해상도)이 이 컷 대사의 유일 정답. 자기 이미지 안 글자 = own.
+            let allBubbles = [...(own.bubbles || [])];
+            let sfx = own.sfx || "";
+            // 흡수된 '대사만' 밴드: 그 영역만 따로 추출·OCR → 대사를 이 컷에 붙인다(이미지엔 안 합침).
+            for (const tr of s.cut.textRegions ?? []) {
+              try {
+                const tpng = await extractRegion(
+                  p.virtualCanvas,
+                  buffers,
+                  tr.yStart,
+                  tr.yEnd,
+                  tr.xStart,
+                  tr.xEnd
+                );
+                const t = await readCutText(tpng, key, OCR_MODEL);
+                if (t.bubbles?.length) allBubbles = allBubbles.concat(t.bubbles);
+                if (t.sfx) sfx = sfx ? `${sfx} ${t.sfx}` : t.sfx;
+              } catch {}
+            }
+            // 풍선별 speakerId 는 기존 값(텍스트 매칭)으로 보존해 화자 귀속이 안 날아가게.
+            s.cut.bubbles = mergeBubbleSpeakers(allBubbles, s.cut.bubbles, s.cut.speakerId);
+            s.cut.dialogue = allBubbles
               .map((b) => (b.text || "").trim())
               .filter(Boolean)
               .join("\n")
               .slice(0, 500);
-            if (own.sfx) s.cut.sfx = own.sfx;
-            s.cut.textBoxes = own.boxes; // 마스크는 '이 컷 이미지 안' 글자만(갭 밴드는 이미지에 없음)
+            if (sfx) s.cut.sfx = sfx;
+            s.cut.textBoxes = own.boxes; // 마스크는 '이 컷 이미지 안' 글자만(흡수 밴드는 이미지에 없음)
           } catch (e) {
             await log(`컷 ${s.order + 1} 글씨읽기 실패: ${String(e?.message ?? e).slice(0, 100)}`);
           }
@@ -362,81 +364,6 @@ export async function runExtract(projectId) {
       );
       done = Math.min(i + C, ocrTodo.length);
       await log(`글씨 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%)`);
-    }
-
-    // ── 갭(컷 사이 '글자만 있는 공간') 내레이션 부착 ─────────────────────────────
-    // 갭 글자를 읽고, ★그림 내용을 보고★ 위(prev)/아래(next) 컷 중 어디에 붙일지 VLM 이 결정
-    // → 그 컷 narration 에 넣음(더빙 때 내레이션으로 표시). 재추출 idempotent(후보 비우고 SET).
-    const gapItems = [];
-    for (const s of scenes) for (const tr of s.cut?.textRegions ?? []) gapItems.push(tr);
-    if (gapItems.length) {
-      const sceneThumb = async (sc) => {
-        try {
-          const rpng = await extractRegion(
-            p.virtualCanvas, buffers,
-            sc.sourceRegion.yStart, sc.sourceRegion.yEnd,
-            sc.sourceRegion.xStart, sc.sourceRegion.xEnd
-          );
-          return await sharp(rpng)
-            .resize(320, 320, { fit: "inside", withoutEnlargement: true })
-            .jpeg({ quality: 78 })
-            .toBuffer();
-        } catch {
-          return null;
-        }
-      };
-      const center = (sc) => (sc.sourceRegion.yStart + sc.sourceRegion.yEnd) / 2;
-      const byScene = new Map(); // sceneId → [narration text…]
-      const candidates = new Set(); // 이번에 손댈 후보 컷(비우고 다시 채움 → 중복 누적 방지)
-      for (const tr of gapItems) {
-        if (tr.prevId) candidates.add(tr.prevId);
-        if (tr.nextId) candidates.add(tr.nextId);
-      }
-      let gi = 0;
-      for (const tr of gapItems) {
-        gi++;
-        try {
-          const gpng = await extractRegion(p.virtualCanvas, buffers, tr.yStart, tr.yEnd, tr.xStart, tr.xEnd);
-          const g = await readCutText(gpng, key, OCR_MODEL);
-          const gapText = (g.bubbles || [])
-            .map((b) => (b.text || "").trim())
-            .filter(Boolean)
-            .join(" ")
-            .trim();
-          if (!gapText) continue;
-          const prev = tr.prevId ? scenes.find((x) => x.id === tr.prevId) : null;
-          const next = tr.nextId ? scenes.find((x) => x.id === tr.nextId) : null;
-          let target = prev && next ? null : prev || next;
-          if (prev && next) {
-            const [pt, nt] = await Promise.all([sceneThumb(prev), sceneThumb(next)]);
-            const dec = await decideAttachSide(gapText, pt, nt, key, OCR_MODEL);
-            if (dec.cost) {
-              try {
-                await recordCost({ projectId, vendor: "openai", model: OCR_MODEL, costUsd: dec.cost, meta: { kind: "attach-decide" } });
-              } catch {}
-            }
-            const gc = (tr.yStart + tr.yEnd) / 2;
-            target =
-              dec.side === "next" ? next
-              : dec.side === "prev" ? prev
-              : Math.abs(center(prev) - gc) <= Math.abs(center(next) - gc) ? prev : next; // 폴백: 가까운 쪽
-          }
-          if (!target) continue;
-          const list = byScene.get(target.id) || [];
-          list.push(gapText);
-          byScene.set(target.id, list);
-        } catch (e) {
-          await log(`갭 내레이션 ${gi} 실패: ${String(e?.message ?? e).slice(0, 80)}`);
-        }
-        await log(`갭 내레이션 ${gi}/${gapItems.length}`);
-      }
-      // 후보 컷 narration 초기화 후 이번 결과로 SET(재추출해도 중복/잔여 없음).
-      for (const s of scenes) if (candidates.has(s.id) && s.cut) s.cut.narration = "";
-      for (const [sid, texts] of byScene) {
-        const sc = scenes.find((x) => x.id === sid);
-        if (sc?.cut) sc.cut.narration = texts.join(" ").slice(0, 800);
-      }
-      if (byScene.size) await log(`갭 내레이션 부착: ${byScene.size}개 컷`);
     }
   }
 

@@ -541,64 +541,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     );
   }
 
-  // 읽기순(order) 이웃 컷. dir=prev/next. 없으면(양끝) null.
-  function adjacentScene(sceneId: string, dir: "prev" | "next") {
-    const sorted = [...project.scenes].sort((a, b) => a.order - b.order);
-    const idx = sorted.findIndex((s) => s.id === sceneId);
-    if (idx < 0) return null;
-    return sorted[dir === "prev" ? idx - 1 : idx + 1] ?? null;
-  }
-
-  // 대사/내레이션을 앞·뒤 컷으로 옮기기(자동 부착이 틀렸을 때 수동 교정). 이어붙임.
-  function moveText(sceneId: string, dir: "prev" | "next", field: "narration" | "dialogue") {
-    const target = adjacentScene(sceneId, dir);
-    const src = project.scenes.find((s) => s.id === sceneId);
-    if (!target || !src?.cut) return;
-    if (field === "narration") {
-      const txt = (src.cut.narration ?? "").trim();
-      if (!txt) return;
-      const tgt = (target.cut?.narration ?? "").trim();
-      updateCut(target.id, { narration: (tgt ? tgt + " " : "") + txt });
-      updateCut(sceneId, { narration: "" });
-    } else {
-      const bubs = src.cut.bubbles ?? [];
-      if (bubs.length) {
-        updateCut(target.id, { bubbles: [...(target.cut?.bubbles ?? []), ...bubs] });
-        updateCut(sceneId, { bubbles: [], dialogue: "" });
-      } else {
-        const d = (src.cut.dialogue ?? "").trim();
-        if (!d) return;
-        const tgt = (target.cut?.dialogue ?? "").trim();
-        updateCut(target.id, { dialogue: (tgt ? tgt + "\n" : "") + d });
-        updateCut(sceneId, { dialogue: "" });
-      }
-    }
-  }
-
-  // 대사/내레이션 '앞·뒤 컷으로 이동' 버튼 줄(3·4단계 공용). 내용 있는 것만 표시.
-  function textMoveRow(s: Project["scenes"][number]) {
-    const hasDlg = (s.cut?.bubbles?.length ?? 0) > 0 || !!(s.cut?.dialogue ?? "").trim();
-    const hasNar = !!(s.cut?.narration ?? "").trim();
-    if (!hasDlg && !hasNar) return null;
-    const btn = "rounded border border-[var(--border)] px-1 leading-none hover:bg-[var(--panel-2)] disabled:opacity-25";
-    const first = adjacentScene(s.id, "prev") == null;
-    const last = adjacentScene(s.id, "next") == null;
-    const pair = (field: "narration" | "dialogue", label: string) => (
-      <span className="inline-flex items-center gap-0.5">
-        {label}
-        <button type="button" onClick={() => moveText(s.id, "prev", field)} disabled={first} className={btn} title="앞 컷으로">◀</button>
-        <button type="button" onClick={() => moveText(s.id, "next", field)} disabled={last} className={btn} title="뒤 컷으로">▶</button>
-      </span>
-    );
-    return (
-      <div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--muted)]">
-        <span className="opacity-70">옮기기:</span>
-        {hasDlg && pair("dialogue", "대사")}
-        {hasNar && pair("narration", "내레이션")}
-      </div>
-    );
-  }
-
   // 출력 비율 선택(세로/가로/1:1) — 모든 컷이 이 비율로 일관되게 생성됨.
   async function setAspect(aspectRatio: "16:9" | "9:16" | "1:1") {
     setProject((prev) => ({ ...prev, aspectRatio }));
@@ -1514,7 +1456,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           placeholder="나레이션/자막 (없으면 직접 입력)"
                           className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px] text-[var(--muted)]"
                         />
-                        {textMoveRow(s)}
                         <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
                           {speaker && <span>화자: {speaker}</span>}
                           <div className="ml-auto flex items-center gap-1">
@@ -1811,7 +1752,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         placeholder="나레이션/자막 (선택)"
                         className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5 text-[var(--muted)]"
                       />
-                      {textMoveRow(s)}
                       {s.cut?.description?.trim() && (
                         <p
                           className="truncate text-[10px] text-[var(--muted)] opacity-70"
