@@ -61,6 +61,13 @@ export interface SourceRegion {
   xEnd?: number; // 없으면 refWidth.
 }
 
+// 컷 사이 '글자만 있는' 빈 구간(내레이션 밴드). 어느 컷에 붙일지 추출 때 VLM 이 결정 →
+// prev/next 컷 id 를 함께 들고 있는다. 부착 결과는 그 컷의 narration 에 쌓인다.
+export interface TextGapRegion extends SourceRegion {
+  prevId?: string | null; // 이 갭 바로 위 컷 id (없으면 최상단)
+  nextId?: string | null; // 이 갭 바로 아래 컷 id (없으면 최하단)
+}
+
 // ── 컷 온톨로지 — 컷의 "중심"(타입) + 내용. config/ontology.json 이 어휘의 원천. ──
 // 분할 시 VLM 이 채우고 사람이 G1 에서 확정한다. 이후 image-2(재생성)에 레퍼런스+
 // 프롬프트로 넘어간다. regenerate=false 타입(text)은 자막/음향/타이틀로 라우팅.
@@ -101,7 +108,7 @@ export interface CutOntology {
   narrationSpeakerId?: string | null; // 이 내레이션을 읽는 화자(나레이터). null=미상/기본
   speakerId?: string | null; // (레거시) 컷 단위 화자. bubbles 있으면 풍선별 speakerId 우선.
   textBoxes?: TextBox[]; // 글씨(말풍선·자막·효과음) 영역들(0~1 정규화) — 마스크 재생성용
-  textRegions?: SourceRegion[]; // 흡수된 '대사만 있는' 밴드 영역들 — 추출 때 따로 OCR해 이 컷 대사로. (이미지엔 안 합침)
+  textRegions?: TextGapRegion[]; // 컷 사이 '글자만 있는' 갭들 — 추출 때 OCR→VLM 이 앞/뒤 컷 결정→narration. (이미지엔 안 합침)
   sfx: string; // 의성어/효과음
   description: string; // VLM 자유 서술(인물·배경·구도·분위기) → image-2 로 그대로 전달
   promptDraft: string; // image-2 재생성용 프롬프트 초안(영문)

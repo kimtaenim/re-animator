@@ -22,7 +22,7 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.setting === "string") c.setting = r.setting.slice(0, 200);
   if (Array.isArray(r.objects)) c.objects = r.objects.map(String).slice(0, 8);
   if (typeof r.dialogue === "string") c.dialogue = r.dialogue.slice(0, 500);
-  if (typeof r.narration === "string") c.narration = r.narration.slice(0, 500);
+  if (typeof r.narration === "string") c.narration = r.narration.slice(0, 800);
   if (typeof r.narrationSpeakerId === "string") c.narrationSpeakerId = r.narrationSpeakerId;
   if (typeof r.speakerId === "string") c.speakerId = r.speakerId;
   if (Array.isArray(r.bubbles)) {
@@ -58,12 +58,15 @@ function cleanCut(raw: unknown): CutOntology {
   }
   if (Array.isArray(r.textRegions)) {
     c.textRegions = r.textRegions
-      .filter((b): b is Record<string, number> => !!b && typeof b === "object")
+      .filter((b): b is Record<string, unknown> => !!b && typeof b === "object")
       .map((b) => ({
         yStart: Number(b.yStart) || 0,
         yEnd: Number(b.yEnd) || 0,
         ...(b.xStart != null ? { xStart: Number(b.xStart) } : {}),
         ...(b.xEnd != null ? { xEnd: Number(b.xEnd) } : {}),
+        // 갭의 앞/뒤 컷 id — ★보존해야 재추출 때 VLM 이 부착 방향을 결정할 수 있다.
+        ...(typeof b.prevId === "string" ? { prevId: b.prevId } : {}),
+        ...(typeof b.nextId === "string" ? { nextId: b.nextId } : {}),
       }))
       .slice(0, 8);
   }
