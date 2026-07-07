@@ -1760,10 +1760,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           <button
                             key={id}
                             type="button"
-                            onClick={() => updateCut(s.id, { motion: mprompt })}
+                            onClick={() => {
+                              // 기존에 넣은 프리셋 문구만 빼고 새 걸 붙임 → 사용자가 쓴 텍스트 유지.
+                              let base = s.cut?.motion ?? "";
+                              for (const [, , pr] of CAMERA_MOVES) base = base.split(pr).join("");
+                              base = base.replace(/\s+/g, " ").trim();
+                              updateCut(s.id, { motion: base ? `${base} ${mprompt}` : mprompt });
+                            }}
                             disabled={busy}
                             className={`rounded border px-1.5 py-0.5 text-[10px] disabled:opacity-40 ${
-                              s.cut?.motion === mprompt
+                              (s.cut?.motion ?? "").includes(mprompt)
                                 ? "border-[var(--accent)] text-[var(--accent)]"
                                 : "border-[var(--border)] hover:bg-[var(--panel-2)]"
                             }`}
