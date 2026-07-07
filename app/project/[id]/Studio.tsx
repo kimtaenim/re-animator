@@ -505,6 +505,42 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }, 700);
   }
 
+  // 대사 편집기(3·4단계 공용) — 말풍선이 있으면 풍선별 입력, 없으면 한 줄 dialogue.
+  // ★두 단계가 이 하나를 함께 써서 자막/대사가 항상 싱크됨(위서 고치면 아래도, 아래서 고치면 위도).
+  //   narration 은 두 곳 다 cut.narration 을 직접 쓰므로 이미 싱크됨.
+  function dialogueEditor(s: Project["scenes"][number]) {
+    const bubs = s.cut?.bubbles ?? [];
+    const cls =
+      "w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px]";
+    if (bubs.length > 0) {
+      return (
+        <div className="flex flex-col gap-0.5">
+          {bubs.map((b, bi) => (
+            <input
+              key={bi}
+              value={b.text}
+              onChange={(e) => {
+                const val = e.target.value;
+                const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, text: val } : x));
+                updateCut(s.id, { bubbles: nb });
+              }}
+              placeholder={`말풍선 ${bi + 1} 대사`}
+              className={cls}
+            />
+          ))}
+        </div>
+      );
+    }
+    return (
+      <input
+        value={s.cut?.dialogue ?? ""}
+        onChange={(e) => updateCut(s.id, { dialogue: e.target.value })}
+        placeholder="대사 (이 칸에 들어갈 자막·더빙)"
+        className={cls}
+      />
+    );
+  }
+
   // 출력 비율 선택(세로/가로/1:1) — 모든 컷이 이 비율로 일관되게 생성됨.
   async function setAspect(aspectRatio: "16:9" | "9:16" | "1:1") {
     setProject((prev) => ({ ...prev, aspectRatio }));
@@ -1413,12 +1449,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           rows={2}
                           className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px] leading-tight"
                         />
-                        <input
-                          value={s.cut?.dialogue ?? ""}
-                          onChange={(e) => updateCut(s.id, { dialogue: e.target.value })}
-                          placeholder="대사 (이 칸에 들어갈 자막·더빙)"
-                          className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px]"
-                        />
+                        {dialogueEditor(s)}
                         <input
                           value={s.cut?.narration ?? ""}
                           onChange={(e) => updateCut(s.id, { narration: e.target.value })}
@@ -1713,33 +1744,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           </button>
                         ))}
                       </div>
-                      {/* 대사 직접 편집 — 말풍선별 입력(클릭해서 수정, 자동 저장) */}
-                      {bubs.length > 0 ? (
-                        <div className="flex flex-col gap-0.5">
-                          {bubs.map((b, bi) => (
-                            <input
-                              key={bi}
-                              value={b.text}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                const nb = (s.cut?.bubbles ?? []).map((x, i) =>
-                                  i === bi ? { ...x, text: val } : x
-                                );
-                                updateCut(s.id, { bubbles: nb });
-                              }}
-                              placeholder={`말풍선 ${bi + 1} 대사`}
-                              className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5"
-                            />
-                          ))}
-                        </div>
-                      ) : (
-                        <input
-                          value={s.cut?.dialogue ?? ""}
-                          onChange={(e) => updateCut(s.id, { dialogue: e.target.value })}
-                          placeholder="대사 (클릭해서 입력)"
-                          className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5"
-                        />
-                      )}
+                      {/* 대사 직접 편집 — 3단계와 같은 공용 편집기(말풍선별/한 줄). 항상 싱크. */}
+                      {dialogueEditor(s)}
                       <input
                         value={s.cut?.narration ?? ""}
                         onChange={(e) => updateCut(s.id, { narration: e.target.value })}

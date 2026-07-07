@@ -17,7 +17,7 @@ const DEFAULT_FONT_URL =
   "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf";
 const FAMILY = "SubtitleKR";
 // 디폴트: 글씨 작게 + 검은 바탕(거의 불투명) + 하얀 글씨. env 로 미세조정.
-const FONT_FRAC = Number(process.env.SUBTITLE_FONT_FRAC || 0.3); // 띠 대비 글자 크기(작게)
+const FONT_FRAC = Number(process.env.SUBTITLE_FONT_FRAC || 0.2); // 띠 대비 글자 크기(작게)
 const BG_ALPHA = Number(process.env.SUBTITLE_BG_ALPHA || 0.9); // 검은 바탕 불투명도
 
 let _canvas = null; // { createCanvas, GlobalFonts } | false(불가)
