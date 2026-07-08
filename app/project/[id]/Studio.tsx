@@ -505,39 +505,105 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }, 700);
   }
 
-  // 대사 편집기(3·4단계 공용) — 말풍선이 있으면 풍선별 입력, 없으면 한 줄 dialogue.
+  // 캐릭터 썸네일(화자 아바타용) — realImage 우선, 없으면 대표 컷 이미지. 없으면 null.
+  function charThumb(charId?: string | null): string | null {
+    if (!charId) return null;
+    const c = project.cast?.find((x) => x.id === charId);
+    if (!c) return null;
+    if (c.realImage) return c.realImage;
+    const rs = c.refSceneId ? project.scenes.find((x) => x.id === c.refSceneId) : null;
+    return rs?.generatedImage || rs?.originalImage || null;
+  }
+
+  // 대사 편집기(3·4단계 공용) — 말풍선별로 [화자 아바타+선택][대사][삭제]. 없으면 한 줄 dialogue.
   // ★두 단계가 이 하나를 함께 써서 자막/대사가 항상 싱크됨(위서 고치면 아래도, 아래서 고치면 위도).
-  //   narration 은 두 곳 다 cut.narration 을 직접 쓰므로 이미 싱크됨.
+  //   삭제 = 대사 아닌 걸 잘못 읽었을 때 그 항목 제거. 화자 = 이 대사를 말하는 캐릭터(더빙 목소리).
   function dialogueEditor(s: Project["scenes"][number]) {
     const bubs = s.cut?.bubbles ?? [];
-    const cls =
-      "w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px]";
+    const cast = project.cast ?? [];
+    const inputCls =
+      "min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px]";
+    const selCls =
+      "shrink-0 max-w-[92px] rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-1 text-[10px]";
+    const delCls =
+      "shrink-0 rounded border border-[var(--border)] px-1.5 py-1 leading-none text-[var(--muted)] hover:border-[var(--danger)] hover:text-[var(--danger)]";
+    const avatar = (charId?: string | null) => {
+      const th = charThumb(charId);
+      return th ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={th} alt="" className="h-5 w-5 shrink-0 rounded-full border border-[var(--border)] object-cover" />
+      ) : (
+        <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-dashed border-[var(--border)] text-[8px] text-[var(--muted)]">
+          나
+        </span>
+      );
+    };
+    const speakerSelect = (value: string | null | undefined, onPick: (v: string | null) => void) => (
+      <select value={value ?? ""} onChange={(e) => onPick(e.target.value || null)} className={selCls} title="이 대사의 화자(캐릭터). 비우면 내레이션.">
+        <option value="">내레이션</option>
+        {cast.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.label}
+          </option>
+        ))}
+      </select>
+    );
     if (bubs.length > 0) {
       return (
         <div className="flex flex-col gap-0.5">
           {bubs.map((b, bi) => (
-            <input
-              key={bi}
-              value={b.text}
-              onChange={(e) => {
-                const val = e.target.value;
-                const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, text: val } : x));
+            <div key={bi} className="flex items-center gap-1">
+              {avatar(b.speakerId)}
+              {speakerSelect(b.speakerId, (v) => {
+                const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, speakerId: v } : x));
                 updateCut(s.id, { bubbles: nb });
-              }}
-              placeholder={`말풍선 ${bi + 1} 대사`}
-              className={cls}
-            />
+              })}
+              <input
+                value={b.text}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, text: val } : x));
+                  updateCut(s.id, { bubbles: nb });
+                }}
+                placeholder={`대사 ${bi + 1}`}
+                className={inputCls}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const nb = (s.cut?.bubbles ?? []).filter((_, i) => i !== bi);
+                  updateCut(s.id, { bubbles: nb });
+                }}
+                title="이 대사 삭제(대사 아닌 걸 잘못 읽었을 때)"
+                className={delCls}
+              >
+                ×
+              </button>
+            </div>
           ))}
         </div>
       );
     }
+    // 말풍선이 아직 없으면 한 줄 입력 + 화자(cut.speakerId) + 지우기.
     return (
-      <input
-        value={s.cut?.dialogue ?? ""}
-        onChange={(e) => updateCut(s.id, { dialogue: e.target.value })}
-        placeholder="대사 (이 칸에 들어갈 자막·더빙)"
-        className={cls}
-      />
+      <div className="flex items-center gap-1">
+        {avatar(s.cut?.speakerId)}
+        {speakerSelect(s.cut?.speakerId, (v) => updateCut(s.id, { speakerId: v }))}
+        <input
+          value={s.cut?.dialogue ?? ""}
+          onChange={(e) => updateCut(s.id, { dialogue: e.target.value })}
+          placeholder="대사 (이 칸에 들어갈 자막·더빙)"
+          className={inputCls}
+        />
+        <button
+          type="button"
+          onClick={() => updateCut(s.id, { dialogue: "" })}
+          title="대사 지우기"
+          className={delCls}
+        >
+          ×
+        </button>
+      </div>
     );
   }
 
