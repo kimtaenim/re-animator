@@ -513,6 +513,18 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     return sorted[dir === "prev" ? idx - 1 : idx + 1] ?? null;
   }
 
+  // 한 컷 안에서 대사(말풍선) 순서를 위/아래로 바꾸기. d=-1 위, +1 아래.
+  function reorderBubble(sceneId: string, bi: number, d: -1 | 1) {
+    const src = project.scenes.find((s) => s.id === sceneId);
+    const bubs = src?.cut?.bubbles;
+    if (!bubs) return;
+    const j = bi + d;
+    if (j < 0 || j >= bubs.length) return;
+    const nb = [...bubs];
+    [nb[bi], nb[j]] = [nb[j], nb[bi]];
+    updateCut(sceneId, { bubbles: nb });
+  }
+
   // 이 대사(말풍선)를 앞(위)/뒤(아래) 컷으로 옮기기 — 자동 부착이 틀렸을 때 수동 교정.
   function moveBubble(sceneId: string, bi: number, dir: "prev" | "next") {
     const target = adjacentScene(sceneId, dir);
@@ -547,8 +559,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       "shrink-0 max-w-[92px] rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-1 text-[10px]";
     const delCls =
       "shrink-0 rounded border border-[var(--border)] px-1.5 py-1 leading-none text-[var(--muted)] hover:border-[var(--danger)] hover:text-[var(--danger)]";
-    const mvCls =
-      "shrink-0 rounded border border-[var(--border)] px-1 py-1 leading-none text-[var(--muted)] hover:bg-[var(--panel-2)] disabled:opacity-25";
     const first = adjacentScene(s.id, "prev") == null;
     const last = adjacentScene(s.id, "next") == null;
     const avatar = (charId?: string | null) => {
@@ -572,32 +582,50 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         ))}
       </select>
     );
+    const stackCls =
+      "leading-none px-1 text-[9px] text-[var(--muted)] hover:text-[var(--accent)] disabled:opacity-20";
+    const rows = (t: string) => Math.min(4, (t.match(/\n/g)?.length ?? 0) + 1); // 줄 수만큼 커짐(최대 4)
     if (bubs.length > 0) {
       return (
         <div className="flex flex-col gap-0.5">
           {bubs.map((b, bi) => (
-            <div key={bi} className="flex items-center gap-1">
-              {avatar(b.speakerId)}
+            <div key={bi} className="flex items-start gap-1">
+              <div className="pt-0.5">{avatar(b.speakerId)}</div>
               {speakerSelect(b.speakerId, (v) => {
                 const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, speakerId: v } : x));
                 updateCut(s.id, { bubbles: nb });
               })}
-              <input
+              <textarea
                 value={b.text}
                 onChange={(e) => {
                   const val = e.target.value;
                   const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, text: val } : x));
                   updateCut(s.id, { bubbles: nb });
                 }}
-                placeholder={`대사 ${bi + 1}`}
-                className={inputCls}
+                rows={rows(b.text)}
+                placeholder={`대사 ${bi + 1} (Enter=줄바꿈)`}
+                className={`${inputCls} resize-none`}
               />
-              <button type="button" onClick={() => moveBubble(s.id, bi, "prev")} disabled={first} title="앞(위) 컷으로 옮기기" className={mvCls}>
-                ◀
-              </button>
-              <button type="button" onClick={() => moveBubble(s.id, bi, "next")} disabled={last} title="뒤(아래) 컷으로 옮기기" className={mvCls}>
-                ▶
-              </button>
+              {/* 한 컷 안 순서 바꾸기(▲▼) — 대사 2개 이상일 때만 */}
+              {bubs.length > 1 && (
+                <div className="flex shrink-0 flex-col" title="이 컷 안에서 순서 바꾸기">
+                  <button type="button" onClick={() => reorderBubble(s.id, bi, -1)} disabled={bi === 0} className={stackCls} title="이 컷 안에서 위로">
+                    ▲
+                  </button>
+                  <button type="button" onClick={() => reorderBubble(s.id, bi, 1)} disabled={bi === bubs.length - 1} className={stackCls} title="이 컷 안에서 아래로">
+                    ▼
+                  </button>
+                </div>
+              )}
+              {/* 앞/뒤 컷으로 보내기(↑↓) */}
+              <div className="flex shrink-0 flex-col" title="앞/뒤 컷으로 보내기">
+                <button type="button" onClick={() => moveBubble(s.id, bi, "prev")} disabled={first} className={stackCls} title="위 컷으로 보내기">
+                  ↑
+                </button>
+                <button type="button" onClick={() => moveBubble(s.id, bi, "next")} disabled={last} className={stackCls} title="아래 컷으로 보내기">
+                  ↓
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => {
@@ -616,14 +644,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
     // 말풍선이 아직 없으면 한 줄 입력 + 화자(cut.speakerId) + 지우기.
     return (
-      <div className="flex items-center gap-1">
-        {avatar(s.cut?.speakerId)}
+      <div className="flex items-start gap-1">
+        <div className="pt-0.5">{avatar(s.cut?.speakerId)}</div>
         {speakerSelect(s.cut?.speakerId, (v) => updateCut(s.id, { speakerId: v }))}
-        <input
+        <textarea
           value={s.cut?.dialogue ?? ""}
           onChange={(e) => updateCut(s.id, { dialogue: e.target.value })}
-          placeholder="대사 (이 칸에 들어갈 자막·더빙)"
-          className={inputCls}
+          rows={rows(s.cut?.dialogue ?? "")}
+          placeholder="대사 (Enter=줄바꿈)"
+          className={`${inputCls} resize-none`}
         />
         <button
           type="button"
