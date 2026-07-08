@@ -285,6 +285,15 @@ export async function runSplit(projectId) {
   // 컷 밖 빈 구간(내레이션 등)도 OCR 잡히게 이웃 컷 textRegions 로 예약.
   const gapN = addGapTextRegions(scenes, global, canvas.totalHeight, log);
   if (gapN) await log(`컷 밖 텍스트 구간 ${gapN}개 → 이웃 컷에 OCR 예약`);
+  // ── 진단: 텍스트 캡처가 어디서 새는지 보이게 ──
+  const typeCounts = {};
+  for (const s of scenes) {
+    const t = s.cut?.type ?? "(미분류)";
+    typeCounts[t] = (typeCounts[t] || 0) + 1;
+  }
+  const totalTR = scenes.reduce((n, s) => n + (s.cut?.textRegions?.length || 0), 0);
+  await log(`[진단] 컷 타입 ${JSON.stringify(typeCounts)}`);
+  await log(`[진단] 텍스트 밴드 예약 총 ${totalTR}개(흡수+갭) — 이 수만큼 내레이션이 이웃 컷 OCR에 붙음`);
 
   // 최신 프로젝트를 다시 읽어 결과만 병합(중간에 다른 갱신 있었을 수 있음).
   const p2 = await getProject(projectId);
@@ -359,6 +368,8 @@ export async function runExtract(projectId) {
     const OCR_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
     const C = Number(process.env.OCR_CONCURRENCY || 2); // 업스케일 이미지가 커서 동시성 낮게
     let done = 0;
+    let trTotal = 0; // [진단] textRegion(넘어온 내레이션 밴드) OCR 시도/성공 수
+    let trHit = 0;
     for (let i = 0; i < ocrTodo.length; i += C) {
       const chunk = ocrTodo.slice(i, i + C);
       await Promise.all(
@@ -389,7 +400,11 @@ export async function runExtract(projectId) {
                   tr.xEnd
                 );
                 const t = await readCutText(tpng, key, OCR_MODEL);
-                if (t.bubbles?.length) allBubbles = allBubbles.concat(t.bubbles);
+                trTotal++;
+                if (t.bubbles?.length) {
+                  allBubbles = allBubbles.concat(t.bubbles);
+                  trHit++;
+                }
                 if (t.sfx) sfx = sfx ? `${sfx} ${t.sfx}` : t.sfx;
               } catch {}
             }
@@ -410,6 +425,7 @@ export async function runExtract(projectId) {
       done = Math.min(i + C, ocrTodo.length);
       await log(`글씨 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%)`);
     }
+    await log(`[진단] 내레이션 밴드 OCR: ${trHit}/${trTotal} 성공(글자 잡힘) — 0/0이면 밴드가 분할서 안 넘어온 것`);
   }
 
   const p2 = await getProject(projectId);

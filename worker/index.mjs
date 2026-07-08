@@ -89,7 +89,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m6-textband-handover-v3 (텍스트 밴드 확실히 이웃 컷에 넘김+갭 피크보충)");
+console.log("[worker] BUILD = m6-textband-diag-v4 (텍스트 밴드 넘김 + 진단 로그)");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();
