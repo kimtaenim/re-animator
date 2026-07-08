@@ -505,6 +505,26 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }, 700);
   }
 
+  // 읽기순(order) 이웃 컷. dir=prev(위)/next(아래). 양끝이면 null.
+  function adjacentScene(sceneId: string, dir: "prev" | "next") {
+    const sorted = [...project.scenes].sort((a, b) => a.order - b.order);
+    const idx = sorted.findIndex((s) => s.id === sceneId);
+    if (idx < 0) return null;
+    return sorted[dir === "prev" ? idx - 1 : idx + 1] ?? null;
+  }
+
+  // 이 대사(말풍선)를 앞(위)/뒤(아래) 컷으로 옮기기 — 자동 부착이 틀렸을 때 수동 교정.
+  function moveBubble(sceneId: string, bi: number, dir: "prev" | "next") {
+    const target = adjacentScene(sceneId, dir);
+    const src = project.scenes.find((s) => s.id === sceneId);
+    const b = src?.cut?.bubbles?.[bi];
+    if (!target || !b) return;
+    const tb = target.cut?.bubbles ?? [];
+    // 위로=뒤에 붙임, 아래로=앞에 붙임(읽기 흐름에 맞게).
+    updateCut(target.id, { bubbles: dir === "prev" ? [...tb, b] : [b, ...tb] });
+    updateCut(sceneId, { bubbles: (src.cut?.bubbles ?? []).filter((_, i) => i !== bi) });
+  }
+
   // 캐릭터 썸네일(화자 아바타용) — realImage 우선, 없으면 대표 컷 이미지. 없으면 null.
   function charThumb(charId?: string | null): string | null {
     if (!charId) return null;
@@ -527,6 +547,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       "shrink-0 max-w-[92px] rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-1 text-[10px]";
     const delCls =
       "shrink-0 rounded border border-[var(--border)] px-1.5 py-1 leading-none text-[var(--muted)] hover:border-[var(--danger)] hover:text-[var(--danger)]";
+    const mvCls =
+      "shrink-0 rounded border border-[var(--border)] px-1 py-1 leading-none text-[var(--muted)] hover:bg-[var(--panel-2)] disabled:opacity-25";
+    const first = adjacentScene(s.id, "prev") == null;
+    const last = adjacentScene(s.id, "next") == null;
     const avatar = (charId?: string | null) => {
       const th = charThumb(charId);
       return th ? (
@@ -568,6 +592,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 placeholder={`대사 ${bi + 1}`}
                 className={inputCls}
               />
+              <button type="button" onClick={() => moveBubble(s.id, bi, "prev")} disabled={first} title="앞(위) 컷으로 옮기기" className={mvCls}>
+                ◀
+              </button>
+              <button type="button" onClick={() => moveBubble(s.id, bi, "next")} disabled={last} title="뒤(아래) 컷으로 옮기기" className={mvCls}>
+                ▶
+              </button>
               <button
                 type="button"
                 onClick={() => {
