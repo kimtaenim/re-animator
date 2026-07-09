@@ -1,44 +1,31 @@
 import { NextResponse } from "next/server";
+import catalog from "@/config/voices.json";
 
 export const runtime = "nodejs";
 
-// GET — Typecast 목소리 목록 프록시. 캐스팅에서 캐릭터별 목소리 선택용.
-// 인증: X-API-KEY(키를 값 그대로). base https://api.typecast.ai, GET /v2/voices.
-// TYPECAST_API_KEY 없으면 빈 목록 + note(프론트는 수동 입력으로 폴백).
+// GET — 더빙 목소리 카탈로그(config/voices.json) 서빙. voice_id 는 공개값이라 API 조회·env 대신
+// 큐레이션한 JSON 으로 관리한다. 캐스팅/나레이터가 이 목록에서 골라 붙인다. 실제 음성 생성은
+// 워커가 provider 별 API 키로 수행. 미교체 placeholder(REPLACE_ME_*)는 목록에서 제외.
+type CatalogVoice = {
+  provider?: string;
+  id?: string;
+  name?: string;
+  lang?: string;
+  gender?: string;
+  note?: string;
+};
+
 export async function GET() {
-  const key = process.env.TYPECAST_API_KEY;
-  if (!key) {
-    return NextResponse.json({ ok: true, voices: [], note: "TYPECAST_API_KEY 미설정" });
-  }
-  try {
-    const r = await fetch("https://api.typecast.ai/v2/voices", {
-      headers: { "X-API-KEY": key },
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!r.ok) {
-      return NextResponse.json(
-        { ok: false, error: `Typecast ${r.status}: ${(await r.text().catch(() => "")).slice(0, 160)}` },
-        { status: 502 }
-      );
-    }
-    const d = await r.json();
-    // 응답이 배열이거나 { voices:[…] } / { results:[…] } 일 수 있어 방어적으로 정규화.
-    const raw: unknown[] = Array.isArray(d) ? d : (d.voices ?? d.results ?? d.data ?? []);
-    const voices: { id: string; name: string; language: string; emotions?: string[] }[] = [];
-    for (const v of raw) {
-      const o = (v ?? {}) as Record<string, unknown>;
-      const id = (o.voice_id ?? o.id) as string | undefined;
-      if (!id) continue;
-      const name = (o.voice_name ?? o.name ?? id) as string;
-      const language = (o.language ?? o.lang ?? "") as string;
-      const emotions = Array.isArray(o.emotions) ? (o.emotions as unknown[]).map(String) : undefined;
-      voices.push({ id, name, language, emotions });
-    }
-    return NextResponse.json({ ok: true, voices });
-  } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : "voices 조회 실패" },
-      { status: 500 }
-    );
-  }
+  const raw = ((catalog as { voices?: CatalogVoice[] }).voices ?? []) as CatalogVoice[];
+  const voices = raw
+    .filter((v) => v && typeof v.id === "string" && v.id && !v.id.startsWith("REPLACE_ME"))
+    .map((v) => ({
+      id: v.id as string,
+      name: v.name || (v.id as string),
+      provider: v.provider === "typecast" ? "typecast" : "eleven",
+      language: v.lang || "",
+      gender: v.gender || "",
+      note: v.note || "",
+    }));
+  return NextResponse.json({ ok: true, voices });
 }

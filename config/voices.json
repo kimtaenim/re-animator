@@ -1,0 +1,19 @@
+{
+  "_help": "더빙 목소리 카탈로그. voice_id 는 공개값이라 여기서 관리한다(=env·API 조회 대신). 캐스팅에서 이 목록을 골라 캐릭터/나레이터에 붙인다. 실제 음성 생성 때만 워커가 API 키(ELEVENLABS_API_KEY / TYPECAST_API_KEY)를 쓴다. 항목을 잔뜩 추가해도 됨. provider=eleven|typecast, id=voice_id, name=표시이름, lang, gender, note=설명.",
+  "voices": [
+    { "provider": "eleven", "id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel", "lang": "multi", "gender": "male", "note": "뉴스 앵커풍, 진중한 내레이터" },
+    { "provider": "eleven", "id": "JBFqnCBsd6RMkjVDRZzb", "name": "George", "lang": "multi", "gender": "male", "note": "따뜻한 중년 남성" },
+    { "provider": "eleven", "id": "pNInz6obpgDQGcFmaJgB", "name": "Adam", "lang": "multi", "gender": "male", "note": "깊고 묵직한 남성" },
+    { "provider": "eleven", "id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam", "lang": "multi", "gender": "male", "note": "젊은 남성" },
+    { "provider": "eleven", "id": "N2lVS1w4EtoT3dr4eOWO", "name": "Callum", "lang": "multi", "gender": "male", "note": "거칠고 음산한 남성" },
+    { "provider": "eleven", "id": "nPczCjzI2devNBz1zQrb", "name": "Brian", "lang": "multi", "gender": "male", "note": "차분한 저음 남성" },
+    { "provider": "eleven", "id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel", "lang": "multi", "gender": "female", "note": "차분한 여성 내레이션" },
+    { "provider": "eleven", "id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah", "lang": "multi", "gender": "female", "note": "부드러운 여성" },
+    { "provider": "eleven", "id": "XB0fDUnXU5powFXDhCwa", "name": "Charlotte", "lang": "multi", "gender": "female", "note": "젊은 여성" },
+    { "provider": "eleven", "id": "XrExE9yKIg1WjnnlVkGX", "name": "Matilda", "lang": "multi", "gender": "female", "note": "밝고 또렷한 여성" },
+    { "provider": "eleven", "id": "pFZP5JQG7iQjIQuC4Bku", "name": "Lily", "lang": "multi", "gender": "female", "note": "차분한 여성" },
+    { "provider": "eleven", "id": "Xb7hH8MSUJpSbSDYk0k2", "name": "Alice", "lang": "multi", "gender": "female", "note": "또렷한 여성" },
+    { "provider": "typecast", "id": "REPLACE_ME_1", "name": "타입캐스트 목소리 1 (교체)", "lang": "ko", "gender": "female", "note": "Typecast /v2/voices 응답의 voice_id 를 여기 넣으세요" },
+    { "provider": "typecast", "id": "REPLACE_ME_2", "name": "타입캐스트 목소리 2 (교체)", "lang": "ko", "gender": "male", "note": "Typecast /v2/voices 응답의 voice_id 를 여기 넣으세요" }
+  ]
+}

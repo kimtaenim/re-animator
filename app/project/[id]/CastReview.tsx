@@ -14,7 +14,7 @@ import type { Character, Scene } from "@/lib/types";
 // 캐스팅 대상 = 인물이 담긴 컷. person(정지·반응) + action(동작 중 인물) 모두 포함.
 const CHARACTER_TYPES = new Set(["person", "action"]);
 
-type VoiceOpt = { id: string; name: string; language?: string };
+type VoiceOpt = { id: string; name: string; language?: string; provider?: string; gender?: string; note?: string };
 
 // 실사 초상 인종/유형 칩 — [프롬프트용 영문, 표시 라벨]. 판타지(엘프·로봇)도 포함.
 const ETHNICITIES: [string, string][] = [
@@ -157,10 +157,17 @@ export default function CastReview({
     setSpeakerMap((prev) => ({ ...prev, [key]: charId }));
     scheduleSave();
   };
-  const setVoice = (charId: string, voice: string, voiceName: string) => {
+  const setVoice = (charId: string, voice: string, voiceName: string, provider: string) => {
     setCast((prev) =>
       prev.map((c) =>
-        c.id === charId ? { ...c, voice: voice || undefined, voiceName: voiceName || undefined } : c
+        c.id === charId
+          ? {
+              ...c,
+              voice: voice || undefined,
+              voiceName: voiceName || undefined,
+              voiceProvider: voice ? provider || undefined : undefined,
+            }
+          : c
       )
     );
     scheduleSave();
@@ -360,25 +367,34 @@ export default function CastReview({
                     value={c.voice ?? ""}
                     onChange={(e) => {
                       const v = voices.find((x) => x.id === e.target.value);
-                      setVoice(c.id, e.target.value, v?.name ?? "");
+                      setVoice(c.id, e.target.value, v?.name ?? "", v?.provider ?? "");
                     }}
-                    title="이 캐릭터 더빙 목소리(Typecast)"
+                    title="이 캐릭터 더빙 목소리(카탈로그 config/voices.json)"
                     className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-xs"
                   >
                     <option value="">🎙 목소리 선택…</option>
-                    {voices.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
-                        {v.language ? ` (${v.language})` : ""}
-                      </option>
-                    ))}
+                    {["eleven", "typecast"].map((pv) => {
+                      const list = voices.filter((v) => (v.provider ?? "eleven") === pv);
+                      if (!list.length) return null;
+                      return (
+                        <optgroup key={pv} label={pv === "eleven" ? "ElevenLabs" : "Typecast"}>
+                          {list.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.name}
+                              {v.gender ? ` · ${v.gender === "female" ? "여" : v.gender === "male" ? "남" : v.gender}` : ""}
+                              {v.note ? ` · ${v.note}` : ""}
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
                   </select>
                 ) : (
                   <input
                     value={c.voice ?? ""}
-                    onChange={(e) => setVoice(c.id, e.target.value, "")}
+                    onChange={(e) => setVoice(c.id, e.target.value, "", "")}
                     onBlur={scheduleSave}
-                    placeholder="🎙 목소리 id (tc_…) — TYPECAST_API_KEY 설정 시 목록"
+                    placeholder="🎙 목소리 id — config/voices.json 에 등록"
                     className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-[11px] text-[var(--muted)]"
                   />
                 )}
