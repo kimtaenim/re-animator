@@ -676,6 +676,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }).catch(() => {});
   }
 
+  // 나레이터 목소리(프로젝트 레벨) — 카탈로그에서 고른 값 저장. null=해제.
+  async function setNarratorVoice(v: { provider: string; id: string; name: string } | null) {
+    setProject((prev) => ({ ...prev, narratorVoice: v ?? undefined }));
+    await fetch(`/api/project/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ narratorVoice: v }),
+    }).catch(() => {});
+  }
+
   // 컷별 모델 — 그때그때 컷마다 다른 모델 선택. 미지정 컷은 헤더 기본 모델(genModel) 사용.
   // (짧은 문자열 하나라 메모리 부담 없음. 워커도 라우팅 문자열로만 씀.)
   const [modelBySceneId, setModelBySceneId] = useState<Record<string, string>>({});
@@ -1344,6 +1354,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 onDesignPortrait={designPortrait}
                 portraitPending={portraitPending}
                 onZoom={(src) => setLightbox({ type: "image", src })}
+                narratorVoice={project.narratorVoice ?? null}
+                onSetNarratorVoice={setNarratorVoice}
               />
             </>
           )}

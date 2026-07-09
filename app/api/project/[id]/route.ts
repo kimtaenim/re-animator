@@ -10,9 +10,15 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const body = await req
-    .json()
-    .catch(() => ({}) as { name?: string; aspectRatio?: string; regenMode?: string });
+  const body = await req.json().catch(
+    () =>
+      ({}) as {
+        name?: string;
+        aspectRatio?: string;
+        regenMode?: string;
+        narratorVoice?: { provider?: string; id?: string; name?: string } | null;
+      }
+  );
   const project = await getProject(id);
   if (!project) {
     return NextResponse.json({ ok: false, error: "프로젝트 없음" }, { status: 404 });
@@ -28,6 +34,18 @@ export async function PATCH(
   }
   if (body.regenMode === "mask" || body.regenMode === "full") {
     project.regenMode = body.regenMode;
+    changed = true;
+  }
+  if (body.narratorVoice !== undefined) {
+    const nv = body.narratorVoice;
+    project.narratorVoice =
+      nv && typeof nv.id === "string" && nv.id
+        ? {
+            provider: String(nv.provider || "eleven").slice(0, 20),
+            id: nv.id.slice(0, 80),
+            name: String(nv.name || nv.id).slice(0, 60),
+          }
+        : undefined; // null → 해제
     changed = true;
   }
   if (changed) await saveProject(project);

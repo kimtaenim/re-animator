@@ -14,7 +14,16 @@ import type { Character, Scene } from "@/lib/types";
 // 캐스팅 대상 = 인물이 담긴 컷. person(정지·반응) + action(동작 중 인물) 모두 포함.
 const CHARACTER_TYPES = new Set(["person", "action"]);
 
-type VoiceOpt = { id: string; name: string; language?: string; provider?: string; gender?: string; note?: string };
+type VoiceOpt = {
+  id: string;
+  name: string;
+  language?: string;
+  provider?: string;
+  gender?: string;
+  note?: string;
+  narration?: boolean;
+};
+type NarratorVoice = { provider: string; id: string; name: string };
 
 // 실사 초상 인종/유형 칩 — [프롬프트용 영문, 표시 라벨]. 판타지(엘프·로봇)도 포함.
 const ETHNICITIES: [string, string][] = [
@@ -38,6 +47,8 @@ interface Props {
   onDesignPortrait: (charId: string, prompt?: string) => void;
   portraitPending: Map<string, string>;
   onZoom: (src: string) => void;
+  narratorVoice: NarratorVoice | null;
+  onSetNarratorVoice: (v: NarratorVoice | null) => void;
 }
 
 // 컷의 대사 단위 목록 — bubbles 있으면 풍선별(idx≥0), 없으면 레거시 통대사(idx=-1).
@@ -102,9 +113,37 @@ export default function CastReview({
   onDesignPortrait,
   portraitPending,
   onZoom,
+  narratorVoice,
+  onSetNarratorVoice,
 }: Props) {
   const [cast, setCast] = useState<Character[]>(initial);
   const [saving, setSaving] = useState<null | "save" | "approve">(null);
+  // 미리듣기(TTS 샘플) — 재생 중인 voiceId 표시.
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const previewVoice = async (provider: string, voiceId: string) => {
+    if (!voiceId || previewing) return;
+    setPreviewing(voiceId);
+    try {
+      const r = await fetch("/api/tts/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider, voiceId }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        alert(`미리듣기 실패: ${d.error ?? r.status}`);
+        return;
+      }
+      const url = URL.createObjectURL(await r.blob());
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      await audio.play();
+    } catch {
+      alert("미리듣기 오류");
+    } finally {
+      setPreviewing(null);
+    }
+  };
 
   // prop 갱신(재캐스팅/저장 후) 재동기화 — 렌더 중 조정 패턴.
   const [last, setLast] = useState(initial);
@@ -362,42 +401,55 @@ export default function CastReview({
                   placeholder="외모·특징 (예: 빨간머리 여자, 검은 정장)"
                   className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-xs text-[var(--muted)]"
                 />
-                {voices.length > 0 ? (
-                  <select
-                    value={c.voice ?? ""}
-                    onChange={(e) => {
-                      const v = voices.find((x) => x.id === e.target.value);
-                      setVoice(c.id, e.target.value, v?.name ?? "", v?.provider ?? "");
-                    }}
-                    title="이 캐릭터 더빙 목소리(카탈로그 config/voices.json)"
-                    className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-xs"
-                  >
-                    <option value="">🎙 목소리 선택…</option>
-                    {["eleven", "typecast"].map((pv) => {
-                      const list = voices.filter((v) => (v.provider ?? "eleven") === pv);
-                      if (!list.length) return null;
-                      return (
-                        <optgroup key={pv} label={pv === "eleven" ? "ElevenLabs" : "Typecast"}>
-                          {list.map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.name}
-                              {v.gender ? ` · ${v.gender === "female" ? "여" : v.gender === "male" ? "남" : v.gender}` : ""}
-                              {v.note ? ` · ${v.note}` : ""}
-                            </option>
-                          ))}
-                        </optgroup>
-                      );
-                    })}
-                  </select>
-                ) : (
-                  <input
-                    value={c.voice ?? ""}
-                    onChange={(e) => setVoice(c.id, e.target.value, "", "")}
-                    onBlur={scheduleSave}
-                    placeholder="🎙 목소리 id — config/voices.json 에 등록"
-                    className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-[11px] text-[var(--muted)]"
-                  />
-                )}
+                <div className="flex items-center gap-1">
+                  {voices.length > 0 ? (
+                    <select
+                      value={c.voice ?? ""}
+                      onChange={(e) => {
+                        const v = voices.find((x) => x.id === e.target.value);
+                        setVoice(c.id, e.target.value, v?.name ?? "", v?.provider ?? "");
+                      }}
+                      title="이 캐릭터 더빙 목소리(카탈로그 config/voices.json)"
+                      className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-xs"
+                    >
+                      <option value="">🎙 목소리 선택…</option>
+                      {["eleven", "typecast"].map((pv) => {
+                        const list = voices.filter((v) => (v.provider ?? "eleven") === pv);
+                        if (!list.length) return null;
+                        return (
+                          <optgroup key={pv} label={pv === "eleven" ? "ElevenLabs" : "Typecast"}>
+                            {list.map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.name}
+                                {v.gender ? ` · ${v.gender === "female" ? "여" : v.gender === "male" ? "남" : v.gender}` : ""}
+                                {v.note ? ` · ${v.note}` : ""}
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
+                    </select>
+                  ) : (
+                    <input
+                      value={c.voice ?? ""}
+                      onChange={(e) => setVoice(c.id, e.target.value, "", "")}
+                      onBlur={scheduleSave}
+                      placeholder="🎙 목소리 id — config/voices.json 에 등록"
+                      className="min-w-0 flex-1 rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-[11px] text-[var(--muted)]"
+                    />
+                  )}
+                  {c.voice && (
+                    <button
+                      type="button"
+                      onClick={() => previewVoice(c.voiceProvider ?? "eleven", c.voice!)}
+                      disabled={previewing === c.voice}
+                      title="이 목소리 미리듣기"
+                      className="shrink-0 rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:bg-[var(--panel-2)] disabled:opacity-40"
+                    >
+                      {previewing === c.voice ? "…" : "▶"}
+                    </button>
+                  )}
+                </div>
               </div>
               <span className="ml-auto shrink-0 text-xs text-[var(--muted)]">{c.sceneIds.length}컷</span>
             </div>
@@ -530,6 +582,60 @@ export default function CastReview({
             잘못 분류됐는지 확인하세요.
           </p>
         )}
+      </div>
+
+      {/* 나레이터 목소리 — 내레이션 더빙에 쓸 목소리. 후보를 골라 미리듣기 후 선택. */}
+      <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2">
+        <h3 className="mb-2 text-sm font-semibold">
+          🎙 나레이터 목소리{" "}
+          <span className="font-normal text-[var(--muted)]">— 내레이션 더빙 (미리듣기 후 선택)</span>
+        </h3>
+        {(() => {
+          const narr = voices.filter((v) => v.narration);
+          if (narr.length === 0)
+            return <p className="text-xs text-[var(--muted)]">config/voices.json 에 narration:true 목소리를 등록하세요.</p>;
+          const order = (v: VoiceOpt) => (v.provider === "typecast" ? 0 : 1); // Typecast 먼저
+          const sorted = [...narr].sort((a, b) => order(a) - order(b));
+          return (
+            <div className="flex flex-col gap-1">
+              {sorted.map((v) => (
+                <div key={v.id} className="flex items-center gap-2 text-xs">
+                  <input
+                    type="radio"
+                    name="narrator-voice"
+                    checked={narratorVoice?.id === v.id}
+                    onChange={() => onSetNarratorVoice({ provider: v.provider ?? "eleven", id: v.id, name: v.name })}
+                  />
+                  <span className="flex-1 truncate">
+                    {v.name}
+                    <span className="text-[var(--muted)]">
+                      {" · "}
+                      {v.provider === "typecast" ? "Typecast" : "ElevenLabs"}
+                      {v.note ? ` · ${v.note}` : ""}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => previewVoice(v.provider ?? "eleven", v.id)}
+                    disabled={previewing === v.id}
+                    className="shrink-0 rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--panel-2)] disabled:opacity-40"
+                  >
+                    {previewing === v.id ? "재생 중…" : "▶ 듣기"}
+                  </button>
+                </div>
+              ))}
+              {narratorVoice && (
+                <button
+                  type="button"
+                  onClick={() => onSetNarratorVoice(null)}
+                  className="mt-0.5 self-start text-[11px] text-[var(--muted)] underline"
+                >
+                  선택 해제
+                </button>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* 대사 · 화자 — 말풍선별로 어느 캐릭터가 말하는지(더빙 목소리 매핑) */}

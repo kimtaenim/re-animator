@@ -13,6 +13,7 @@ type CatalogVoice = {
   lang?: string;
   gender?: string;
   note?: string;
+  narration?: boolean;
 };
 
 export async function GET() {
@@ -26,6 +27,7 @@ export async function GET() {
       language: v.lang || "",
       gender: v.gender || "",
       note: v.note || "",
+      narration: v.narration === true,
     }));
   return NextResponse.json({ ok: true, voices });
 }
