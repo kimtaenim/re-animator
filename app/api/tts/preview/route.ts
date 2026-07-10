@@ -30,8 +30,8 @@ export async function POST(req: NextRequest) {
           voice_id: voiceId,
           text,
           model: "ssfm-v30",
-          language: "kor",
-          output: { audio_format: "wav", tempo: 1 },
+          language: "kor", // ISO 639-3 (한국어)
+          output: { audio_format: "wav" }, // audio_tempo 등은 기본값. ★tempo(비표준)→제거
         }),
         signal: AbortSignal.timeout(30_000),
       });
