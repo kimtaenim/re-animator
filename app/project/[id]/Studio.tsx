@@ -56,6 +56,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const regenSawRunning = useRef(false); // 재생성 잡이 실제 running 을 거쳤는지(스피너 조기 해제 방지)
   const [selForVideo, setSelForVideo] = useState<Set<string>>(() => new Set()); // 4단계 다중 선택
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
+  const [scenePreview, setScenePreview] = useState<string | null>(null); // 씬 미리보기(영상+자막+더빙)
   const [portraitPending, setPortraitPending] = useState<Map<string, string>>(() => new Map()); // 실사 초상 생성 중(값=옛 realImage url)
   const [genModel, setGenModel] = useState("gpt-image-2"); // 재생성 모델(비교용)
   const [costKrw, setCostKrw] = useState<number | null>(null);
@@ -971,6 +972,25 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 이 씬에 더빙 오디오가 하나라도 있나(재생 버튼 표시용).
   const sceneHasAudio = (s: Project["scenes"][number]) =>
     (s.cut?.bubbles ?? []).some((b) => b.audioUrl) || !!s.cut?.narrationAudioUrl || !!s.cut?.sfxAudioUrl;
+
+  // 자막 텍스트(합성에서 구울 것과 동일 규칙: 대사 + 내레이션). 미리보기 오버레이용.
+  function subtitleText(cut?: Project["scenes"][number]["cut"]): string {
+    const parts: string[] = [];
+    if (cut?.bubbles?.length) for (const b of cut.bubbles) { const t = (b.text || "").trim(); if (t) parts.push(t); }
+    else if (cut?.dialogue?.trim()) parts.push(cut.dialogue.trim());
+    if (cut?.narration?.trim()) parts.push(cut.narration.trim());
+    return parts.join("  ").trim();
+  }
+  // 씬 미리보기 열면 그 씬 더빙 오디오 자동 재생, 닫으면 멈춤.
+  useEffect(() => {
+    if (!scenePreview) return;
+    const s = project.scenes.find((x) => x.id === scenePreview);
+    if (s && sceneHasAudio(s)) playSceneAudio(s);
+    return () => {
+      if (audioRef.current) audioRef.current.pause();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenePreview]);
 
   // 5단계 — 씬 영상들을 워커에서 이어붙이기(오디오·자막 없이).
   async function runComposeJob() {
@@ -1945,6 +1965,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           화자: {speakerLabel}
                           {voiceLabel ? ` · 목소리: ${voiceLabel}` : " · 목소리 미지정"}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => setScenePreview(s.id)}
+                          title="이 씬 미리보기 — 영상+자막+더빙을 함께 확인(합성 전 수시 확인)"
+                          className="rounded border border-[var(--accent)] px-2 py-0.5 text-[var(--accent)] hover:bg-[var(--panel-2)]"
+                        >
+                          👁 미리보기
+                        </button>
                         {sceneHasAudio(s) && (
                           <button
                             type="button"
@@ -2146,6 +2174,55 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           </button>
         </div>
       )}
+
+      {/* 씬 미리보기 — 영상 + 자막(오버레이) + 더빙 오디오를 함께. 합성 전 수시 확인용. */}
+      {scenePreview &&
+        (() => {
+          const s = project.scenes.find((x) => x.id === scenePreview);
+          if (!s) return null;
+          const sub = subtitleText(s.cut);
+          return (
+            <div
+              onClick={() => setScenePreview(null)}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+            >
+              <div onClick={(e) => e.stopPropagation()} className="flex max-h-[92vh] max-w-[92vw] flex-col items-center gap-3">
+                <div className="relative">
+                  {s.videoUrl ? (
+                    <video src={s.videoUrl} autoPlay loop muted playsInline className="max-h-[70vh] max-w-[86vw] rounded" />
+                  ) : s.generatedImage ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={s.generatedImage} alt="" className="max-h-[70vh] max-w-[86vw] rounded" />
+                  ) : (
+                    <div className="grid h-40 w-72 place-items-center rounded bg-[var(--panel)] text-sm text-[var(--muted)]">
+                      이미지/영상 없음
+                    </div>
+                  )}
+                  {sub && (
+                    <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
+                      <span className="max-w-[90%] whitespace-pre-wrap rounded bg-black/90 px-3 py-1 text-center text-sm font-semibold text-white">
+                        {sub}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-sm text-white">
+                  <span className="opacity-80">컷 {s.order + 1}</span>
+                  {sceneHasAudio(s) ? (
+                    <button onClick={() => playSceneAudio(s)} className="rounded border border-white/30 px-3 py-1 hover:bg-white/10">
+                      ▶ 더빙 다시 듣기
+                    </button>
+                  ) : (
+                    <span className="opacity-60">더빙 오디오 없음 — 🎙 더빙 먼저</span>
+                  )}
+                  <button onClick={() => setScenePreview(null)} className="rounded bg-white/20 px-3 py-1 hover:bg-white/30">
+                    ✕ 닫기
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
     </div>
   );
 }
