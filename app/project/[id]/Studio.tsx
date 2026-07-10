@@ -2344,10 +2344,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     <div
                       className={`pointer-events-none absolute inset-x-0 flex justify-center px-4 ${
                         (s.cut?.subtitlePos ?? "auto") === "top"
-                          ? "top-4"
+                          ? "top-[12%]"
                           : s.cut?.subtitlePos === "middle"
                             ? "top-1/2 -translate-y-1/2"
-                            : "bottom-4"
+                            : "bottom-[12%]"
                       }`}
                     >
                       {/* 한 번에 한 박스만(순차). 여러 개면 subIdx 로 돌아가며 표시. */}

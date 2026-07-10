@@ -174,9 +174,10 @@ export async function runCompose(projectId) {
       // 유닛 여러 개면 밴드를 키워 각 박스가 읽히게(최대 3배 상당).
       const nU = Math.min(subUnits.length, 3);
       const bandH = Math.round(H * SUB_FRAC * (nU > 1 ? 1 + 0.75 * (nU - 1) : 1));
-      let bandY = Math.round(H * 0.6); // 기본: 바닥이 아닌 하단 1/3(가장자리 회피)
       const pos = s.cut?.subtitlePos; // 수동 위치(top/middle/bottom). 없거나 auto=자동 배치.
-      const margin = Math.round(H * 0.06);
+      const margin = Math.round(H * 0.12); // 위/아래 가장자리에 너무 붙지 않게(안쪽 여백)
+      // 기본: 하단이되 가장자리 여백 확보(화면 밖으로 안 나가게 클램프).
+      let bandY = Math.max(margin, Math.min(Math.round(H * 0.55), H - bandH - margin));
       if (subUnits.length) {
         try {
           if (pos === "top") {

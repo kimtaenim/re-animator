@@ -15,7 +15,7 @@ const FACE_W = 9; // 얼굴 겹침 벌점(사실상 하드 회피)
 const HAND_W = 2.5; // 손 겹침 벌점(소프트)
 export async function pickSubtitleBand(
   imgBuf,
-  { frameW, frameH, heightFrac = 0.16, faces = [], hands = [], edgeMarginFrac = 0.1 } = {}
+  { frameW, frameH, heightFrac = 0.16, faces = [], hands = [], edgeMarginFrac = 0.12 } = {}
 ) {
   const bandH = Math.max(1, Math.round(frameH * heightFrac));
   const SAMPLE_H = 120; // 세로 샘플 해상도(행별 대표값)
