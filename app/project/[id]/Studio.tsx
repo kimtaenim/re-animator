@@ -2125,13 +2125,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       )}
                       {/* 대사·내레이션 통합 편집 — 각 줄에 화자(캐릭터/내레이션) 지정. 3단계와 싱크. */}
                       {dialogueEditor(s)}
-                      {/* 효과음(의성어) — ElevenLabs Sound Effects 로 생성 */}
-                      <input
-                        value={s.cut?.sfx ?? ""}
-                        onChange={(e) => updateCut(s.id, { sfx: e.target.value })}
-                        placeholder="효과음/의성어 (예: 쾅, 두근 — 비우면 효과음 없음)"
-                        className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5 text-[var(--muted)]"
-                      />
                       {/* 자막 위치 — 자동(얼굴/손 피함) + 수동 상/중/하 대략 지정 */}
                       <div className="flex flex-wrap items-center gap-1 text-[10px]" title="자막 위치 — 자동은 얼굴/손을 피해 배치, 수동은 상/중/하로 대략 고정">
                         <span className="text-[var(--muted)]">자막위치</span>
