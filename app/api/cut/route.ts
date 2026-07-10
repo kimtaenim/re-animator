@@ -73,7 +73,7 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.sfxAudioUrl === "string") c.sfxAudioUrl = r.sfxAudioUrl; // 효과음 오디오 보존
   if (typeof r.description === "string") c.description = r.description.slice(0, 800);
   if (typeof r.promptDraft === "string") c.promptDraft = r.promptDraft.slice(0, 800);
-  if (typeof r.motion === "string") c.motion = r.motion.slice(0, 200);
+  if (typeof r.motion === "string") c.motion = r.motion.slice(0, 800); // 프롬프트 잘림 방지
   if (typeof r.durationSec === "number" && r.durationSec > 0) {
     c.durationSec = Math.max(0.5, Math.min(15, Math.round(r.durationSec * 2) / 2)); // 0.5초 단위
   }

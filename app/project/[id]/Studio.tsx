@@ -2304,7 +2304,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <div onClick={(e) => e.stopPropagation()} className="flex max-h-[92vh] max-w-[92vw] flex-col items-center gap-3">
                 <div className="relative">
                   {s.videoUrl ? (
-                    <video src={s.videoUrl} autoPlay loop muted playsInline className="max-h-[70vh] max-w-[86vw] rounded" />
+                    <video src={s.videoUrl} autoPlay muted playsInline className="max-h-[70vh] max-w-[86vw] rounded" />
                   ) : s.generatedImage ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={s.generatedImage} alt="" className="max-h-[70vh] max-w-[86vw] rounded" />

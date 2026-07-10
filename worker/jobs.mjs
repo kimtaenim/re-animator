@@ -1077,7 +1077,14 @@ export async function runDub(projectId, payload) {
   for (const s of scenes) {
     const cut = s.cut;
     if (!cut) continue;
-    const bubs = cut.bubbles ?? [];
+    let bubs = cut.bubbles ?? [];
+    // ★말풍선이 없고 dialogue(한 줄 대사)만 있으면 그걸 단일 말풍선으로 승격 — 예전엔 dialogue 를
+    //   무시해서 "대사 없음"으로 실패했음. 승격해두면 더빙·미리보기가 말풍선으로 일관된다.
+    if (!bubs.length && (cut.dialogue || "").trim()) {
+      bubs = [{ text: cut.dialogue.trim(), speakerId: cut.speakerId ?? null }];
+      cut.bubbles = bubs;
+      cut.dialogue = "";
+    }
     for (let i = 0; i < bubs.length; i++) {
       const text = (bubs[i].text || "").trim();
       if (text) units.push({ s, kind: "bubble", idx: i, text, voice: resolve(bubs[i].speakerId) });
@@ -1122,46 +1129,15 @@ export async function runDub(projectId, payload) {
     await log(`더빙 ${done}/${units.length} (${Math.round((done / units.length) * 100)}%)`);
   }
 
-  // 효과음(sfx) — 한글 의성어를 영어 사운드 묘사로 바꿔 ElevenLabs Sound Effects 로 생성.
-  const sfxScenes = scenes.filter((s) => (s.cut?.sfx || "").trim());
-  if (sfxScenes.length) {
-    const okey = process.env.OPENAI_API_KEY;
-    await log(`효과음 ${sfxScenes.length}개 생성…`);
-    for (const s of sfxScenes) {
-      try {
-        const desc = await sfxToEnglish(s.cut.sfx.trim(), okey);
-        const { buf, ext, contentType } = await synthSfx(desc);
-        const { url } = await put(
-          `project/${projectId}/dub/${s.id}-sfx-${Date.now()}.${ext}`,
-          buf,
-          { access: "public", contentType, addRandomSuffix: false }
-        );
-        s.cut.sfxAudioUrl = url;
-        ok++;
-      } catch (e) {
-        await log(`효과음 실패(컷 ${s.order + 1}): ${String(e?.message ?? e).slice(0, 120)}`);
-      }
-    }
-  }
+  // ★효과음은 자동 생성하지 않는다(사용자 지시). sfx 텍스트는 남겨두되 소리는 안 만든다.
 
-  // 저장 — ★필드 단위 병합★. 최신 프로젝트(비디오 잡이 동시에 videoUrl 을 썼을 수 있음)에
-  // 오디오 URL '만' 얹는다(씬 통째 교체 금지 → 병렬 비디오 결과를 안 지움). 단계 상태도 안 건드림.
+  // 저장 — 이번에 만진 씬의 '컷'만 교체(오디오·승격 반영). videoUrl 등 씬의 다른 필드는 최신 것을
+  // 유지 → 병렬 비디오 결과를 안 지움. (비디오는 scene.videoUrl 을, 더빙은 scene.cut 을 쓴다.)
   const p2 = (await getProject(projectId)) ?? p;
   const touched = new Map(scenes.map((s) => [s.id, s.cut]));
-  p2.scenes = (p2.scenes ?? []).map((fresh) => {
-    const myCut = touched.get(fresh.id);
-    if (!myCut || !fresh.cut) return fresh;
-    const cut = { ...fresh.cut };
-    if (Array.isArray(myCut.bubbles) && Array.isArray(cut.bubbles)) {
-      cut.bubbles = cut.bubbles.map((b, i) => {
-        const mb = myCut.bubbles[i];
-        return mb && mb.audioUrl ? { ...b, audioUrl: mb.audioUrl } : b;
-      });
-    }
-    if (myCut.narrationAudioUrl) cut.narrationAudioUrl = myCut.narrationAudioUrl;
-    if (myCut.sfxAudioUrl) cut.sfxAudioUrl = myCut.sfxAudioUrl;
-    return { ...fresh, cut };
-  });
+  p2.scenes = (p2.scenes ?? []).map((fresh) =>
+    touched.has(fresh.id) ? { ...fresh, cut: touched.get(fresh.id) } : fresh
+  );
   await saveProject(p2);
   try {
     await recordCost({ projectId, vendor: "tts", model: "dub", costUsd: 0, meta: { kind: "dub", ok, skipped } });
