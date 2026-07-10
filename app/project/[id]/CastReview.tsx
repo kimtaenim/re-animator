@@ -120,6 +120,7 @@ export default function CastReview({
   const [saving, setSaving] = useState<null | "save" | "approve">(null);
   // 미리듣기(TTS 샘플) — 재생 중인 voiceId 표시.
   const [previewing, setPreviewing] = useState<string | null>(null);
+  const [tcStatus, setTcStatus] = useState<string | null>(null); // Typecast 구독 확인 결과
   const previewVoice = async (provider: string, voiceId: string) => {
     if (!voiceId || previewing) return;
     setPreviewing(voiceId);
@@ -586,10 +587,37 @@ export default function CastReview({
 
       {/* 나레이터 목소리 — 내레이션 더빙에 쓸 목소리. 후보를 골라 미리듣기 후 선택. */}
       <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2">
-        <h3 className="mb-2 text-sm font-semibold">
-          🎙 나레이터 목소리{" "}
-          <span className="font-normal text-[var(--muted)]">— 내레이션 더빙 (미리듣기 후 선택)</span>
-        </h3>
+        <div className="mb-2 flex items-center gap-2">
+          <h3 className="text-sm font-semibold">
+            🎙 나레이터 목소리{" "}
+            <span className="font-normal text-[var(--muted)]">— 내레이션 더빙 (미리듣기 후 선택)</span>
+          </h3>
+          <button
+            type="button"
+            onClick={async () => {
+              setTcStatus("확인 중…");
+              try {
+                const r = await fetch("/api/tts/typecast-status", { cache: "no-store" });
+                const d = await r.json();
+                if (d.ok) {
+                  setTcStatus(
+                    `Typecast 플랜: ${d.plan}` +
+                      (d.planCredits != null ? ` · 크레딧 ${d.usedCredits ?? 0}/${d.planCredits}` : "") +
+                      (d.plan === "free" ? "  ⚠️ free 티어 → 서버 요청이 어뷰즈로 막힙니다(유료 API 필요)" : "  ✅ 유료/활성")
+                  );
+                } else {
+                  setTcStatus(`실패: ${d.error ?? d.status ?? "알 수 없음"}`);
+                }
+              } catch {
+                setTcStatus("확인 오류");
+              }
+            }}
+            className="shrink-0 rounded border border-[var(--border)] px-2 py-0.5 text-[11px] hover:bg-[var(--panel-2)]"
+          >
+            Typecast 상태 확인
+          </button>
+        </div>
+        {tcStatus && <p className="mb-2 text-[11px] text-[var(--muted)]">{tcStatus}</p>}
         {(() => {
           const narr = voices.filter((v) => v.narration);
           if (narr.length === 0)
