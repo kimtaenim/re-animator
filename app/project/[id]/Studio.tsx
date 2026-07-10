@@ -1051,6 +1051,23 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenePreview]);
+  // ★내레이션도 '대사(줄)'다 — 레거시 cut.narration 을 말풍선(화자=내레이션, speakerId=null)으로
+  //   이관해 대사 목록 하나로 통일. 최초 1회, 이관 후엔 narration="" 라 재실행돼도 무해.
+  const narrationMigrated = useRef(false);
+  useEffect(() => {
+    if (narrationMigrated.current) return;
+    narrationMigrated.current = true;
+    for (const s of project.scenes) {
+      const nar = s.cut?.narration?.trim();
+      if (nar) {
+        updateCut(s.id, {
+          bubbles: [...(s.cut?.bubbles ?? []), { text: nar, speakerId: null }],
+          narration: "",
+        });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 5단계 — 씬 영상들을 워커에서 이어붙이기(오디오·자막 없이).
   async function runComposeJob() {
@@ -1736,12 +1753,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px] leading-tight"
                         />
                         {dialogueEditor(s)}
-                        <input
-                          value={s.cut?.narration ?? ""}
-                          onChange={(e) => updateCut(s.id, { narration: e.target.value })}
-                          placeholder="나레이션/자막 (없으면 직접 입력)"
-                          className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[11px] text-[var(--muted)]"
-                        />
                         <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
                           {speaker && <span>화자: {speaker}</span>}
                           <div className="ml-auto flex items-center gap-1">
@@ -2098,14 +2109,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           컷: {s.cut.description.trim()}
                         </p>
                       )}
-                      {/* 대사 직접 편집 — 3단계와 같은 공용 편집기(말풍선별/한 줄). 항상 싱크. */}
+                      {/* 대사·내레이션 통합 편집 — 각 줄에 화자(캐릭터/내레이션) 지정. 3단계와 싱크. */}
                       {dialogueEditor(s)}
-                      <input
-                        value={s.cut?.narration ?? ""}
-                        onChange={(e) => updateCut(s.id, { narration: e.target.value })}
-                        placeholder="나레이션/자막 (선택)"
-                        className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5 text-[var(--muted)]"
-                      />
                       {/* 효과음(의성어) — ElevenLabs Sound Effects 로 생성 */}
                       <input
                         value={s.cut?.sfx ?? ""}

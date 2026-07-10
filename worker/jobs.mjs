@@ -1131,6 +1131,11 @@ export async function runDub(projectId, payload) {
 
   // ★효과음은 자동 생성하지 않는다(사용자 지시). sfx 텍스트는 남겨두되 소리는 안 만든다.
 
+  // 하나도 못 만들고 전부 목소리 미배정으로 스킵됐으면 → 조용히 넘기지 말고 명확히 알린다.
+  if (ok === 0 && skipped > 0) {
+    throw new Error(`목소리 미배정 — 캐스팅에서 캐릭터 목소리/나레이터를 먼저 지정하세요 (${skipped}줄 스킵)`);
+  }
+
   // 저장 — 이번에 만진 씬의 '컷'만 교체(오디오·승격 반영). videoUrl 등 씬의 다른 필드는 최신 것을
   // 유지 → 병렬 비디오 결과를 안 지움. (비디오는 scene.videoUrl 을, 더빙은 scene.cut 을 쓴다.)
   const p2 = (await getProject(projectId)) ?? p;
