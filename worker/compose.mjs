@@ -14,8 +14,9 @@ import { createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pickSubtitleBand } from "./subtitle-place.mjs";
-import { renderSubtitle } from "./subtitle-render.mjs";
+import { renderSubtitle, renderCaptionPng } from "./subtitle-render.mjs";
 import { detectFaceHandBoxes } from "./vision-boxes.mjs";
+import { stripMarks } from "./emphasis.mjs";
 
 // ffmpeg 바이너리 경로 — 합성할 때만 '지연' 로드한다(워커 시작 때 import 하면 ffmpeg-static
 // 설치 문제가 워커 전체를 죽인다). Render node 런타임엔 시스템 ffmpeg 가 없어 npm 정적
@@ -102,6 +103,44 @@ const FADES_OUT = new Set(["fadeout", "black", "dissolve"]);
 const FADES_IN = new Set(["fadein", "black", "dissolve"]);
 const SUB_FRAC = Number(process.env.SUBTITLE_HEIGHT_FRAC || 0.18); // 자막 띠 높이(프레임 대비)
 
+// 이 컷의 '오디오 유닛'(재생 순서) — 말풍선(대사·내레이션·효과음) audioUrl + 그 자막 텍스트.
+// 효과음(__sfx__) 은 소리만(자막 없음). 레거시 cut.narration 도 뒤에 붙인다.
+function audioUnits(cut) {
+  const units = [];
+  for (const b of cut?.bubbles ?? []) {
+    if (b.audioUrl) units.push({ audioUrl: b.audioUrl, subText: b.speakerId === "__sfx__" ? "" : (b.text || "").trim() });
+  }
+  if (cut?.narrationAudioUrl && (cut?.narration || "").trim()) {
+    units.push({ audioUrl: cut.narrationAudioUrl, subText: cut.narration.trim() });
+  }
+  return units;
+}
+
+// 자막 세로중심 y — 수동(top/middle/bottom) 또는 auto(얼굴/손 회피).
+async function subtitleCenterY(s, W, H, projectId) {
+  const pos = s.cut?.subtitlePos;
+  if (pos === "top") return Math.round(H * 0.15);
+  if (pos === "middle") return Math.round(H * 0.5);
+  if (pos === "bottom") return Math.round(H * 0.85);
+  let cy = Math.round(H * 0.82); // auto 기본: 하단
+  if (s.generatedImage) {
+    try {
+      const genBuf = await download2(s.generatedImage);
+      if (genBuf) {
+        const fh = await detectFaceHandBoxes(genBuf, OPENAI_KEY);
+        if (fh.cost) {
+          try {
+            await recordCost({ projectId, vendor: "openai", model: "gpt-4o", costUsd: fh.cost, meta: { kind: "subtitle-faces" } });
+          } catch {}
+        }
+        const band = await pickSubtitleBand(genBuf, { frameW: W, frameH: H, heightFrac: 0.16, faces: fh.faces, hands: fh.hands });
+        cy = Math.round(band.y + (H * 0.16) / 2);
+      }
+    } catch {}
+  }
+  return cy;
+}
+
 // 이 컷 자막 '유닛' 배열 — 각 말풍선/내레이션 조각이 별개 박스. 겹치지 않게 세로로 쌓인다.
 function subtitleUnits(cut) {
   const units = [];
@@ -152,88 +191,114 @@ export async function runCompose(projectId) {
       );
       const raw = join(dir, `raw${i}.mp4`);
       await download(s.videoUrl, raw);
-      const dur = (await probeDuration(raw)) || 3;
-      const fadeOut = FADES_OUT.has(s.cut?.transition); // 이 컷 끝 전환
-      // 이 컷 시작 페이드인: 앞 컷의 전환이 인/암전/디졸브면. 첫 컷은 자기 전환이 페이드인이면(인트로).
+      const vd = (await probeDuration(raw)) || 3;
+      const fadeOut = FADES_OUT.has(s.cut?.transition);
       const fadeIn =
         FADES_IN.has(scenes[i - 1]?.cut?.transition) ||
         (i === 0 && s.cut?.transition === "fadein");
 
-      const vf = [
-        `scale=${W}:${H}:force_original_aspect_ratio=decrease`,
-        `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`,
-        "setsar=1",
-        `fps=${FPS}`,
-      ];
-      if (fadeIn) vf.push(`fade=t=in:st=0:d=${FADE}`);
-      if (fadeOut) vf.push(`fade=t=out:st=${Math.max(0, dur - FADE).toFixed(2)}:d=${FADE}`);
+      // ── 더빙 오디오 유닛 다운로드 + 자막 캡션 타이밍 ──
+      const aus = audioUnits(s.cut);
+      const aPaths = [];
+      const captions = []; // [{ text, start, end }] — 순차 표시
+      let audioLen = 0;
+      if (aus.length) {
+        let acc = 0;
+        for (let j = 0; j < aus.length; j++) {
+          const ext = aus[j].audioUrl.includes(".wav") ? "wav" : "mp3";
+          const ap = join(dir, `a${i}_${j}.${ext}`);
+          try {
+            await download(aus[j].audioUrl, ap);
+            const ad = (await probeDuration(ap)) || 0.8;
+            aPaths.push(ap);
+            const start = acc;
+            acc += ad;
+            if (aus[j].subText) captions.push({ text: aus[j].subText, start, end: acc });
+          } catch (e) {
+            await log(`씬 ${i + 1}: 오디오 스킵: ${String(e?.message ?? e).slice(0, 80)}`);
+          }
+        }
+        audioLen = acc;
+      } else {
+        // 더빙 없음 → 자막을 영상 길이에 글자수 비례로 순차 배치.
+        const subUnits = subtitleUnits(s.cut);
+        if (subUnits.length) {
+          const weights = subUnits.map((t) => Math.max(1, stripMarks(t).replace(/\s/g, "").length));
+          const wSum = weights.reduce((a, b) => a + b, 0) || 1;
+          let acc = 0;
+          subUnits.forEach((t, j) => {
+            const d = Math.max(1.2, (vd * weights[j]) / wSum);
+            const start = acc;
+            acc += d;
+            captions.push({ text: t, start, end: acc });
+          });
+        }
+      }
+      const capTotal = captions.length ? captions[captions.length - 1].end : 0;
+      const duration = Math.max(audioLen, capTotal, vd);
+      if (captions.length) captions[captions.length - 1].end = duration + 0.5;
+      const speed = vd > 0 && duration > vd ? duration / vd : 1; // 오디오/자막 길면 영상 슬로모션
 
-      // 자막 — 씬마다 대사+나레이션을 '빈 곳'에 얹는다(폰트/canvas 없으면 자막만 skip).
-      const subUnits = subtitleUnits(s.cut);
-      let subPath = null;
-      // 유닛 여러 개면 밴드를 키워 각 박스가 읽히게(최대 3배 상당).
-      const nU = Math.min(subUnits.length, 3);
-      const bandH = Math.round(H * SUB_FRAC * (nU > 1 ? 1 + 0.75 * (nU - 1) : 1));
-      const pos = s.cut?.subtitlePos; // 수동 위치(top/middle/bottom). 없거나 auto=자동 배치.
-      const margin = Math.round(H * 0.12); // 위/아래 가장자리에 너무 붙지 않게(안쪽 여백)
-      // 기본: 하단이되 가장자리 여백 확보(화면 밖으로 안 나가게 클램프).
-      let bandY = Math.max(margin, Math.min(Math.round(H * 0.55), H - bandH - margin));
-      if (subUnits.length) {
-        try {
-          if (pos === "top") {
-            bandY = margin;
-          } else if (pos === "middle") {
-            bandY = Math.round((H - bandH) / 2);
-          } else if (pos === "bottom") {
-            bandY = H - bandH - margin;
-          } else if (s.generatedImage) {
-            // auto: 얼굴·손 위치를 물어(gpt-4o, 실패해도 자막 정상) 그 위를 피해 빈 띠 선택.
-            const genBuf = await download2(s.generatedImage);
-            if (genBuf) {
-              const fh = await detectFaceHandBoxes(genBuf, OPENAI_KEY);
-              if (fh.cost) {
-                try {
-                  await recordCost({ projectId, vendor: "openai", model: "gpt-4o", costUsd: fh.cost, meta: { kind: "subtitle-faces" } });
-                } catch {}
-              }
-              const band = await pickSubtitleBand(genBuf, {
-                frameW: W,
-                frameH: H,
-                heightFrac: bandH / H,
-                faces: fh.faces,
-                hands: fh.hands,
-              });
-              bandY = band.y;
+      // 자막 캡션 PNG(전체프레임, 순차) — 위치는 씬당 한 번(수동 or 얼굴 회피).
+      const capPaths = [];
+      if (captions.length) {
+        const cy = await subtitleCenterY(s, W, H, projectId);
+        for (let k = 0; k < captions.length; k++) {
+          try {
+            const png = await renderCaptionPng(captions[k].text, { W, H, cy });
+            if (png) {
+              const cp = join(dir, `cap${i}_${k}.png`);
+              await writeFile(cp, png);
+              capPaths.push({ path: cp, span: captions[k] });
             }
-          }
-          const png = await renderSubtitle(subUnits, { frameW: W, bandH });
-          if (png) {
-            subPath = join(dir, `sub${i}.png`);
-            await writeFile(subPath, png);
-          }
-        } catch {
-          /* 자막 실패 → 자막 없이 진행 */
+          } catch {}
         }
       }
 
+      // ── ffmpeg: 영상(슬로모션+페이드) + 자막(시간구간 순차 overlay) + 더빙 오디오 mux ──
+      const A = aPaths.length;
+      const C = capPaths.length;
+      let vfilter =
+        `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+        `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,` +
+        `setpts=${speed.toFixed(4)}*PTS,fps=${FPS}`;
+      if (fadeIn) vfilter += `,fade=t=in:st=0:d=${FADE}`;
+      if (fadeOut) vfilter += `,fade=t=out:st=${Math.max(0, duration - FADE).toFixed(2)}:d=${FADE}`;
+      vfilter += `[bg]`;
+      let prev = "bg";
+      capPaths.forEach((c, k) => {
+        const inIdx = 1 + A + k;
+        const label = `cv${k}`;
+        vfilter += `;[${prev}][${inIdx}:v]overlay=0:0:enable='between(t,${c.span.start.toFixed(3)},${c.span.end.toFixed(3)})'[${label}]`;
+        prev = label;
+      });
+
       const out = join(dir, `n${i}.mp4`);
-      if (subPath) {
-        await run(FFMPEG, [
-          "-y", "-i", raw, "-loop", "1", "-i", subPath,
-          "-filter_complex",
-          `[0:v]${vf.join(",")}[base];[base][1:v]overlay=0:${bandY}:shortest=1[v]`,
-          "-map", "[v]",
-          "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-          "-pix_fmt", "yuv420p", "-movflags", "+faststart", out,
-        ]);
+      const args = ["-y", "-i", raw];
+      for (const ap of aPaths) args.push("-i", ap);
+      for (const c of capPaths) args.push("-loop", "1", "-framerate", String(FPS), "-i", c.path);
+      let audioMap;
+      if (A === 0) {
+        args.push("-f", "lavfi", "-t", duration.toFixed(2), "-i", "anullsrc=channel_layout=stereo:sample_rate=44100");
+        audioMap = `${1 + C}:a`;
+      } else if (A === 1) {
+        audioMap = "1:a";
       } else {
-        await run(FFMPEG, [
-          "-y", "-i", raw,
-          "-vf", vf.join(","),
-          "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-          "-pix_fmt", "yuv420p", "-movflags", "+faststart", out,
-        ]);
+        vfilter += `;${aPaths.map((_, j) => `[${1 + j}:a]`).join("")}concat=n=${A}:v=0:a=1[aout]`;
+        audioMap = "[aout]";
       }
+      args.push(
+        "-filter_complex", vfilter,
+        "-map", `[${prev}]`,
+        "-map", audioMap,
+        "-t", duration.toFixed(2),
+        "-r", String(FPS),
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "21",
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart", out
+      );
+      await log(`씬 ${i + 1}/${scenes.length}: 인코딩(자막 ${C}·오디오 ${A}·${duration.toFixed(1)}s)…`);
+      await run(FFMPEG, args);
       norm.push(out);
     }
 

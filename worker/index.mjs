@@ -103,6 +103,6 @@ async function loop(types) {
   }
 }
 
-console.log("[worker] BUILD = m6-emphasis-v10 (강조 자막 [[..]] 이식)");
+console.log("[worker] BUILD = m7-compose-av-v11 (합성: 더빙 오디오 mux + 자막 순차 타이밍 + 슬로모션)");
 console.log("[worker] 시작 — 메인 큐 + 더빙 큐(병렬) 폴링 중…");
 await Promise.all([loop(MAIN_TYPES), loop(["dub"])]);

@@ -22,7 +22,7 @@ const DEFAULT_FONT_URL =
 const FAMILY = "SubtitleKR";
 // 디폴트: 글씨 작게 + 검은 바탕(거의 불투명) + 하얀 글씨. env 로 미세조정.
 const FONT_FRAC = Number(process.env.SUBTITLE_FONT_FRAC || 0.2); // 띠 대비 글자 크기(작게)
-const BG_ALPHA = Number(process.env.SUBTITLE_BG_ALPHA || 0.9); // 검은 바탕 불투명도
+const BG_ALPHA = Number(process.env.SUBTITLE_BG_ALPHA || 0.6); // 검은 바탕 불투명도(반투명)
 
 let _canvas = null; // { createCanvas, GlobalFonts } | false(불가)
 let _fontReady = false;
@@ -277,6 +277,75 @@ export async function renderSubtitle(input, { frameW, bandH }) {
       drawBox(ctx, u, { frameW, top, boxH });
       top += boxH + GAP;
     }
+    return canvas.toBuffer("image/png");
+  } catch {
+    return null;
+  }
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// ★한 자막 유닛을 '전체 프레임(W×H) 투명 PNG'로 — 박스를 세로중심 cy 에 둔다(합성서 시간구간
+// overlay=0:0 로 얹어 순차 표시). 강조([[..]])·반투명 검은 박스 반영. 실패 시 null.
+export async function renderCaptionPng(text, { W, H, cy }) {
+  const raw = (text || "").trim();
+  if (!raw) return null;
+  const mod = await loadCanvas();
+  if (!mod) return null;
+  const { createCanvas, GlobalFonts } = mod;
+  if (!(await ensureFont(GlobalFonts))) return null;
+  try {
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext("2d");
+    const maxW = Math.round(W * 0.9);
+    const fontPx = Math.max(20, Math.round(H * 0.04)); // 프레임 높이 비례
+    const emSize = Math.round(fontPx * 1.3);
+    const baseF = `700 ${fontPx}px ${FAMILY}, sans-serif`;
+    const emF = `800 ${emSize}px ${FAMILY}, sans-serif`;
+    const padX = Math.round(fontPx * 0.5);
+    const padY = Math.round(fontPx * 0.35);
+    const lines = layoutLines(ctx, raw, maxW - padX * 2, baseF, emF, fontPx, emSize, 3);
+    if (!lines.length) return null;
+    const lineHs = lines.map((l) => Math.round(l.size * 1.3));
+    const totalH = lineHs.reduce((a, b) => a + b, 0);
+    const textW = Math.max(...lines.map((l) => l.width), 0);
+    const boxW = Math.min(maxW, Math.round(textW + padX * 2));
+    const boxH = Math.round(totalH + padY * 2);
+    const cx = W / 2;
+    const bx = Math.round(cx - boxW / 2);
+    const by = Math.round(cy - boxH / 2);
+    // 반투명 검은 박스.
+    ctx.fillStyle = `rgba(0,0,0,${BG_ALPHA})`;
+    roundRectPath(ctx, bx, by, boxW, boxH, Math.min(fontPx * 0.4, 20));
+    ctx.fill();
+    // 글자(세그먼트별 폰트/색 — 강조는 크게·강조색).
+    ctx.lineJoin = "round";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    let yTop = by + padY;
+    lines.forEach((l, i) => {
+      const baseline = yTop + Math.round(l.size * 0.8);
+      let tx = cx - l.width / 2;
+      for (const seg of l.segs) {
+        const sz = seg.em ? emSize : fontPx;
+        ctx.font = seg.em ? emF : baseF;
+        ctx.lineWidth = Math.max(2, Math.round(sz * 0.12));
+        ctx.strokeStyle = "rgba(0,0,0,0.9)";
+        ctx.strokeText(seg.t, tx, baseline);
+        ctx.fillStyle = seg.em ? EM_COLOR : "#ffffff";
+        ctx.fillText(seg.t, tx, baseline);
+        tx += seg.w;
+      }
+      yTop += lineHs[i];
+    });
     return canvas.toBuffer("image/png");
   } catch {
     return null;

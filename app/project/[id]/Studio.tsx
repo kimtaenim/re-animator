@@ -2425,7 +2425,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       }`}
                     >
                       {/* 한 번에 한 박스만(순차). [[강조]]는 크게·노랑. */}
-                      <span className="max-w-[90%] whitespace-pre-wrap rounded bg-black/90 px-3 py-1 text-center text-sm font-semibold text-white">
+                      <span className="max-w-[90%] whitespace-pre-wrap rounded bg-black/60 px-3 py-1 text-center text-sm font-semibold text-white">
                         {splitRuns(units[Math.min(subIdx, units.length - 1)]).map((r, ri) =>
                           r.em ? (
                             <span key={ri} className="text-[1.3em] font-extrabold text-[#ffd23f]">
