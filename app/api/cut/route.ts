@@ -70,6 +70,7 @@ function cleanCut(raw: unknown): CutOntology {
       .slice(0, 8);
   }
   if (typeof r.sfx === "string") c.sfx = r.sfx.slice(0, 120);
+  if (typeof r.sfxAudioUrl === "string") c.sfxAudioUrl = r.sfxAudioUrl; // 효과음 오디오 보존
   if (typeof r.description === "string") c.description = r.description.slice(0, 800);
   if (typeof r.promptDraft === "string") c.promptDraft = r.promptDraft.slice(0, 800);
   if (typeof r.motion === "string") c.motion = r.motion.slice(0, 200);

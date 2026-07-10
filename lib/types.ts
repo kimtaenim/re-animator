@@ -105,6 +105,7 @@ export interface CutOntology {
   textBoxes?: TextBox[]; // 글씨(말풍선·자막·효과음) 영역들(0~1 정규화) — 마스크 재생성용
   textRegions?: SourceRegion[]; // 흡수된 '대사만 있는' 밴드 영역들 — 추출 때 따로 OCR해 이 컷 대사로. (이미지엔 안 합침)
   sfx: string; // 의성어/효과음
+  sfxAudioUrl?: string; // 효과음 오디오 Blob URL (ElevenLabs Sound Effects 생성)
   description: string; // VLM 자유 서술(인물·배경·구도·분위기) → image-2 로 그대로 전달
   promptDraft: string; // image-2 재생성용 프롬프트 초안(영문)
   motion: string; // I2V 모션 힌트(후속)

@@ -92,7 +92,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m6-dub-v1 (대사·내레이션 TTS 더빙 + 말하는 입 모션)");
+console.log("[worker] BUILD = m6-dub-sfx-v2 (더빙 + 효과음 ElevenLabs SFX)");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();

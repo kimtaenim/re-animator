@@ -48,3 +48,20 @@ async function synthEleven(voiceId, text) {
   if (!r.ok) throw new Error(`ElevenLabs ${r.status}: ${(await r.text().catch(() => "")).slice(0, 160)}`);
   return { buf: Buffer.from(await r.arrayBuffer()), ext: "mp3", contentType: "audio/mpeg" };
 }
+
+// ElevenLabs Sound Effects — 영어 사운드 묘사(description) → 효과음 오디오(mp3).
+// 효과음은 ElevenLabs 만 지원(Typecast 는 TTS 전용). durationSec 지정 가능(0.5~22s).
+export async function synthSfx(description, durationSec) {
+  const key = EL_KEY();
+  if (!key) throw new Error("ELEVENLABS_API_KEY 미설정");
+  const body = { text: String(description || "").slice(0, 200) };
+  if (durationSec) body.duration_seconds = Math.max(0.5, Math.min(22, durationSec));
+  const r = await fetch("https://api.elevenlabs.io/v1/sound-generation", {
+    method: "POST",
+    headers: { "content-type": "application/json", "xi-api-key": key },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!r.ok) throw new Error(`ElevenLabs SFX ${r.status}: ${(await r.text().catch(() => "")).slice(0, 160)}`);
+  return { buf: Buffer.from(await r.arrayBuffer()), ext: "mp3", contentType: "audio/mpeg" };
+}

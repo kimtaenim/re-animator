@@ -533,8 +533,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     if (!target || !b) return;
     const tb = target.cut?.bubbles ?? [];
     // 위로=뒤에 붙임, 아래로=앞에 붙임(읽기 흐름에 맞게).
-    updateCut(target.id, { bubbles: dir === "prev" ? [...tb, b] : [b, ...tb] });
-    updateCut(sceneId, { bubbles: (src.cut?.bubbles ?? []).filter((_, i) => i !== bi) });
+    // ★옮기면 양쪽 컷 길이를 auto(durationSec 해제)로 되돌려, 바뀐 대사량에 맞게 자동 재계산.
+    updateCut(target.id, { bubbles: dir === "prev" ? [...tb, b] : [b, ...tb], durationSec: undefined });
+    updateCut(sceneId, {
+      bubbles: (src.cut?.bubbles ?? []).filter((_, i) => i !== bi),
+      durationSec: undefined,
+    });
   }
 
   // 캐릭터 썸네일(화자 아바타용) — realImage 우선, 없으면 대표 컷 이미지. 없으면 null.
@@ -946,6 +950,27 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       /* ignore */
     }
   }
+  // 씬 오디오 전체 재생 — 말풍선 대사들 → 내레이션 → 효과음을 순서대로.
+  function playSceneAudio(s: Project["scenes"][number]) {
+    const urls: string[] = [];
+    for (const b of s.cut?.bubbles ?? []) if (b.audioUrl) urls.push(b.audioUrl);
+    if (s.cut?.narrationAudioUrl) urls.push(s.cut.narrationAudioUrl);
+    if (s.cut?.sfxAudioUrl) urls.push(s.cut.sfxAudioUrl);
+    if (!urls.length) return;
+    let i = 0;
+    const next = () => {
+      if (i >= urls.length) return;
+      if (audioRef.current) audioRef.current.pause();
+      const a = new Audio(urls[i++]);
+      audioRef.current = a;
+      a.onended = next;
+      a.play().catch(() => {});
+    };
+    next();
+  }
+  // 이 씬에 더빙 오디오가 하나라도 있나(재생 버튼 표시용).
+  const sceneHasAudio = (s: Project["scenes"][number]) =>
+    (s.cut?.bubbles ?? []).some((b) => b.audioUrl) || !!s.cut?.narrationAudioUrl || !!s.cut?.sfxAudioUrl;
 
   // 5단계 — 씬 영상들을 워커에서 이어붙이기(오디오·자막 없이).
   async function runComposeJob() {
@@ -1920,6 +1945,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           화자: {speakerLabel}
                           {voiceLabel ? ` · 목소리: ${voiceLabel}` : " · 목소리 미지정"}
                         </span>
+                        {sceneHasAudio(s) && (
+                          <button
+                            type="button"
+                            onClick={() => playSceneAudio(s)}
+                            title="이 씬 더빙 오디오 재생(대사→내레이션→효과음)"
+                            className="rounded border border-[var(--ok)] px-2 py-0.5 text-[var(--ok)] hover:bg-[var(--panel-2)]"
+                          >
+                            🔊 씬 오디오
+                          </button>
+                        )}
                       </div>
                       {/* 전환 — 카메라워크처럼 칩으로. 이 컷 → 다음 컷 사이(5단계 합성에서 적용). */}
                       <div

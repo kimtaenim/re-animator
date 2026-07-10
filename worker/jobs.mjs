@@ -29,7 +29,36 @@ import {
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { readCutText } from "./ocr.mjs";
-import { synthesize } from "./tts.mjs";
+import { synthesize, synthSfx } from "./tts.mjs";
+
+// 만화 효과음(한글 의성어) → ElevenLabs Sound Effects 용 짧은 영어 사운드 묘사. 실패 시 원문.
+async function sfxToEnglish(korean, key) {
+  if (!key) return korean;
+  try {
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: process.env.OPENAI_SFX_MODEL || "gpt-4o-mini",
+        temperature: 0,
+        max_tokens: 30,
+        messages: [
+          {
+            role: "user",
+            content: `만화 효과음 의성어 "${korean}" 를 그 소리를 만들 짧은 영어 사운드 묘사로만 답해. 예: 쾅→loud explosion bang, 두근→heartbeat thump, 쏴→pouring rain. 오직 묘사구(따옴표 없이).`,
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!r.ok) return korean;
+    const d = await r.json();
+    const t = d.choices?.[0]?.message?.content?.trim();
+    return t ? t.replace(/^["']|["']$/g, "").slice(0, 200) : korean;
+  } catch {
+    return korean;
+  }
+}
 
 // 영상(I2V)은 여러 컷을 병렬로 생성(각자 submit→poll). xAI 초당 1건 제한은 grok.mjs
 // 레이트 게이트가 처리하므로, 여기선 병렬 개수만 정한다(제출은 1초 간격으로 자동 스로틀).
@@ -1051,6 +1080,28 @@ export async function runDub(projectId, payload) {
     );
     done = Math.min(i + C, units.length);
     await log(`더빙 ${done}/${units.length} (${Math.round((done / units.length) * 100)}%)`);
+  }
+
+  // 효과음(sfx) — 한글 의성어를 영어 사운드 묘사로 바꿔 ElevenLabs Sound Effects 로 생성.
+  const sfxScenes = scenes.filter((s) => (s.cut?.sfx || "").trim());
+  if (sfxScenes.length) {
+    const okey = process.env.OPENAI_API_KEY;
+    await log(`효과음 ${sfxScenes.length}개 생성…`);
+    for (const s of sfxScenes) {
+      try {
+        const desc = await sfxToEnglish(s.cut.sfx.trim(), okey);
+        const { buf, ext, contentType } = await synthSfx(desc);
+        const { url } = await put(
+          `project/${projectId}/dub/${s.id}-sfx-${Date.now()}.${ext}`,
+          buf,
+          { access: "public", contentType, addRandomSuffix: false }
+        );
+        s.cut.sfxAudioUrl = url;
+        ok++;
+      } catch (e) {
+        await log(`효과음 실패(컷 ${s.order + 1}): ${String(e?.message ?? e).slice(0, 120)}`);
+      }
+    }
   }
 
   // 저장 — 최신 프로젝트에 이번에 만진 씬만 병합(오디오 URL 반영).
