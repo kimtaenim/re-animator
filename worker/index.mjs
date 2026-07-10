@@ -103,6 +103,6 @@ async function loop(types) {
   }
 }
 
-console.log("[worker] BUILD = m6-dub-parallel-v6 (더빙 큐 병렬 — 동영상 중에도 더빙)");
+console.log("[worker] BUILD = m6-dub-parallel-v7 (병렬 더빙 + 따옴표 정규화)");
 console.log("[worker] 시작 — 메인 큐 + 더빙 큐(병렬) 폴링 중…");
 await Promise.all([loop(MAIN_TYPES), loop(["dub"])]);

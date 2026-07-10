@@ -57,6 +57,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [selForVideo, setSelForVideo] = useState<Set<string>>(() => new Set()); // 4단계 다중 선택
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
   const [scenePreview, setScenePreview] = useState<string | null>(null); // 씬 미리보기(영상+자막+더빙)
+  const [subIdx, setSubIdx] = useState(0); // 미리보기 자막 박스 순차 표시 인덱스(하나씩)
   const [portraitPending, setPortraitPending] = useState<Map<string, string>>(() => new Map()); // 실사 초상 생성 중(값=옛 realImage url)
   const [genModel, setGenModel] = useState("gpt-image-2"); // 재생성 모델(비교용)
   const [costKrw, setCostKrw] = useState<number | null>(null);
@@ -542,6 +543,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     });
   }
 
+  // 대사(말풍선) 칸 추가 — 빈 말풍선 하나 더. 단일 dialogue 만 있으면 그걸 첫 말풍선으로.
+  function addBubble(sceneId: string) {
+    const s = project.scenes.find((x) => x.id === sceneId);
+    const cur = s?.cut?.bubbles ?? (s?.cut?.dialogue?.trim() ? [{ text: s.cut.dialogue.trim() }] : []);
+    updateCut(sceneId, { bubbles: [...cur, { text: "" }], dialogue: "" });
+  }
+
   // 캐릭터 썸네일(화자 아바타용) — realImage 우선, 없으면 대표 컷 이미지. 없으면 null.
   function charThumb(charId?: string | null): string | null {
     if (!charId) return null;
@@ -654,28 +662,44 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
             </div>
           ))}
+          <button
+            type="button"
+            onClick={() => addBubble(s.id)}
+            className="self-start rounded border border-dashed border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+          >
+            + 대사 추가
+          </button>
         </div>
       );
     }
-    // 말풍선이 아직 없으면 한 줄 입력 + 화자(cut.speakerId) + 지우기.
+    // 말풍선이 아직 없으면 한 줄 입력 + 화자(cut.speakerId) + 지우기 + 대사 추가.
     return (
-      <div className="flex items-start gap-1">
-        <div className="pt-0.5">{avatar(s.cut?.speakerId)}</div>
-        {speakerSelect(s.cut?.speakerId, (v) => updateCut(s.id, { speakerId: v }))}
-        <textarea
-          value={s.cut?.dialogue ?? ""}
-          onChange={(e) => updateCut(s.id, { dialogue: e.target.value })}
-          rows={rows(s.cut?.dialogue ?? "")}
-          placeholder="대사 (Enter=줄바꿈)"
-          className={`${inputCls} resize-none`}
-        />
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-start gap-1">
+          <div className="pt-0.5">{avatar(s.cut?.speakerId)}</div>
+          {speakerSelect(s.cut?.speakerId, (v) => updateCut(s.id, { speakerId: v }))}
+          <textarea
+            value={s.cut?.dialogue ?? ""}
+            onChange={(e) => updateCut(s.id, { dialogue: e.target.value })}
+            rows={rows(s.cut?.dialogue ?? "")}
+            placeholder="대사 (Enter=줄바꿈)"
+            className={`${inputCls} resize-none`}
+          />
+          <button
+            type="button"
+            onClick={() => updateCut(s.id, { dialogue: "" })}
+            title="대사 지우기"
+            className={delCls}
+          >
+            ×
+          </button>
+        </div>
         <button
           type="button"
-          onClick={() => updateCut(s.id, { dialogue: "" })}
-          title="대사 지우기"
-          className={delCls}
+          onClick={() => addBubble(s.id)}
+          className="self-start rounded border border-dashed border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
         >
-          ×
+          + 대사 추가
         </button>
       </div>
     );
@@ -1014,6 +1038,17 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     return () => {
       if (audioRef.current) audioRef.current.pause();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenePreview]);
+  // 자막 박스가 여러 개면 하나씩 순차 표시(동시에 안 띄움). 미리보기 열릴 때 순환 시작.
+  useEffect(() => {
+    setSubIdx(0);
+    if (!scenePreview) return;
+    const s = project.scenes.find((x) => x.id === scenePreview);
+    const n = s ? subtitleUnits(s.cut).length : 0;
+    if (n <= 1) return;
+    const iv = setInterval(() => setSubIdx((i) => (i + 1) % n), 2600);
+    return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenePreview]);
 
@@ -1925,7 +1960,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     <img
                       src={s.generatedImage}
                       alt="생성"
-                      onClick={() => s.generatedImage && setLightbox({ type: "image", src: s.generatedImage })}
+                      onClick={() => setScenePreview(s.id)}
                       className="h-28 w-auto shrink-0 cursor-zoom-in rounded border border-[var(--border)]"
                     />
                     <button
@@ -1951,7 +1986,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         loop
                         muted
                         playsInline
-                        onClick={() => s.videoUrl && setLightbox({ type: "video", src: s.videoUrl })}
+                        onClick={() => setScenePreview(s.id)}
                         className="h-28 w-auto shrink-0 cursor-zoom-in rounded border border-[var(--ok)] object-cover"
                       />
                     ) : (
@@ -2069,6 +2104,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         value={s.cut?.narration ?? ""}
                         onChange={(e) => updateCut(s.id, { narration: e.target.value })}
                         placeholder="나레이션/자막 (선택)"
+                        className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5 text-[var(--muted)]"
+                      />
+                      {/* 효과음(의성어) — ElevenLabs Sound Effects 로 생성 */}
+                      <input
+                        value={s.cut?.sfx ?? ""}
+                        onChange={(e) => updateCut(s.id, { sfx: e.target.value })}
+                        placeholder="효과음/의성어 (예: 쾅, 두근 — 비우면 효과음 없음)"
                         className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5 text-[var(--muted)]"
                       />
                       {/* 자막 위치 — 자동(얼굴/손 피함) + 수동 상/중/하 대략 지정 */}
@@ -2273,7 +2315,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   )}
                   {units.length > 0 && (
                     <div
-                      className={`pointer-events-none absolute inset-x-0 flex flex-col items-center gap-1 px-4 ${
+                      className={`pointer-events-none absolute inset-x-0 flex justify-center px-4 ${
                         (s.cut?.subtitlePos ?? "auto") === "top"
                           ? "top-4"
                           : s.cut?.subtitlePos === "middle"
@@ -2281,14 +2323,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             : "bottom-4"
                       }`}
                     >
-                      {units.map((u, ui) => (
-                        <span
-                          key={ui}
-                          className="max-w-[90%] whitespace-pre-wrap rounded bg-black/90 px-3 py-1 text-center text-sm font-semibold text-white"
-                        >
-                          {u}
-                        </span>
-                      ))}
+                      {/* 한 번에 한 박스만(순차). 여러 개면 subIdx 로 돌아가며 표시. */}
+                      <span className="max-w-[90%] whitespace-pre-wrap rounded bg-black/90 px-3 py-1 text-center text-sm font-semibold text-white">
+                        {units[Math.min(subIdx, units.length - 1)]}
+                      </span>
                     </div>
                   )}
                 </div>

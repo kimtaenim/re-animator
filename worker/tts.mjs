@@ -9,8 +9,13 @@ const TC_KEY = () => process.env.TYPECAST_API_KEY;
 const EL_KEY = () => process.env.ELEVENLABS_API_KEY;
 
 // { buf, ext, contentType } 반환. text 는 1~2000자.
+// 스마트(둥근) 따옴표를 straight 로 정규화 — 일부 TTS 가 특수 문자에서 실패하는 걸 방어.
 export async function synthesize(provider, voiceId, text) {
-  const t = String(text || "").trim().slice(0, 1900);
+  const t = String(text || "")
+    .replace(/[‘’‚‛′]/g, "'")
+    .replace(/[“”„‟″]/g, '"')
+    .trim()
+    .slice(0, 1900);
   if (!t) throw new Error("빈 텍스트");
   if (!voiceId) throw new Error("voice_id 없음");
   if (provider === "typecast") return synthTypecast(voiceId, t);
