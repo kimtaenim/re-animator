@@ -10,7 +10,7 @@ import {
   STEP_ORDER,
 } from "@/lib/types";
 import { blankCut } from "@/lib/ontology";
-import { splitRuns } from "@/lib/emphasis";
+import { splitRuns, wordTokens, toggleWordEmphasis } from "@/lib/emphasis";
 import BoundaryEditor, { type SavedRegion } from "./BoundaryEditor";
 import CastReview from "./CastReview";
 
@@ -608,11 +608,44 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     const stackCls =
       "leading-none px-1 text-[9px] text-[var(--muted)] hover:text-[var(--accent)] disabled:opacity-20";
     const rows = (t: string) => Math.min(4, (t.match(/\n/g)?.length ?? 0) + 1); // 줄 수만큼 커짐(최대 4)
+    // 단어 클릭 강조 칩(aninews 방식) — 누르면 그 단어를 [[ ]] 로 토글. 자막에서 크게·노랑.
+    const emphChips = (bi: number, text: string) => {
+      const toks = wordTokens(text ?? "");
+      const words = toks.filter((t) => !t.space);
+      if (!words.length) return null;
+      const anyEm = words.some((t) => t.em);
+      return (
+        <div className="flex flex-wrap items-center gap-1 pl-6">
+          <span className="text-[9px] text-[var(--muted)]">강조</span>
+          {toks.map((tok, ti) =>
+            tok.space ? null : (
+              <button
+                key={ti}
+                type="button"
+                onClick={() => {
+                  const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, text: toggleWordEmphasis(x.text, ti) } : x));
+                  updateCut(s.id, { bubbles: nb });
+                }}
+                className={`rounded border px-1 py-0.5 text-[10px] ${
+                  tok.em
+                    ? "border-[#c99a00] bg-[#ffd23f]/20 font-semibold text-[#a67c00]"
+                    : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--panel-2)]"
+                }`}
+              >
+                {tok.text}
+              </button>
+            )
+          )}
+          {!anyEm && <span className="text-[9px] text-[var(--muted)] opacity-70">← 크게 강조할 단어를 누르세요</span>}
+        </div>
+      );
+    };
     if (bubs.length > 0) {
       return (
         <div className="flex flex-col gap-0.5">
           {bubs.map((b, bi) => (
-            <div key={bi} className="flex items-start gap-1">
+            <div key={bi} className="flex flex-col gap-0.5">
+              <div className="flex items-start gap-1">
               <div className="pt-0.5">{avatar(b.speakerId)}</div>
               {speakerSelect(b.speakerId, (v) => {
                 const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, speakerId: v } : x));
@@ -677,6 +710,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               >
                 ×
               </button>
+              </div>
+              {b.speakerId !== SFX_SPEAKER && emphChips(bi, b.text)}
             </div>
           ))}
           <div className="flex items-center gap-2">
