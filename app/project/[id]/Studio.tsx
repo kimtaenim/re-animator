@@ -41,6 +41,8 @@ const TRANSITIONS: [string, string][] = [
   ["black", "암전"],
   ["dissolve", "디졸브(섞임)"],
 ];
+// 대사 줄의 화자 특수값 — 효과음(소리 생성). 캐릭터 id 와 안 겹치는 센티넬.
+const SFX_SPEAKER = "__sfx__";
 
 export default function Studio({ initialProject }: { initialProject: Project }) {
   const [project, setProject] = useState<Project>(initialProject);
@@ -575,6 +577,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     const first = adjacentScene(s.id, "prev") == null;
     const last = adjacentScene(s.id, "next") == null;
     const avatar = (charId?: string | null) => {
+      if (charId === SFX_SPEAKER)
+        return (
+          <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-[var(--accent)] text-[10px]" title="효과음">
+            💥
+          </span>
+        );
       const th = charThumb(charId);
       return th ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -586,8 +594,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       );
     };
     const speakerSelect = (value: string | null | undefined, onPick: (v: string | null) => void) => (
-      <select value={value ?? ""} onChange={(e) => onPick(e.target.value || null)} className={selCls} title="이 대사의 화자(캐릭터). 비우면 내레이션.">
+      <select value={value ?? ""} onChange={(e) => onPick(e.target.value || null)} className={selCls} title="이 줄의 화자 — 캐릭터(입 움직임)/내레이션(입 안 움직임)/효과음(소리 생성)">
         <option value="">내레이션</option>
+        <option value={SFX_SPEAKER}>효과음</option>
         {cast.map((c) => (
           <option key={c.id} value={c.id}>
             {c.label}
@@ -616,7 +625,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   updateCut(s.id, { bubbles: nb });
                 }}
                 rows={rows(b.text)}
-                placeholder={`대사 ${bi + 1} (Enter=줄바꿈)`}
+                placeholder={b.speakerId === SFX_SPEAKER ? "효과음 (예: 웅성웅성, 쾅)" : `대사 ${bi + 1} (Enter=줄바꿈)`}
                 className={`${inputCls} resize-none`}
               />
               {/* 한 컷 안 순서 바꾸기(▲▼) — 대사 2개 이상일 때만 */}
@@ -1022,9 +1031,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     (s.cut?.bubbles ?? []).some((b) => b.audioUrl) || !!s.cut?.narrationAudioUrl;
 
   // 자막 '유닛' 배열 — 각 말풍선/내레이션 조각이 별개 박스(겹치지 않게). compose 와 동일 규칙.
+  // ★효과음(화자=효과음) 줄은 자막에서 제외(소리일 뿐 캡션 아님).
   function subtitleUnits(cut?: Project["scenes"][number]["cut"]): string[] {
     const units: string[] = [];
-    if (cut?.bubbles?.length) for (const b of cut.bubbles) { const t = (b.text || "").trim(); if (t) units.push(t); }
+    if (cut?.bubbles?.length)
+      for (const b of cut.bubbles) {
+        if (b.speakerId === SFX_SPEAKER) continue;
+        const t = (b.text || "").trim();
+        if (t) units.push(t);
+      }
     else if (cut?.dialogue?.trim()) units.push(cut.dialogue.trim());
     if (cut?.narration?.trim()) for (const seg of cut.narration.split(/\n\s*\n/)) { const t = seg.trim(); if (t) units.push(t); }
     return units;

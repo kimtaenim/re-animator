@@ -938,7 +938,8 @@ const SPEAKING_GUIDANCE =
 function hasSpokenDialogue(cut) {
   if (!cut || (cut.type !== "person" && cut.type !== "action")) return false;
   const bubs = cut.bubbles ?? [];
-  if (bubs.length) return bubs.some((b) => !!b.speakerId && (b.text || "").trim() !== "");
+  if (bubs.length)
+    return bubs.some((b) => !!b.speakerId && b.speakerId !== "__sfx__" && (b.text || "").trim() !== "");
   return (cut.dialogue || "").trim() !== "";
 }
 function buildVideoPrompt(cut) {
@@ -1088,7 +1089,12 @@ export async function runDub(projectId, payload) {
     }
     for (let i = 0; i < bubs.length; i++) {
       const text = (bubs[i].text || "").trim();
-      if (text) units.push({ s, kind: "bubble", idx: i, text, voice: resolve(bubs[i].speakerId) });
+      if (!text) continue;
+      if (bubs[i].speakerId === "__sfx__") {
+        units.push({ s, kind: "sfx", idx: i, text, voice: "__sfx__" }); // 효과음 줄 → 소리 생성
+      } else {
+        units.push({ s, kind: "bubble", idx: i, text, voice: resolve(bubs[i].speakerId) });
+      }
     }
     const nar = (cut.narration || "").trim();
     if (nar) units.push({ s, kind: "nar", idx: -1, text: nar, voice: resolve(cut.narrationSpeakerId ?? null) });
@@ -1105,20 +1111,27 @@ export async function runDub(projectId, payload) {
     await Promise.all(
       chunk.map(async (u) => {
         try {
-          if (!u.voice) {
+          let audio;
+          if (u.kind === "sfx") {
+            // 효과음 줄 — 한글 의성어를 영어 사운드 묘사로 바꿔 ElevenLabs Sound Effects.
+            const desc = await sfxToEnglish(u.text, process.env.OPENAI_API_KEY);
+            audio = await synthSfx(desc);
+          } else if (!u.voice) {
             skipped++;
             return; // 목소리 미배정 → 스킵
+          } else {
+            audio = await synthesize(u.voice.provider, u.voice.id, u.text);
           }
-          const { buf, ext, contentType } = await synthesize(u.voice.provider, u.voice.id, u.text);
+          const { buf, ext, contentType } = audio;
           const { url } = await put(
             `project/${projectId}/dub/${u.s.id}-${u.kind}${u.idx}-${Date.now()}.${ext}`,
             buf,
             { access: "public", contentType, addRandomSuffix: false }
           );
-          if (u.kind === "bubble") {
-            if (u.s.cut?.bubbles?.[u.idx]) u.s.cut.bubbles[u.idx].audioUrl = url;
-          } else {
+          if (u.kind === "nar") {
             u.s.cut.narrationAudioUrl = url;
+          } else if (u.s.cut?.bubbles?.[u.idx]) {
+            u.s.cut.bubbles[u.idx].audioUrl = url; // 대사·효과음 줄 모두 말풍선 audioUrl 에
           }
           ok++;
         } catch (e) {

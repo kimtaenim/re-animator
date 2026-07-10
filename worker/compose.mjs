@@ -107,6 +107,7 @@ function subtitleUnits(cut) {
   const units = [];
   if (cut?.bubbles?.length) {
     for (const b of cut.bubbles) {
+      if (b.speakerId === "__sfx__") continue; // 효과음 줄은 자막 아님(소리)
       const t = (b.text || "").trim();
       if (t) units.push(t);
     }
