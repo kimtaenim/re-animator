@@ -2132,6 +2132,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               controls
               autoPlay
               loop
+              muted
               onClick={(e) => e.stopPropagation()}
               className="max-h-[92vh] max-w-[92vw] rounded"
             />
