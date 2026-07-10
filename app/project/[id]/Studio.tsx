@@ -648,15 +648,22 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   ↓
                 </button>
               </div>
-              {b.audioUrl && (
+              {b.audioUrl ? (
                 <button
                   type="button"
                   onClick={() => playAudio(b.audioUrl!)}
-                  title="더빙 오디오 듣기"
+                  title={b.speakerId === SFX_SPEAKER ? "효과음 생성됨 — 듣기" : "더빙됨 — 듣기"}
                   className="shrink-0 rounded border border-[var(--ok)] px-1.5 py-1 leading-none text-[var(--ok)] hover:bg-[var(--panel-2)]"
                 >
                   🔊
                 </button>
+              ) : (
+                <span
+                  title="아직 더빙 안 됨 — 🎙 더빙 누르세요"
+                  className="shrink-0 rounded border border-dashed border-[var(--border)] px-1.5 py-1 leading-none text-[var(--muted)] opacity-60"
+                >
+                  🔇
+                </span>
               )}
               <button
                 type="button"
@@ -954,8 +961,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 더빙(TTS) 잡 적재 — 대사(화자 목소리)·내레이션(나레이터). sceneIds 없으면 전체.
   // ★비디오(scene 단계)와 독립: 잡 상태를 따로 폴링해 동영상 생성 중에도 더빙을 걸 수 있다.
   const [dubbing, setDubbing] = useState(false); // 더빙 잡 진행 중(비디오와 무관)
+  const [dubMsg, setDubMsg] = useState<string | null>(null); // 더빙 완료/실패 안내(잠깐 표시)
   async function runDubJob(sceneIds?: string[]) {
     setError("");
+    setDubMsg(null);
     if (dubbing) return;
     try {
       const r = await fetch("/api/dub", {
@@ -982,7 +991,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         if (d.ok && (d.status === "done" || d.status === "error")) {
           clearInterval(iv);
           setDubbing(false);
-          if (d.status === "error") setError(`더빙 실패: ${d.error ?? ""}`);
+          if (d.status === "error") {
+            setError(`더빙 실패: ${d.error ?? ""}`);
+          } else {
+            setDubMsg("✓ 더빙 완료 — 각 줄의 🔊(초록)로 확인/재생하세요");
+            setTimeout(() => setDubMsg(null), 6000);
+          }
           try {
             const pr = await fetch(`/api/project/${project.id}`, { cache: "no-store" });
             const pj = await pr.json();
@@ -1888,6 +1902,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 더빙 중…
               </span>
             )}
+            {dubMsg && !dubbing && <span className="text-xs text-[var(--ok)]">{dubMsg}</span>}
             {selForVideo.size > 0 && (
               <button
                 onClick={() => runDubJob([...selForVideo])}
