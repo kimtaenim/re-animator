@@ -626,6 +626,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   ↓
                 </button>
               </div>
+              {b.audioUrl && (
+                <button
+                  type="button"
+                  onClick={() => playAudio(b.audioUrl!)}
+                  title="더빙 오디오 듣기"
+                  className="shrink-0 rounded border border-[var(--ok)] px-1.5 py-1 leading-none text-[var(--ok)] hover:bg-[var(--panel-2)]"
+                >
+                  🔊
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -901,6 +911,40 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setVidPending((prev) => new Set([...prev, ...ids]));
     runVideoJob(ids);
     setSelForVideo(new Set());
+  }
+
+  // 더빙(TTS) 잡 적재 — 대사(화자 목소리)·내레이션(나레이터). sceneIds 없으면 전체.
+  // scene 단계를 running 으로 → scenePolling 이 오디오 URL 반영을 폴링한다.
+  async function runDubJob(sceneIds?: string[]) {
+    setError("");
+    try {
+      const r = await fetch("/api/dub", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, ...(sceneIds ? { sceneIds } : {}) }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "더빙 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, scene: { ...prev.steps.scene, status: "running" } },
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "더빙 실패");
+    }
+  }
+
+  // 오디오 재생(더빙 미리듣기) — 한 번에 하나만.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  function playAudio(url: string) {
+    try {
+      if (audioRef.current) audioRef.current.pause();
+      const a = new Audio(url);
+      audioRef.current = a;
+      a.play().catch(() => {});
+    } catch {
+      /* ignore */
+    }
   }
 
   // 5단계 — 씬 영상들을 워커에서 이어붙이기(오디오·자막 없이).
@@ -1699,6 +1743,24 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               className="rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50"
             >
               {sceneRunning ? "생성 중…" : "전체 동영상 생성"}
+            </button>
+            {selForVideo.size > 0 && (
+              <button
+                onClick={() => runDubJob([...selForVideo])}
+                disabled={busy || sceneRunning}
+                title="선택 컷의 대사·내레이션 음성 생성"
+                className="rounded-md border border-[var(--accent)] px-3 py-2 text-sm text-[var(--accent)] disabled:opacity-50"
+              >
+                🎙 선택 더빙
+              </button>
+            )}
+            <button
+              onClick={() => runDubJob()}
+              disabled={busy || sceneRunning}
+              title="모든 컷의 대사(화자 목소리)·내레이션(나레이터) 음성 생성"
+              className="rounded-md border border-[var(--accent)] px-3 py-2 text-sm text-[var(--accent)] disabled:opacity-50"
+            >
+              🎙 전체 더빙
             </button>
           </div>
 

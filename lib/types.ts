@@ -87,6 +87,7 @@ export interface DialogueBubble {
   text: string; // 그 풍선 글자(OCR 보이는 그대로)
   speakerId?: string | null; // 이 풍선을 말하는 캐릭터 id. null=나레이션/미상
   box?: TextBox; // 풍선 영역(0~1)
+  audioUrl?: string; // 더빙 오디오 Blob URL (TTS). 화자 목소리로 생성.
 }
 
 export interface CutOntology {
@@ -99,6 +100,7 @@ export interface CutOntology {
   bubbles?: DialogueBubble[]; // 말풍선 단위 대사+화자. OCR 이 풍선별로 채움.
   narration?: string; // 흡수된 위·아래 나레이션/자막(별도 — OCR 이 안 건드림)
   narrationSpeakerId?: string | null; // 이 내레이션을 읽는 화자(나레이터). null=미상/기본
+  narrationAudioUrl?: string; // 내레이션 더빙 오디오 Blob URL (나레이터 목소리로 생성)
   speakerId?: string | null; // (레거시) 컷 단위 화자. bubbles 있으면 풍선별 speakerId 우선.
   textBoxes?: TextBox[]; // 글씨(말풍선·자막·효과음) 영역들(0~1 정규화) — 마스크 재생성용
   textRegions?: SourceRegion[]; // 흡수된 '대사만 있는' 밴드 영역들 — 추출 때 따로 OCR해 이 컷 대사로. (이미지엔 안 합침)

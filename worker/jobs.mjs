@@ -29,6 +29,7 @@ import {
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { readCutText } from "./ocr.mjs";
+import { synthesize } from "./tts.mjs";
 
 // 영상(I2V)은 여러 컷을 병렬로 생성(각자 submit→poll). xAI 초당 1건 제한은 grok.mjs
 // 레이트 게이트가 처리하므로, 여기선 병렬 개수만 정한다(제출은 1초 간격으로 자동 스로틀).
@@ -858,9 +859,21 @@ function estimateVideoSeconds(cut) {
 const MOTION_GUIDANCE =
   "Keep motion subtle and minimal — small, gentle movements and a slow, steady camera; " +
   "keep the subject, art style and colors consistent with the still image. No new objects, no text, no morphing.";
+// 대사 있는 인물 컷: '말하는 것처럼' 입/얼굴 움직임(진짜 립싱크 아님 — Grok I2V 한계).
+const SPEAKING_GUIDANCE =
+  "The character is talking: natural, subtle lip and mouth movement as if speaking, with a slight, " +
+  "lively facial expression. Keep the same identity and pose; do not add text or captions.";
+// 이 컷에 '인물이 하는 대사'가 있나 — 인물/액션 컷 + 내레이션 아닌 대사 텍스트.
+function hasSpokenDialogue(cut) {
+  if (!cut || (cut.type !== "person" && cut.type !== "action")) return false;
+  const bubs = cut.bubbles ?? [];
+  if (bubs.length) return bubs.some((b) => b.speakerId !== null && (b.text || "").trim() !== "");
+  return (cut.dialogue || "").trim() !== "";
+}
 function buildVideoPrompt(cut) {
   const motion = String(cut?.motion || "").trim();
-  return motion ? `${motion}. ${MOTION_GUIDANCE}` : MOTION_GUIDANCE;
+  const base = motion ? `${motion}. ${MOTION_GUIDANCE}` : MOTION_GUIDANCE;
+  return hasSpokenDialogue(cut) ? `${base} ${SPEAKING_GUIDANCE}` : base;
 }
 
 // ── video(M4): 재생성 컷(generatedImage)을 Grok I2V 로 영상화 → Scene.videoUrl ─
@@ -957,6 +970,99 @@ export async function runVideo(projectId, payload) {
 
   await flush(true);
   await log(`영상 완료: ${ok}/${cand.length} (~$${costTotal.toFixed(3)})`);
+  return ok;
+}
+
+// ── dub(M6): 대사·내레이션을 TTS로 음성화 → bubble.audioUrl / cut.narrationAudioUrl ──
+//    화자=캐릭터면 그 캐릭터 목소리, 화자 없음(내레이션)이면 프로젝트 나레이터 목소리.
+//    payload.sceneIds 있으면 그 컷만. scene 단계로 진행 표시.
+export async function runDub(projectId, payload) {
+  await resetProgress(projectId);
+  const log = async (m) => {
+    console.error("[dub]", m);
+    await logProgress(projectId, m);
+  };
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  const cast = p.cast ?? [];
+  const narrator = p.narratorVoice || null;
+  const only =
+    Array.isArray(payload?.sceneIds) && payload.sceneIds.length ? new Set(payload.sceneIds) : null;
+  const scenes = (p.scenes ?? [])
+    .slice()
+    .sort((a, b) => a.order - b.order)
+    .filter((s) => !only || only.has(s.id));
+
+  // 화자 id → 목소리. charId면 그 캐릭터(voice+provider), null/미지정이면 나레이터.
+  const resolve = (speakerId) => {
+    if (speakerId) {
+      const c = cast.find((x) => x.id === speakerId);
+      if (c?.voice) return { provider: c.voiceProvider || "eleven", id: c.voice, name: c.voiceName || c.label };
+      return null; // 화자 지정됐지만 목소리 미배정 → 스킵
+    }
+    return narrator ? { provider: narrator.provider, id: narrator.id, name: narrator.name } : null;
+  };
+
+  // 합성 유닛 수집: 말풍선 + 내레이션.
+  const units = [];
+  for (const s of scenes) {
+    const cut = s.cut;
+    if (!cut) continue;
+    const bubs = cut.bubbles ?? [];
+    for (let i = 0; i < bubs.length; i++) {
+      const text = (bubs[i].text || "").trim();
+      if (text) units.push({ s, kind: "bubble", idx: i, text, voice: resolve(bubs[i].speakerId) });
+    }
+    const nar = (cut.narration || "").trim();
+    if (nar) units.push({ s, kind: "nar", idx: -1, text: nar, voice: resolve(cut.narrationSpeakerId ?? null) });
+  }
+  if (!units.length) throw new Error("더빙할 대사·내레이션이 없어요");
+
+  await log(`더빙 대상 ${units.length}개 — 목소리 생성 시작`);
+  const C = Number(process.env.DUB_CONCURRENCY || 2);
+  let done = 0;
+  let ok = 0;
+  let skipped = 0;
+  for (let i = 0; i < units.length; i += C) {
+    const chunk = units.slice(i, i + C);
+    await Promise.all(
+      chunk.map(async (u) => {
+        try {
+          if (!u.voice) {
+            skipped++;
+            return; // 목소리 미배정 → 스킵
+          }
+          const { buf, ext, contentType } = await synthesize(u.voice.provider, u.voice.id, u.text);
+          const { url } = await put(
+            `project/${projectId}/dub/${u.s.id}-${u.kind}${u.idx}-${Date.now()}.${ext}`,
+            buf,
+            { access: "public", contentType, addRandomSuffix: false }
+          );
+          if (u.kind === "bubble") {
+            if (u.s.cut?.bubbles?.[u.idx]) u.s.cut.bubbles[u.idx].audioUrl = url;
+          } else {
+            u.s.cut.narrationAudioUrl = url;
+          }
+          ok++;
+        } catch (e) {
+          await log(`더빙 실패(컷 ${u.s.order + 1}): ${String(e?.message ?? e).slice(0, 120)}`);
+        }
+      })
+    );
+    done = Math.min(i + C, units.length);
+    await log(`더빙 ${done}/${units.length} (${Math.round((done / units.length) * 100)}%)`);
+  }
+
+  // 저장 — 최신 프로젝트에 이번에 만진 씬만 병합(오디오 URL 반영).
+  const p2 = (await getProject(projectId)) ?? p;
+  const map = new Map(scenes.map((s) => [s.id, s]));
+  p2.scenes = (p2.scenes ?? []).map((s) => map.get(s.id) ?? s);
+  p2.steps.scene = { ...p2.steps.scene, kind: "scene", status: "review", error: undefined, updatedAt: Date.now() };
+  await saveProject(p2);
+  try {
+    await recordCost({ projectId, vendor: "tts", model: "dub", costUsd: 0, meta: { kind: "dub", ok, skipped } });
+  } catch {}
+  await log(`더빙 완료: 생성 ${ok}개${skipped ? `, 목소리 미배정 스킵 ${skipped}개` : ""}`);
   return ok;
 }
 

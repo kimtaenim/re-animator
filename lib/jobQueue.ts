@@ -17,7 +17,8 @@ export type JobType =
   | "mergecut"
   | "video"
   | "compose"
-  | "portrait";
+  | "portrait"
+  | "dub";
 export type JobStatus = "queued" | "running" | "done" | "error";
 
 export interface Job {
