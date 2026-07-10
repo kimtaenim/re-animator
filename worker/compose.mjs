@@ -37,7 +37,7 @@ async function resolveFf() {
 }
 
 const FADE = Number(process.env.COMPOSE_FADE_SEC || 0.5);
-const FPS = Number(process.env.COMPOSE_FPS || 30);
+const FPS = Number(process.env.COMPOSE_FPS || 24); // 24fps 로 충분(파일 작게). env 로 조정.
 const OPENAI_KEY = process.env.OPENAI_API_KEY; // 자막 얼굴/손 회피용(없으면 감지 skip)
 
 function run(cmd, args, timeoutMs = 180_000) {
