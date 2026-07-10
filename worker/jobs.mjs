@@ -933,11 +933,12 @@ const MOTION_GUIDANCE =
 const SPEAKING_GUIDANCE =
   "The character is talking: natural, subtle lip and mouth movement as if speaking, with a slight, " +
   "lively facial expression. Keep the same identity and pose; do not add text or captions.";
-// 이 컷에 '인물이 하는 대사'가 있나 — 인물/액션 컷 + 내레이션 아닌 대사 텍스트.
+// 이 컷에 '인물이 하는 대사'가 있나 — 인물/액션 컷 + ★화자가 캐릭터(charId)로 지정된★ 대사.
+// 내레이션(speakerId=null)·미지정(undefined) 은 입이 안 움직인다 = 대사와 내레이션의 유일한 차이.
 function hasSpokenDialogue(cut) {
   if (!cut || (cut.type !== "person" && cut.type !== "action")) return false;
   const bubs = cut.bubbles ?? [];
-  if (bubs.length) return bubs.some((b) => b.speakerId !== null && (b.text || "").trim() !== "");
+  if (bubs.length) return bubs.some((b) => !!b.speakerId && (b.text || "").trim() !== "");
   return (cut.dialogue || "").trim() !== "";
 }
 function buildVideoPrompt(cut) {

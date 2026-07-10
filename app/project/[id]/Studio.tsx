@@ -1000,12 +1000,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       /* ignore */
     }
   }
-  // 씬 오디오 전체 재생 — 말풍선 대사들 → 내레이션 → 효과음을 순서대로.
+  // 씬 오디오 전체 재생 — 말풍선/내레이션 대사만 순서대로. (효과음은 자동생성 폐기 → 재생 안 함)
   function playSceneAudio(s: Project["scenes"][number]) {
     const urls: string[] = [];
     for (const b of s.cut?.bubbles ?? []) if (b.audioUrl) urls.push(b.audioUrl);
     if (s.cut?.narrationAudioUrl) urls.push(s.cut.narrationAudioUrl);
-    if (s.cut?.sfxAudioUrl) urls.push(s.cut.sfxAudioUrl);
     if (!urls.length) return;
     let i = 0;
     const next = () => {
@@ -1018,9 +1017,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     };
     next();
   }
-  // 이 씬에 더빙 오디오가 하나라도 있나(재생 버튼 표시용).
+  // 이 씬에 더빙 오디오가 하나라도 있나(재생 버튼 표시용). 효과음은 재생에서 제외.
   const sceneHasAudio = (s: Project["scenes"][number]) =>
-    (s.cut?.bubbles ?? []).some((b) => b.audioUrl) || !!s.cut?.narrationAudioUrl || !!s.cut?.sfxAudioUrl;
+    (s.cut?.bubbles ?? []).some((b) => b.audioUrl) || !!s.cut?.narrationAudioUrl;
 
   // 자막 '유닛' 배열 — 각 말풍선/내레이션 조각이 별개 박스(겹치지 않게). compose 와 동일 규칙.
   function subtitleUnits(cut?: Project["scenes"][number]["cut"]): string[] {
