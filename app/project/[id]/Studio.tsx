@@ -1789,23 +1789,31 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             >
               {sceneRunning ? "생성 중…" : "전체 동영상 생성"}
             </button>
+          </div>
+
+          {/* 더빙(음성 생성) — 동영상과 별개. 눈에 띄게 전용 줄로. */}
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--panel)] p-2">
+            <span className="text-sm font-semibold text-[var(--accent)]">🎙 더빙</span>
+            <span className="text-xs text-[var(--muted)]">
+              대사=화자 목소리 · 내레이션=나레이터 · 효과음=ElevenLabs
+            </span>
             {selForVideo.size > 0 && (
               <button
                 onClick={() => runDubJob([...selForVideo])}
                 disabled={busy || sceneRunning}
                 title="선택 컷의 대사·내레이션 음성 생성"
-                className="rounded-md border border-[var(--accent)] px-3 py-2 text-sm text-[var(--accent)] disabled:opacity-50"
+                className="ml-auto rounded-md border border-[var(--accent)] px-3 py-2 text-sm text-[var(--accent)] disabled:opacity-50"
               >
-                🎙 선택 더빙
+                선택 {selForVideo.size}개 더빙
               </button>
             )}
             <button
               onClick={() => runDubJob()}
               disabled={busy || sceneRunning}
-              title="모든 컷의 대사(화자 목소리)·내레이션(나레이터) 음성 생성"
-              className="rounded-md border border-[var(--accent)] px-3 py-2 text-sm text-[var(--accent)] disabled:opacity-50"
+              title="모든 컷의 대사(화자 목소리)·내레이션(나레이터)·효과음 음성 생성"
+              className={`${selForVideo.size > 0 ? "" : "ml-auto "}rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50`}
             >
-              🎙 전체 더빙
+              🎙 전체 더빙 생성
             </button>
           </div>
 
@@ -2023,6 +2031,31 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         placeholder="나레이션/자막 (선택)"
                         className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5 text-[var(--muted)]"
                       />
+                      {/* 자막 위치 — 자동(얼굴/손 피함) + 수동 상/중/하 대략 지정 */}
+                      <div className="flex flex-wrap items-center gap-1 text-[10px]" title="자막 위치 — 자동은 얼굴/손을 피해 배치, 수동은 상/중/하로 대략 고정">
+                        <span className="text-[var(--muted)]">자막위치</span>
+                        {(
+                          [
+                            ["auto", "자동"],
+                            ["top", "상"],
+                            ["middle", "중"],
+                            ["bottom", "하"],
+                          ] as const
+                        ).map(([v, label]) => (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => updateCut(s.id, { subtitlePos: v })}
+                            className={`rounded border px-1.5 py-0.5 ${
+                              (s.cut?.subtitlePos ?? "auto") === v
+                                ? "border-[var(--accent)] font-medium text-[var(--accent)]"
+                                : "border-[var(--border)] hover:bg-[var(--panel-2)]"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
                       {/* 카메라 워크 → 모션 프롬프트 채움. 영상 프롬프트 = 모션(+가이드), 정지컷 내용은 이미지가 담당. */}
                       <div className="flex flex-wrap gap-1">
                         {CAMERA_MOVES.map(([id, label, mprompt]) => (
@@ -2199,7 +2232,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     </div>
                   )}
                   {sub && (
-                    <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
+                    <div
+                      className={`pointer-events-none absolute inset-x-0 flex justify-center px-4 ${
+                        (s.cut?.subtitlePos ?? "auto") === "top"
+                          ? "top-4"
+                          : s.cut?.subtitlePos === "middle"
+                            ? "top-1/2 -translate-y-1/2"
+                            : "bottom-4"
+                      }`}
+                    >
                       <span className="max-w-[90%] whitespace-pre-wrap rounded bg-black/90 px-3 py-1 text-center text-sm font-semibold text-white">
                         {sub}
                       </span>

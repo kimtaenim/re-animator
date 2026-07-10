@@ -111,6 +111,7 @@ export interface CutOntology {
   motion: string; // I2V 모션 힌트(후속)
   durationSec?: number; // 이 컷 영상/씬 길이(초) 사람 지정. 없으면 대사·타입으로 추정.
   transition?: string; // 이 컷 끝의 전환(합성 시): none/fadeout/fadein/black/dissolve
+  subtitlePos?: "auto" | "top" | "middle" | "bottom"; // 자막 위치(수동). 기본 auto=얼굴/손 피해 자동
   confirmed: boolean; // 사람이 G1 에서 타입 확정했는지
 }
 

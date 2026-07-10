@@ -83,6 +83,9 @@ function cleanCut(raw: unknown): CutOntology {
   ) {
     c.transition = r.transition;
   }
+  if (typeof r.subtitlePos === "string" && ["auto", "top", "middle", "bottom"].includes(r.subtitlePos)) {
+    c.subtitlePos = r.subtitlePos as CutOntology["subtitlePos"];
+  }
   c.confirmed = r.confirmed === true;
   return c;
 }

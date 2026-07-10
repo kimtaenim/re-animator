@@ -166,12 +166,20 @@ export async function runCompose(projectId) {
       let subPath = null;
       const bandH = Math.round(H * SUB_FRAC);
       let bandY = Math.round(H * 0.6); // 기본: 바닥이 아닌 하단 1/3(가장자리 회피)
+      const pos = s.cut?.subtitlePos; // 수동 위치(top/middle/bottom). 없거나 auto=자동 배치.
+      const margin = Math.round(H * 0.06);
       if (subText) {
         try {
-          if (s.generatedImage) {
+          if (pos === "top") {
+            bandY = margin;
+          } else if (pos === "middle") {
+            bandY = Math.round((H - bandH) / 2);
+          } else if (pos === "bottom") {
+            bandY = H - bandH - margin;
+          } else if (s.generatedImage) {
+            // auto: 얼굴·손 위치를 물어(gpt-4o, 실패해도 자막 정상) 그 위를 피해 빈 띠 선택.
             const genBuf = await download2(s.generatedImage);
             if (genBuf) {
-              // 얼굴·손 위치를 물어(gpt-4o, 실패해도 자막 정상) 그 위를 피해 빈 띠 선택.
               const fh = await detectFaceHandBoxes(genBuf, OPENAI_KEY);
               if (fh.cost) {
                 try {
