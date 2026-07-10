@@ -92,7 +92,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m6-dub-sfx-v4 (자막 줄바꿈 존중)");
+console.log("[worker] BUILD = m6-dub-sfx-v5 (별개 자막=별개 박스 세로 스택)");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();

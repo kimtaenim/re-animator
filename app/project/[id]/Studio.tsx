@@ -973,13 +973,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const sceneHasAudio = (s: Project["scenes"][number]) =>
     (s.cut?.bubbles ?? []).some((b) => b.audioUrl) || !!s.cut?.narrationAudioUrl || !!s.cut?.sfxAudioUrl;
 
-  // 자막 텍스트(합성에서 구울 것과 동일 규칙: 대사 + 내레이션). 미리보기 오버레이용.
-  function subtitleText(cut?: Project["scenes"][number]["cut"]): string {
-    const parts: string[] = [];
-    if (cut?.bubbles?.length) for (const b of cut.bubbles) { const t = (b.text || "").trim(); if (t) parts.push(t); }
-    else if (cut?.dialogue?.trim()) parts.push(cut.dialogue.trim());
-    if (cut?.narration?.trim()) parts.push(cut.narration.trim());
-    return parts.join("\n").trim(); // 말풍선·내레이션은 각각 줄바꿈. 칸 안 Enter 줄바꿈도 유지.
+  // 자막 '유닛' 배열 — 각 말풍선/내레이션 조각이 별개 박스(겹치지 않게). compose 와 동일 규칙.
+  function subtitleUnits(cut?: Project["scenes"][number]["cut"]): string[] {
+    const units: string[] = [];
+    if (cut?.bubbles?.length) for (const b of cut.bubbles) { const t = (b.text || "").trim(); if (t) units.push(t); }
+    else if (cut?.dialogue?.trim()) units.push(cut.dialogue.trim());
+    if (cut?.narration?.trim()) for (const seg of cut.narration.split(/\n\s*\n/)) { const t = seg.trim(); if (t) units.push(t); }
+    return units;
   }
   // 씬 미리보기 열면 그 씬 더빙 오디오 자동 재생, 닫으면 멈춤.
   useEffect(() => {
@@ -1981,6 +1981,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         >
                           👁 미리보기
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => runDubJob([s.id])}
+                          disabled={busy || sceneRunning}
+                          title="이 컷만 더빙(대사·내레이션·효과음) 다시 생성 — 하나만 고쳤을 때"
+                          className="rounded border border-[var(--accent)] px-2 py-0.5 text-[var(--accent)] hover:bg-[var(--panel-2)] disabled:opacity-40"
+                        >
+                          🎙 이 컷 더빙
+                        </button>
                         {sceneHasAudio(s) && (
                           <button
                             type="button"
@@ -2213,7 +2222,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         (() => {
           const s = project.scenes.find((x) => x.id === scenePreview);
           if (!s) return null;
-          const sub = subtitleText(s.cut);
+          const units = subtitleUnits(s.cut);
           return (
             <div
               onClick={() => setScenePreview(null)}
@@ -2231,9 +2240,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       이미지/영상 없음
                     </div>
                   )}
-                  {sub && (
+                  {units.length > 0 && (
                     <div
-                      className={`pointer-events-none absolute inset-x-0 flex justify-center px-4 ${
+                      className={`pointer-events-none absolute inset-x-0 flex flex-col items-center gap-1 px-4 ${
                         (s.cut?.subtitlePos ?? "auto") === "top"
                           ? "top-4"
                           : s.cut?.subtitlePos === "middle"
@@ -2241,9 +2250,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             : "bottom-4"
                       }`}
                     >
-                      <span className="max-w-[90%] whitespace-pre-wrap rounded bg-black/90 px-3 py-1 text-center text-sm font-semibold text-white">
-                        {sub}
-                      </span>
+                      {units.map((u, ui) => (
+                        <span
+                          key={ui}
+                          className="max-w-[90%] whitespace-pre-wrap rounded bg-black/90 px-3 py-1 text-center text-sm font-semibold text-white"
+                        >
+                          {u}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>

@@ -121,65 +121,72 @@ function wrap(ctx, text, maxW, maxLines = 4) {
   return out.length ? out : [""];
 }
 
-// text → 자막 PNG(frameW × bandH). 실패 시 null(자막 없이 진행).
-export async function renderSubtitle(text, { frameW, bandH }) {
+// 한 유닛(자막 조각)을 [top, top+boxH] 영역에 검은 박스 + 흰 글자로 그린다.
+function drawBox(ctx, text, { frameW, top, boxH }) {
   const t = (text || "").trim();
-  if (!t) return null;
+  if (!t) return;
+  const pad = Math.round(boxH * 0.14);
+  const maxW = frameW - pad * 2 - Math.round(frameW * 0.06);
+  let fontPx = Math.max(12, Math.round(boxH * FONT_FRAC));
+  let lines;
+  for (; fontPx >= 12; fontPx -= 2) {
+    ctx.font = `700 ${fontPx}px ${FAMILY}, sans-serif`;
+    lines = wrap(ctx, t, maxW, 3);
+    if (lines.length * fontPx * 1.25 <= boxH - pad) break;
+  }
+  ctx.font = `700 ${fontPx}px ${FAMILY}, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const lineH = fontPx * 1.25;
+  const totalH = lines.length * lineH;
+  const cx = frameW / 2;
+  const midY = top + boxH / 2;
+  let y = midY - totalH / 2 + lineH / 2;
+  // 검은 박스(글자 폭에 맞춤).
+  const boxW = Math.min(frameW - pad, Math.max(...lines.map((l) => ctx.measureText(l).width)) + pad * 2);
+  ctx.fillStyle = `rgba(0,0,0,${BG_ALPHA})`;
+  const bx = cx - boxW / 2;
+  const by = midY - totalH / 2 - pad * 0.4;
+  const bh = totalH + pad * 0.8;
+  const r = Math.min(boxH * 0.18, 18);
+  ctx.beginPath();
+  ctx.moveTo(bx + r, by);
+  ctx.arcTo(bx + boxW, by, bx + boxW, by + bh, r);
+  ctx.arcTo(bx + boxW, by + bh, bx, by + bh, r);
+  ctx.arcTo(bx, by + bh, bx, by, r);
+  ctx.arcTo(bx, by, bx + boxW, by, r);
+  ctx.closePath();
+  ctx.fill();
+  // 글자: 검은 외곽선 + 흰 채움.
+  ctx.lineJoin = "round";
+  ctx.lineWidth = Math.max(1, Math.round(fontPx * 0.1));
+  ctx.strokeStyle = "rgba(0,0,0,0.95)";
+  ctx.fillStyle = "#ffffff";
+  for (const l of lines) {
+    ctx.strokeText(l, cx, y);
+    ctx.fillText(l, cx, y);
+    y += lineH;
+  }
+}
+
+// input = 자막 문자열 또는 ★유닛 배열★(각 유닛 = 별개 박스). 여러 유닛은 세로로 겹치지 않게 쌓는다.
+// → 별개 대사/내레이션이 별개 박스로 나가고, 서로 지워지지 않는다. 실패 시 null.
+export async function renderSubtitle(input, { frameW, bandH }) {
+  const units = (Array.isArray(input) ? input : [input]).map((s) => (s || "").trim()).filter(Boolean);
+  if (!units.length) return null;
   const mod = await loadCanvas();
   if (!mod) return null;
   const { createCanvas, GlobalFonts } = mod;
   if (!(await ensureFont(GlobalFonts))) return null;
-
   try {
     const canvas = createCanvas(frameW, bandH);
     const ctx = canvas.getContext("2d");
-    const pad = Math.round(bandH * 0.14);
-    const maxW = frameW - pad * 2 - Math.round(frameW * 0.06);
-    let fontPx = Math.round(bandH * FONT_FRAC);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    // 폰트 크기 낮춰가며 밴드 안에 맞춤(직접 줄바꿈 존중, 최대 4줄).
-    let lines;
-    for (; fontPx >= 12; fontPx -= 2) {
-      ctx.font = `700 ${fontPx}px ${FAMILY}, sans-serif`;
-      lines = wrap(ctx, t, maxW, 4);
-      const lineH = fontPx * 1.25;
-      if (lines.length * lineH <= bandH - pad) break;
-    }
-    ctx.font = `700 ${fontPx}px ${FAMILY}, sans-serif`;
-    const lineH = fontPx * 1.25;
-    const totalH = lines.length * lineH;
-    const cx = frameW / 2;
-    let y = bandH / 2 - totalH / 2 + lineH / 2;
-
-    // 반투명 어두운 띠(가독성) — 글자 폭에 맞춘 라운드 박스.
-    const boxW = Math.min(
-      frameW - pad,
-      Math.max(...lines.map((l) => ctx.measureText(l).width)) + pad * 2
-    );
-    ctx.fillStyle = `rgba(0,0,0,${BG_ALPHA})`;
-    const bx = cx - boxW / 2;
-    const by = bandH / 2 - totalH / 2 - pad * 0.4;
-    const bh = totalH + pad * 0.8;
-    const r = Math.min(bandH * 0.18, 18);
-    ctx.beginPath();
-    ctx.moveTo(bx + r, by);
-    ctx.arcTo(bx + boxW, by, bx + boxW, by + bh, r);
-    ctx.arcTo(bx + boxW, by + bh, bx, by + bh, r);
-    ctx.arcTo(bx, by + bh, bx, by, r);
-    ctx.arcTo(bx, by, bx + boxW, by, r);
-    ctx.closePath();
-    ctx.fill();
-
-    // 글자: 검은 외곽선 + 흰 채움.
-    ctx.lineJoin = "round";
-    ctx.lineWidth = Math.max(1, Math.round(fontPx * 0.1)); // 검은 바탕이라 외곽선 얇게
-    ctx.strokeStyle = "rgba(0,0,0,0.95)";
-    ctx.fillStyle = "#ffffff";
-    for (const l of lines) {
-      ctx.strokeText(l, cx, y);
-      ctx.fillText(l, cx, y);
-      y += lineH;
+    const GAP = units.length > 1 ? Math.round(bandH * 0.06) : 0;
+    const boxH = Math.floor((bandH - GAP * (units.length - 1)) / units.length);
+    let top = 0;
+    for (const u of units) {
+      drawBox(ctx, u, { frameW, top, boxH });
+      top += boxH + GAP;
     }
     return canvas.toBuffer("image/png");
   } catch {

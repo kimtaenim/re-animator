@@ -102,19 +102,25 @@ const FADES_OUT = new Set(["fadeout", "black", "dissolve"]);
 const FADES_IN = new Set(["fadein", "black", "dissolve"]);
 const SUB_FRAC = Number(process.env.SUBTITLE_HEIGHT_FRAC || 0.18); // 자막 띠 높이(프레임 대비)
 
-// 이 컷 자막 텍스트 = 대사(말풍선 합침) + 나레이션. 씬마다 이걸 얹는다.
-function subtitleText(cut) {
-  const parts = [];
+// 이 컷 자막 '유닛' 배열 — 각 말풍선/내레이션 조각이 별개 박스. 겹치지 않게 세로로 쌓인다.
+function subtitleUnits(cut) {
+  const units = [];
   if (cut?.bubbles?.length) {
     for (const b of cut.bubbles) {
       const t = (b.text || "").trim();
-      if (t) parts.push(t);
+      if (t) units.push(t);
     }
-  } else if (cut?.dialogue) {
-    parts.push(cut.dialogue.trim());
+  } else if (cut?.dialogue?.trim()) {
+    units.push(cut.dialogue.trim());
   }
-  if (cut?.narration?.trim()) parts.push(cut.narration.trim());
-  return parts.filter(Boolean).join("\n").trim(); // 말풍선·내레이션 각각 줄바꿈(칸 안 Enter 도 유지)
+  // 내레이션: 빈 줄로 나뉜 별개 조각을 각각 박스로.
+  if (cut?.narration?.trim()) {
+    for (const seg of cut.narration.split(/\n\s*\n/)) {
+      const t = seg.trim();
+      if (t) units.push(t);
+    }
+  }
+  return units;
 }
 
 // projectId 의 씬 영상들을 이어붙여 project.composedUrl 로. compose 단계 진행 표시.
@@ -162,13 +168,15 @@ export async function runCompose(projectId) {
       if (fadeOut) vf.push(`fade=t=out:st=${Math.max(0, dur - FADE).toFixed(2)}:d=${FADE}`);
 
       // 자막 — 씬마다 대사+나레이션을 '빈 곳'에 얹는다(폰트/canvas 없으면 자막만 skip).
-      const subText = subtitleText(s.cut);
+      const subUnits = subtitleUnits(s.cut);
       let subPath = null;
-      const bandH = Math.round(H * SUB_FRAC);
+      // 유닛 여러 개면 밴드를 키워 각 박스가 읽히게(최대 3배 상당).
+      const nU = Math.min(subUnits.length, 3);
+      const bandH = Math.round(H * SUB_FRAC * (nU > 1 ? 1 + 0.75 * (nU - 1) : 1));
       let bandY = Math.round(H * 0.6); // 기본: 바닥이 아닌 하단 1/3(가장자리 회피)
       const pos = s.cut?.subtitlePos; // 수동 위치(top/middle/bottom). 없거나 auto=자동 배치.
       const margin = Math.round(H * 0.06);
-      if (subText) {
+      if (subUnits.length) {
         try {
           if (pos === "top") {
             bandY = margin;
@@ -189,14 +197,14 @@ export async function runCompose(projectId) {
               const band = await pickSubtitleBand(genBuf, {
                 frameW: W,
                 frameH: H,
-                heightFrac: SUB_FRAC,
+                heightFrac: bandH / H,
                 faces: fh.faces,
                 hands: fh.hands,
               });
               bandY = band.y;
             }
           }
-          const png = await renderSubtitle(subText, { frameW: W, bandH });
+          const png = await renderSubtitle(subUnits, { frameW: W, bandH });
           if (png) {
             subPath = join(dir, `sub${i}.png`);
             await writeFile(subPath, png);
