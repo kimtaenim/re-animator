@@ -114,7 +114,7 @@ function subtitleText(cut) {
     parts.push(cut.dialogue.trim());
   }
   if (cut?.narration?.trim()) parts.push(cut.narration.trim());
-  return parts.filter(Boolean).join("  ").trim();
+  return parts.filter(Boolean).join("\n").trim(); // 말풍선·내레이션 각각 줄바꿈(칸 안 Enter 도 유지)
 }
 
 // projectId 의 씬 영상들을 이어붙여 project.composedUrl 로. compose 단계 진행 표시.

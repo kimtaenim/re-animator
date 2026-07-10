@@ -77,29 +77,48 @@ async function ensureFont(GlobalFonts) {
   }
 }
 
-// 텍스트 폭에 맞춰 최대 2줄(넘치면 …)로 균형 줄바꿈.
-function wrap(ctx, text, maxW, maxLines = 2) {
-  const words = text.replace(/\s+/g, " ").trim().split(" ");
-  const lines = [];
-  let cur = "";
-  for (const w of words) {
-    const t = cur ? cur + " " + w : w;
-    if (ctx.measureText(t).width <= maxW || !cur) cur = t;
-    else {
-      lines.push(cur);
-      cur = w;
-      if (lines.length === maxLines - 1) break;
+// 직접 넣은 줄바꿈(\n)은 하드 브레이크로 존중하고, 각 줄은 폭에 맞춰 다시 감싼다.
+// maxLines 초과 시 마지막 줄에 …. (자막=대사+내레이션, 사용자가 칸에서 Enter 로 줄 나눔)
+function wrap(ctx, text, maxW, maxLines = 4) {
+  const hard = String(text || "").replace(/\r/g, "").split("\n");
+  const out = [];
+  let truncated = false;
+  for (const seg of hard) {
+    if (out.length >= maxLines) {
+      truncated = true;
+      break;
     }
+    const words = seg.replace(/[ \t]+/g, " ").trim().split(" ").filter(Boolean);
+    if (!words.length) {
+      out.push(""); // 빈 줄 유지
+      continue;
+    }
+    let cur = "";
+    for (const w of words) {
+      const t = cur ? cur + " " + w : w;
+      if (ctx.measureText(t).width <= maxW || !cur) cur = t;
+      else {
+        out.push(cur);
+        cur = w;
+        if (out.length >= maxLines) {
+          truncated = true;
+          break;
+        }
+      }
+    }
+    if (out.length >= maxLines) {
+      if (cur) truncated = true;
+      break;
+    }
+    if (cur) out.push(cur);
   }
-  if (cur) lines.push(cur);
-  // 마지막 줄이 넘치면 잘라서 …
-  if (lines.length >= maxLines) {
-    let last = lines[maxLines - 1] || "";
+  while (out.length && out[out.length - 1] === "") out.pop(); // 끝 빈 줄 정리
+  if (truncated && out.length) {
+    let last = out[out.length - 1];
     while (last && ctx.measureText(last + "…").width > maxW) last = last.slice(0, -1);
-    lines[maxLines - 1] = (last || "").trimEnd() + "…";
-    lines.length = maxLines;
+    out[out.length - 1] = last.trimEnd() + "…";
   }
-  return lines;
+  return out.length ? out : [""];
 }
 
 // text → 자막 PNG(frameW × bandH). 실패 시 null(자막 없이 진행).
@@ -119,11 +138,11 @@ export async function renderSubtitle(text, { frameW, bandH }) {
     let fontPx = Math.round(bandH * FONT_FRAC);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    // 폰트 크기 낮춰가며 2줄 안에 맞춤.
+    // 폰트 크기 낮춰가며 밴드 안에 맞춤(직접 줄바꿈 존중, 최대 4줄).
     let lines;
     for (; fontPx >= 12; fontPx -= 2) {
       ctx.font = `700 ${fontPx}px ${FAMILY}, sans-serif`;
-      lines = wrap(ctx, t, maxW, 2);
+      lines = wrap(ctx, t, maxW, 4);
       const lineH = fontPx * 1.25;
       if (lines.length * lineH <= bandH - pad) break;
     }

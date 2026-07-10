@@ -979,7 +979,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     if (cut?.bubbles?.length) for (const b of cut.bubbles) { const t = (b.text || "").trim(); if (t) parts.push(t); }
     else if (cut?.dialogue?.trim()) parts.push(cut.dialogue.trim());
     if (cut?.narration?.trim()) parts.push(cut.narration.trim());
-    return parts.join("  ").trim();
+    return parts.join("\n").trim(); // 말풍선·내레이션은 각각 줄바꿈. 칸 안 Enter 줄바꿈도 유지.
   }
   // 씬 미리보기 열면 그 씬 더빙 오디오 자동 재생, 닫으면 멈춤.
   useEffect(() => {
