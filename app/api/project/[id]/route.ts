@@ -17,6 +17,7 @@ export async function PATCH(
         aspectRatio?: string;
         regenMode?: string;
         narratorVoice?: { provider?: string; id?: string; name?: string } | null;
+        dubSpeed?: number;
       }
   );
   const project = await getProject(id);
@@ -46,6 +47,10 @@ export async function PATCH(
             name: String(nv.name || nv.id).slice(0, 60),
           }
         : undefined; // null → 해제
+    changed = true;
+  }
+  if (typeof body.dubSpeed === "number" && body.dubSpeed > 0) {
+    project.dubSpeed = Math.max(0.5, Math.min(2, body.dubSpeed));
     changed = true;
   }
   if (changed) await saveProject(project);

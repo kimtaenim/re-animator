@@ -778,6 +778,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }).catch(() => {});
   }
 
+  // 더빙 말 속도(프로젝트 레벨) — 1=기본, 1.2=조금 빠르게. 저장 후 다음 더빙부터 적용.
+  async function setDubSpeed(v: number) {
+    setProject((prev) => ({ ...prev, dubSpeed: v }));
+    await fetch(`/api/project/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dubSpeed: v }),
+    }).catch(() => {});
+  }
+
   // 나레이터 목소리(프로젝트 레벨) — 카탈로그에서 고른 값 저장. null=해제.
   async function setNarratorVoice(v: { provider: string; id: string; name: string } | null) {
     setProject((prev) => ({ ...prev, narratorVoice: v ?? undefined }));
@@ -1942,6 +1952,23 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             <span className="text-sm font-semibold text-[var(--accent)]">🎙 더빙</span>
             <span className="text-xs text-[var(--muted)]">
               대사=화자 목소리 · 내레이션=나레이터 · 효과음=ElevenLabs · 동영상 생성 중에도 가능
+            </span>
+            <span className="flex items-center gap-1 text-xs text-[var(--muted)]" title="더빙 말 속도">
+              속도
+              {[1, 1.2].map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setDubSpeed(v)}
+                  className={`rounded border px-1.5 py-0.5 text-[11px] ${
+                    (project.dubSpeed ?? 1) === v
+                      ? "border-[var(--accent)] font-medium text-[var(--accent)]"
+                      : "border-[var(--border)] hover:bg-[var(--panel-2)]"
+                  }`}
+                >
+                  {v}배
+                </button>
+              ))}
             </span>
             {dubbing && (
               <span className="flex items-center gap-1 text-xs text-[var(--accent)]">

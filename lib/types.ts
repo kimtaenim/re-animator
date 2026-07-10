@@ -160,6 +160,7 @@ export interface Project {
   cast?: Character[]; // M2 캐스팅 결과(등장인물). 확정 전엔 미정.
   composedUrl?: string; // 5단계 합성(이어붙인) 최종 영상 Blob URL
   narratorVoice?: { provider: string; id: string; name: string }; // 나레이션 더빙 목소리(카탈로그에서 선택)
+  dubSpeed?: number; // 더빙 말 속도 배수(1=기본, 1.2=조금 빠르게). Typecast tempo / ElevenLabs speed.
 
   steps: Record<StepKind, StepState>;
 

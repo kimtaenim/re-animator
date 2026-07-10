@@ -1057,6 +1057,7 @@ export async function runDub(projectId, payload) {
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
   const cast = p.cast ?? [];
   const narrator = p.narratorVoice || null;
+  const speed = Math.max(0.5, Math.min(2, Number(p.dubSpeed) || 1)); // 말 속도 배수
   const only =
     Array.isArray(payload?.sceneIds) && payload.sceneIds.length ? new Set(payload.sceneIds) : null;
   const scenes = (p.scenes ?? [])
@@ -1120,7 +1121,7 @@ export async function runDub(projectId, payload) {
             skipped++;
             return; // 목소리 미배정 → 스킵
           } else {
-            audio = await synthesize(u.voice.provider, u.voice.id, u.text);
+            audio = await synthesize(u.voice.provider, u.voice.id, u.text, speed);
           }
           const { buf, ext, contentType } = audio;
           const { url } = await put(
