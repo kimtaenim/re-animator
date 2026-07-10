@@ -61,10 +61,10 @@ async function runJob(job) {
   return count;
 }
 
-async function tick() {
+async function tick(types) {
   let job = null;
   let type = null;
-  for (const t of TYPES) {
+  for (const t of types) {
     try {
       job = await popJob(t);
     } catch (e) {
@@ -88,13 +88,21 @@ async function tick() {
     const msg = String(e?.message ?? e);
     console.error(`[worker] ${type} 실패 job=${job.id}:`, msg);
     await updateJob(job.id, { status: "error", error: msg });
-    await failStep(job.projectId, msg, JOB_STEP[type] ?? "source");
+    // dub 은 단계 상태를 안 씀(비디오와 병렬) → scene 단계 건드리지 않는다.
+    if (type !== "dub") await failStep(job.projectId, msg, JOB_STEP[type] ?? "source");
   }
 }
 
-console.log("[worker] BUILD = m6-dub-sfx-v5 (별개 자막=별개 박스 세로 스택)");
-console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
-for (;;) {
-  await tick();
-  await new Promise((r) => setTimeout(r, POLL_MS));
+// ★ 더빙(dub)은 가벼운 네트워크 작업이라 무거운 메인 큐(분할·추출·영상·합성)와 '병렬'로 돈다.
+//   → 동영상 생성 중에도 더빙이 동시에 처리된다. 저장은 오디오 필드만 병합(runDub)해 충돌 방지.
+const MAIN_TYPES = TYPES.filter((t) => t !== "dub");
+async function loop(types) {
+  for (;;) {
+    await tick(types);
+    await new Promise((r) => setTimeout(r, POLL_MS));
+  }
 }
+
+console.log("[worker] BUILD = m6-dub-parallel-v6 (더빙 큐 병렬 — 동영상 중에도 더빙)");
+console.log("[worker] 시작 — 메인 큐 + 더빙 큐(병렬) 폴링 중…");
+await Promise.all([loop(MAIN_TYPES), loop(["dub"])]);

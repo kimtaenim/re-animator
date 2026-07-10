@@ -1048,11 +1048,9 @@ export async function runVideo(projectId, payload) {
 //    화자=캐릭터면 그 캐릭터 목소리, 화자 없음(내레이션)이면 프로젝트 나레이터 목소리.
 //    payload.sceneIds 있으면 그 컷만. scene 단계로 진행 표시.
 export async function runDub(projectId, payload) {
-  await resetProgress(projectId);
-  const log = async (m) => {
-    console.error("[dub]", m);
-    await logProgress(projectId, m);
-  };
+  // ★비디오 잡과 '병렬'로 돌 수 있으므로 공유 진행로그(resetProgress/logProgress)·단계 상태를
+  //   건드리지 않는다(그러면 동영상 진행 표시가 깨짐). 진행은 잡 상태로 앱이 추적, 상세는 콘솔.
+  const log = async (m) => console.error("[dub]", m);
   const p = await getProject(projectId);
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
   const cast = p.cast ?? [];
@@ -1146,11 +1144,24 @@ export async function runDub(projectId, payload) {
     }
   }
 
-  // 저장 — 최신 프로젝트에 이번에 만진 씬만 병합(오디오 URL 반영).
+  // 저장 — ★필드 단위 병합★. 최신 프로젝트(비디오 잡이 동시에 videoUrl 을 썼을 수 있음)에
+  // 오디오 URL '만' 얹는다(씬 통째 교체 금지 → 병렬 비디오 결과를 안 지움). 단계 상태도 안 건드림.
   const p2 = (await getProject(projectId)) ?? p;
-  const map = new Map(scenes.map((s) => [s.id, s]));
-  p2.scenes = (p2.scenes ?? []).map((s) => map.get(s.id) ?? s);
-  p2.steps.scene = { ...p2.steps.scene, kind: "scene", status: "review", error: undefined, updatedAt: Date.now() };
+  const touched = new Map(scenes.map((s) => [s.id, s.cut]));
+  p2.scenes = (p2.scenes ?? []).map((fresh) => {
+    const myCut = touched.get(fresh.id);
+    if (!myCut || !fresh.cut) return fresh;
+    const cut = { ...fresh.cut };
+    if (Array.isArray(myCut.bubbles) && Array.isArray(cut.bubbles)) {
+      cut.bubbles = cut.bubbles.map((b, i) => {
+        const mb = myCut.bubbles[i];
+        return mb && mb.audioUrl ? { ...b, audioUrl: mb.audioUrl } : b;
+      });
+    }
+    if (myCut.narrationAudioUrl) cut.narrationAudioUrl = myCut.narrationAudioUrl;
+    if (myCut.sfxAudioUrl) cut.sfxAudioUrl = myCut.sfxAudioUrl;
+    return { ...fresh, cut };
+  });
   await saveProject(p2);
   try {
     await recordCost({ projectId, vendor: "tts", model: "dub", costUsd: 0, meta: { kind: "dub", ok, skipped } });

@@ -919,9 +919,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }
 
   // 더빙(TTS) 잡 적재 — 대사(화자 목소리)·내레이션(나레이터). sceneIds 없으면 전체.
-  // scene 단계를 running 으로 → scenePolling 이 오디오 URL 반영을 폴링한다.
+  // ★비디오(scene 단계)와 독립: 잡 상태를 따로 폴링해 동영상 생성 중에도 더빙을 걸 수 있다.
+  const [dubbing, setDubbing] = useState(false); // 더빙 잡 진행 중(비디오와 무관)
   async function runDubJob(sceneIds?: string[]) {
     setError("");
+    if (dubbing) return;
     try {
       const r = await fetch("/api/dub", {
         method: "POST",
@@ -930,13 +932,36 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "더빙 실패");
-      setProject((prev) => ({
-        ...prev,
-        steps: { ...prev.steps, scene: { ...prev.steps.scene, status: "running" } },
-      }));
+      setDubbing(true);
+      pollDubJob(d.jobId as string);
     } catch (e) {
       setError(e instanceof Error ? e.message : "더빙 실패");
     }
+  }
+  // 더빙 잡 상태 폴링 → 끝나면 씬(오디오 URL) 새로고침. 비디오 폴링과 별개.
+  function pollDubJob(jobId: string) {
+    let tries = 0;
+    const iv = setInterval(async () => {
+      tries++;
+      try {
+        const r = await fetch(`/api/job?id=${jobId}`, { cache: "no-store" });
+        const d = await r.json();
+        if (d.ok && (d.status === "done" || d.status === "error")) {
+          clearInterval(iv);
+          setDubbing(false);
+          if (d.status === "error") setError(`더빙 실패: ${d.error ?? ""}`);
+          try {
+            const pr = await fetch(`/api/project/${project.id}`, { cache: "no-store" });
+            const pj = await pr.json();
+            if (pj.ok) setProject((prev) => ({ ...prev, scenes: pj.project.scenes }));
+          } catch {}
+        }
+      } catch {}
+      if (tries > 260) {
+        clearInterval(iv);
+        setDubbing(false);
+      }
+    }, 3000);
   }
 
   // 오디오 재생(더빙 미리듣기) — 한 번에 하나만.
@@ -1791,16 +1816,22 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             </button>
           </div>
 
-          {/* 더빙(음성 생성) — 동영상과 별개. 눈에 띄게 전용 줄로. */}
+          {/* 더빙(음성 생성) — 동영상과 별개(동영상 생성 중에도 가능). 눈에 띄게 전용 줄로. */}
           <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--panel)] p-2">
             <span className="text-sm font-semibold text-[var(--accent)]">🎙 더빙</span>
             <span className="text-xs text-[var(--muted)]">
-              대사=화자 목소리 · 내레이션=나레이터 · 효과음=ElevenLabs
+              대사=화자 목소리 · 내레이션=나레이터 · 효과음=ElevenLabs · 동영상 생성 중에도 가능
             </span>
+            {dubbing && (
+              <span className="flex items-center gap-1 text-xs text-[var(--accent)]">
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+                더빙 중…
+              </span>
+            )}
             {selForVideo.size > 0 && (
               <button
                 onClick={() => runDubJob([...selForVideo])}
-                disabled={busy || sceneRunning}
+                disabled={busy || dubbing}
                 title="선택 컷의 대사·내레이션 음성 생성"
                 className="ml-auto rounded-md border border-[var(--accent)] px-3 py-2 text-sm text-[var(--accent)] disabled:opacity-50"
               >
@@ -1809,11 +1840,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             )}
             <button
               onClick={() => runDubJob()}
-              disabled={busy || sceneRunning}
+              disabled={busy || dubbing}
               title="모든 컷의 대사(화자 목소리)·내레이션(나레이터)·효과음 음성 생성"
               className={`${selForVideo.size > 0 ? "" : "ml-auto "}rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50`}
             >
-              🎙 전체 더빙 생성
+              {dubbing ? "더빙 중…" : "🎙 전체 더빙 생성"}
             </button>
           </div>
 
@@ -1984,7 +2015,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         <button
                           type="button"
                           onClick={() => runDubJob([s.id])}
-                          disabled={busy || sceneRunning}
+                          disabled={busy || dubbing}
                           title="이 컷만 더빙(대사·내레이션·효과음) 다시 생성 — 하나만 고쳤을 때"
                           className="rounded border border-[var(--accent)] px-2 py-0.5 text-[var(--accent)] hover:bg-[var(--panel-2)] disabled:opacity-40"
                         >
