@@ -103,6 +103,6 @@ async function loop(types) {
   }
 }
 
-console.log("[worker] BUILD = m6-dub-fix-v9 (입움직임=화자지정 대사만 + 효과음 재생 제거)");
+console.log("[worker] BUILD = m6-emphasis-v10 (강조 자막 [[..]] 이식)");
 console.log("[worker] 시작 — 메인 큐 + 더빙 큐(병렬) 폴링 중…");
 await Promise.all([loop(MAIN_TYPES), loop(["dub"])]);

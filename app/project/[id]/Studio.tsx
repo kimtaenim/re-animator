@@ -10,6 +10,7 @@ import {
   STEP_ORDER,
 } from "@/lib/types";
 import { blankCut } from "@/lib/ontology";
+import { splitRuns } from "@/lib/emphasis";
 import BoundaryEditor, { type SavedRegion } from "./BoundaryEditor";
 import CastReview from "./CastReview";
 
@@ -678,13 +679,18 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
             </div>
           ))}
-          <button
-            type="button"
-            onClick={() => addBubble(s.id)}
-            className="self-start rounded border border-dashed border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
-          >
-            + 대사 추가
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => addBubble(s.id)}
+              className="rounded border border-dashed border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            >
+              + 대사 추가
+            </button>
+            <span className="text-[10px] text-[var(--muted)] opacity-70">
+              강조: <code className="text-[#c99a00]">[[말]]</code>
+            </span>
+          </div>
         </div>
       );
     }
@@ -2350,9 +2356,17 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             : "bottom-[12%]"
                       }`}
                     >
-                      {/* 한 번에 한 박스만(순차). 여러 개면 subIdx 로 돌아가며 표시. */}
+                      {/* 한 번에 한 박스만(순차). [[강조]]는 크게·노랑. */}
                       <span className="max-w-[90%] whitespace-pre-wrap rounded bg-black/90 px-3 py-1 text-center text-sm font-semibold text-white">
-                        {units[Math.min(subIdx, units.length - 1)]}
+                        {splitRuns(units[Math.min(subIdx, units.length - 1)]).map((r, ri) =>
+                          r.em ? (
+                            <span key={ri} className="text-[1.3em] font-extrabold text-[#ffd23f]">
+                              {r.t}
+                            </span>
+                          ) : (
+                            <span key={ri}>{r.t}</span>
+                          )
+                        )}
                       </span>
                     </div>
                   )}
