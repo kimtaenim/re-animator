@@ -1978,14 +1978,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           </button>
                         ))}
                       </div>
-                      {/* 대사 직접 편집 — 3단계와 같은 공용 편집기(말풍선별/한 줄). 항상 싱크. */}
-                      {dialogueEditor(s)}
-                      <input
-                        value={s.cut?.narration ?? ""}
-                        onChange={(e) => updateCut(s.id, { narration: e.target.value })}
-                        placeholder="나레이션/자막 (선택)"
-                        className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5 text-[var(--muted)]"
-                      />
+                      {/* 프롬프트(컷 설명) — 3단계와 같은 순서(프롬프트 위, 대사 아래)로 통일. */}
                       {s.cut?.description?.trim() && (
                         <p
                           className="truncate text-[10px] text-[var(--muted)] opacity-70"
@@ -1994,6 +1987,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           컷: {s.cut.description.trim()}
                         </p>
                       )}
+                      {/* 대사 직접 편집 — 3단계와 같은 공용 편집기(말풍선별/한 줄). 항상 싱크. */}
+                      {dialogueEditor(s)}
+                      <input
+                        value={s.cut?.narration ?? ""}
+                        onChange={(e) => updateCut(s.id, { narration: e.target.value })}
+                        placeholder="나레이션/자막 (선택)"
+                        className="w-full rounded border border-dashed border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5 text-[var(--muted)]"
+                      />
                       {/* 카메라 워크 → 모션 프롬프트 채움. 영상 프롬프트 = 모션(+가이드), 정지컷 내용은 이미지가 담당. */}
                       <div className="flex flex-wrap gap-1">
                         {CAMERA_MOVES.map(([id, label, mprompt]) => (

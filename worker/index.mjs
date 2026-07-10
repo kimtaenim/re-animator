@@ -92,7 +92,7 @@ async function tick() {
   }
 }
 
-console.log("[worker] BUILD = m6-dub-sfx-v2 (더빙 + 효과음 ElevenLabs SFX)");
+console.log("[worker] BUILD = m6-dub-sfx-v3 (더빙·SFX + 그록 클립 오디오 제거)");
 console.log("[worker] 시작 — jobq:split / resplit / extract / cast / regen 폴링 중…");
 for (;;) {
   await tick();

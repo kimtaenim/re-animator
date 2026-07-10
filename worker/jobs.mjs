@@ -4,6 +4,10 @@
 // ============================================================================
 
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { put } from "@vercel/blob";
 import {
   getProject,
@@ -195,6 +199,43 @@ async function download(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`다운로드 실패 ${r.status} ${String(url).slice(0, 80)}`);
   return Buffer.from(await r.arrayBuffer());
+}
+
+// ffmpeg 경로(지연 확정) — ffmpeg-static 있으면 그걸, 없으면 PATH. env override 우선.
+let _ffPath = null;
+async function ffmpegPath() {
+  if (_ffPath !== null) return _ffPath;
+  try {
+    _ffPath = process.env.FFMPEG_PATH || (await import("ffmpeg-static")).default || "ffmpeg";
+  } catch {
+    _ffPath = process.env.FFMPEG_PATH || "ffmpeg";
+  }
+  return _ffPath;
+}
+
+// mp4 버퍼에서 오디오 트랙 제거(그록 I2V가 자동으로 넣는 소리 삭제). 실패하면 null → 원본 사용.
+// 재인코딩 없이 -c copy -an 이라 빠르다.
+async function stripAudio(buf) {
+  let dir;
+  try {
+    const ff = await ffmpegPath();
+    dir = await mkdtemp(join(tmpdir(), "vstrip-"));
+    const inp = join(dir, "in.mp4");
+    const out = join(dir, "out.mp4");
+    await writeFile(inp, buf);
+    await new Promise((res, rej) => {
+      const pr = spawn(ff, ["-y", "-i", inp, "-c", "copy", "-an", "-movflags", "+faststart", out]);
+      let err = "";
+      pr.stderr.on("data", (d) => (err += d));
+      pr.on("error", rej);
+      pr.on("close", (c) => (c === 0 ? res() : rej(new Error(`ffmpeg ${c}: ${err.slice(-200)}`))));
+    });
+    return await readFile(out);
+  } catch {
+    return null;
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 function sortedFiles(p) {
@@ -966,7 +1007,8 @@ export async function runVideo(projectId, payload) {
             { imageUrl: s.generatedImage, prompt: buildVideoPrompt(s.cut), duration: grokDur },
             () => log(`컷 ${s.order + 1} 생성 중…(${grokDur}s)`)
           );
-          const buf = await download(videoUrl);
+          const raw = await download(videoUrl);
+          const buf = (await stripAudio(raw)) ?? raw; // 그록 자동 오디오 제거(실패 시 원본)
           const { url } = await put(
             `project/${projectId}/vid-${s.order}-${Date.now()}.mp4`,
             buf,
