@@ -190,13 +190,16 @@ export async function runCompose(projectId) {
           units.push({ ap, dur: ad, subText: au.subText });
         } catch {}
       }
-      const cy = await subtitleCenterY(s, W, H, projectId);
+      const subUnits = subtitleUnits(s.cut);
+      // 자막(대사/내레이션) 있는 씬만 얼굴검출(gpt-4o) — 없으면 건너뛰어 시간·비용 절약.
+      const willHaveCaption = units.some((u) => u.subText) || subUnits.length > 0;
+      const cy = willHaveCaption ? await subtitleCenterY(s, W, H, projectId) : Math.round(H * 0.82);
       sceneData.push({
         raw,
         vd,
         units,
         cy,
-        subUnits: subtitleUnits(s.cut), // 더빙 없을 때 자막(오디오 없이 영상 길이에 비례)
+        subUnits, // 더빙 없을 때 자막(오디오 없이 영상 길이에 비례)
         fadeIn: FADES_IN.has(scenes[i - 1]?.cut?.transition) || (i === 0 && s.cut?.transition === "fadein"),
         fadeOut: FADES_OUT.has(s.cut?.transition),
       });
@@ -286,8 +289,8 @@ export async function runCompose(projectId) {
       args.push(
         "-filter_complex", vfilter, "-map", `[${prev}]`, "-an",
         "-t", lenI.toFixed(2), "-r", String(FPS),
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "21",
-        "-movflags", "+faststart", out
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "superfast", "-crf", "25",
+        "-threads", "0", "-movflags", "+faststart", out
       );
       await log(`씬 ${i + 1}/${sceneData.length} 인코딩(자막 ${local.length})…`);
       await run(FFMPEG, args);
