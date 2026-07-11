@@ -276,7 +276,9 @@ export async function runCompose(projectId) {
       vfilter += `[bg]`;
       let prev = "bg";
       local.forEach((lc, k) => {
-        vfilter += `;[${prev}][${1 + k}:v]overlay=0:0:enable='between(t,${lc.ls.toFixed(3)},${lc.le.toFixed(3)})'[cv${k}]`;
+        // ★shortest=1 필수 — 자막 PNG는 -loop 1(무한)이라, 이게 없으면 영상이 끝나도 오버레이가
+        //   안 끝나 ffmpeg 가 매달린다(먹통). 영상(유한)이 끝나면 오버레이도 끝낸다.
+        vfilter += `;[${prev}][${1 + k}:v]overlay=0:0:shortest=1:enable='between(t,${lc.ls.toFixed(3)},${lc.le.toFixed(3)})'[cv${k}]`;
         prev = `cv${k}`;
       });
       const args = ["-y", "-i", sd.raw];
