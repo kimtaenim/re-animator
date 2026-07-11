@@ -186,12 +186,15 @@ function mergeBubbleSpeakers(newBubbles, oldBubbles, legacySpeakerId) {
   const norm = (t) => String(t || "").replace(/\s+/g, "").trim();
   for (const nb of bubbles) {
     const match = old.find(
-      (ob) => (ob.speakerId || ob.subtitleX != null || ob.subtitleY != null) && norm(ob.text) === norm(nb.text)
+      (ob) =>
+        (ob.speakerId || ob.subtitleX != null || ob.subtitleY != null || ob.emotion) &&
+        norm(ob.text) === norm(nb.text)
     );
     if (match) {
       if (match.speakerId) nb.speakerId = match.speakerId;
       if (typeof match.subtitleX === "number") nb.subtitleX = match.subtitleX;
       if (typeof match.subtitleY === "number") nb.subtitleY = match.subtitleY;
+      if (match.emotion) nb.emotion = match.emotion; // 감정 연기도 화자처럼 보존
     }
   }
   if (!old.some((o) => o.speakerId) && legacySpeakerId && bubbles.length === 1 && !bubbles[0].speakerId) {
@@ -1128,7 +1131,7 @@ export async function runDub(projectId, payload) {
       if (bubs[i].speakerId === "__sfx__") {
         units.push({ s, kind: "sfx", idx: i, text, voice: "__sfx__" }); // 효과음 줄 → 소리 생성
       } else {
-        units.push({ s, kind: "bubble", idx: i, text, voice: resolve(bubs[i].speakerId) });
+        units.push({ s, kind: "bubble", idx: i, text, voice: resolve(bubs[i].speakerId), emotion: bubs[i].emotion });
       }
     }
     const nar = (cut.narration || "").trim();
@@ -1155,7 +1158,7 @@ export async function runDub(projectId, payload) {
             skipped++;
             return; // 목소리 미배정 → 스킵
           } else {
-            audio = await synthesize(u.voice.provider, u.voice.id, u.text, speed);
+            audio = await synthesize(u.voice.provider, u.voice.id, u.text, speed, u.emotion);
           }
           const { buf, ext, contentType } = audio;
           const { url } = await put(

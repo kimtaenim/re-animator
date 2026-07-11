@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProject, saveProject } from "@/lib/projectStore";
 import { CUT_TYPES, TEXT_KINDS, blankCut } from "@/lib/ontology";
-import type { CutOntology } from "@/lib/types";
+import { EMOTIONS, type CutOntology } from "@/lib/types";
 
 export const runtime = "nodejs";
 
 const TYPE_IDS = new Set(CUT_TYPES.map((t) => t.id));
 const TK_IDS = new Set(TEXT_KINDS.map((t) => t.id));
+const EMOTION_IDS = new Set(EMOTIONS.map((e) => e.id));
 
 function cleanCut(raw: unknown): CutOntology {
   const c = blankCut();
@@ -52,6 +53,8 @@ function cleanCut(raw: unknown): CutOntology {
             typeof b.subtitleY === "number" && isFinite(b.subtitleY)
               ? Math.max(0.05, Math.min(0.95, b.subtitleY))
               : undefined,
+          // 감정 연기 id — EMOTIONS 화이트리스트만(ElevenLabs v3 오디오 태그로 변환).
+          emotion: EMOTION_IDS.has(String(b.emotion)) ? String(b.emotion) : undefined,
         };
       })
       .slice(0, 12);

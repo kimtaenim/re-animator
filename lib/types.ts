@@ -90,7 +90,20 @@ export interface DialogueBubble {
   audioUrl?: string; // 더빙 오디오 Blob URL (TTS). 화자 목소리로 생성.
   subtitleX?: number; // 이 줄 자막 가로 중심(0~1). 없으면 컷 기본(cut.subtitleX)
   subtitleY?: number; // 이 줄 자막 세로 중심(0~1). 화자가 번갈아 말할 때 줄마다 위치 지정
+  emotion?: string; // 감정 연기 id(EMOTIONS) — ElevenLabs v3 오디오 태그로 변환돼 과장 연기
 }
+
+// 감정 연기 프리셋 — id 는 bubble.emotion 에 저장, tag 는 ElevenLabs v3 오디오 태그(워커 tts.mjs 와 동기).
+export const EMOTIONS: { id: string; label: string; tag: string }[] = [
+  { id: "shout", label: "📢 외침", tag: "shouting" },
+  { id: "angry", label: "😡 분노", tag: "angry" },
+  { id: "cry", label: "😭 울음", tag: "crying" },
+  { id: "whisper", label: "🤫 속삭임", tag: "whispering" },
+  { id: "laugh", label: "😆 웃음", tag: "laughing" },
+  { id: "shock", label: "😱 경악", tag: "shocked" },
+  { id: "excited", label: "🔥 신남", tag: "excited" },
+  { id: "sigh", label: "😮‍💨 한숨", tag: "sighs" },
+];
 
 export interface CutOntology {
   type: CutType | null; // null = 미분류(사람이 채움)

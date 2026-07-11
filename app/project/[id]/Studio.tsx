@@ -8,6 +8,7 @@ import {
   type Character,
   type CutOntology,
   STEP_ORDER,
+  EMOTIONS,
 } from "@/lib/types";
 import { blankCut } from "@/lib/ontology";
 import { splitRuns, wordTokens, toggleWordEmphasis } from "@/lib/emphasis";
@@ -699,6 +700,28 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   ↓
                 </button>
               </div>
+              {/* 감정 연기 — ElevenLabs v3 오디오 태그로 과장 연기(자막엔 안 나감). */}
+              {b.speakerId !== SFX_SPEAKER && (
+                <select
+                  value={b.emotion ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value || undefined;
+                    const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, emotion: v } : x));
+                    updateCut(s.id, { bubbles: nb });
+                  }}
+                  className={`shrink-0 max-w-[64px] rounded border bg-[var(--panel-2)] px-0.5 py-1 text-[10px] ${
+                    b.emotion ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)]"
+                  }`}
+                  title="감정 연기 — 일레븐랩스 목소리로 더빙할 때 과장 연기(자막에는 안 나감)"
+                >
+                  <option value="">🎭</option>
+                  {EMOTIONS.map((em) => (
+                    <option key={em.id} value={em.id}>
+                      {em.label}
+                    </option>
+                  ))}
+                </select>
+              )}
               {/* 이 줄 자막 위치(9곳) — 화자가 번갈아 말할 때 줄마다 지정. 다시 클릭=해제(컷 기본). */}
               {b.speakerId !== SFX_SPEAKER && (
                 <div
