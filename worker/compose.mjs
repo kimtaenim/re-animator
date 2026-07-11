@@ -10,7 +10,9 @@ import { getProject, saveProject, logProgress, resetProgress, recordCost } from 
 import { put } from "@vercel/blob";
 import { spawn } from "node:child_process";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
-import { createReadStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pickSubtitleBand } from "./subtitle-place.mjs";
@@ -72,9 +74,11 @@ function probeDuration(file) {
 }
 
 async function download(url, dest) {
-  const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  const r = await fetch(url, { signal: AbortSignal.timeout(120_000) });
   if (!r.ok) throw new Error(`다운로드 실패 ${r.status}`);
-  await writeFile(dest, Buffer.from(await r.arrayBuffer()));
+  // 스트리밍 저장 — 파일 전체를 메모리(Buffer)에 안 올린다(OOM 방지).
+  if (r.body) await pipeline(Readable.fromWeb(r.body), createWriteStream(dest));
+  else await writeFile(dest, Buffer.from(await r.arrayBuffer()));
 }
 async function download2(url) {
   try {
