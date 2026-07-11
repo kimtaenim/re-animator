@@ -119,7 +119,11 @@ export async function PUT(req: NextRequest) {
       id: old?.id ?? randomUUID(),
       order: i,
       sourceRegion: region,
-      cut,
+      // ★경계가 그대로인 컷은 서버 기존 cut 위에 G1 편집 필드만 덮어쓴다 — cleanCut 이
+      //   파싱하지 않는 필드(bubbles·더빙 audioUrl·narration·sfxAudioUrl·subtitleX/Y·
+      //   durationSec·transition·textBoxes)가 추출 이후 G1 재저장으로 사라지지 않게.
+      //   경계가 바뀐 컷은 내용이 어차피 낡았으므로 새로 시작(추출이 다시 OCR).
+      cut: old?.cut ? { ...old.cut, ...cut } : cut,
       originalImage: old?.originalImage,
       regenMode: old?.regenMode,
       generatedImage: old?.generatedImage,
