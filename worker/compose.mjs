@@ -90,10 +90,17 @@ const FADES_OUT = new Set(["fadeout", "black", "dissolve"]);
 const FADES_IN = new Set(["fadein", "black", "dissolve"]);
 
 // 이 컷의 '오디오 유닛'(재생 순서) — 말풍선(대사·내레이션·효과음) audioUrl + 그 자막 텍스트.
+// sx/sy = 이 줄의 자막 위치(0~1 중심). 화자가 번갈아 말하면 줄마다 다르게 지정됨.
 function audioUnits(cut) {
   const units = [];
   for (const b of cut?.bubbles ?? []) {
-    if (b.audioUrl) units.push({ audioUrl: b.audioUrl, subText: b.speakerId === "__sfx__" ? "" : (b.text || "").trim() });
+    if (b.audioUrl)
+      units.push({
+        audioUrl: b.audioUrl,
+        subText: b.speakerId === "__sfx__" ? "" : (b.text || "").trim(),
+        sx: b.subtitleX,
+        sy: b.subtitleY,
+      });
   }
   if (cut?.narrationAudioUrl && (cut?.narration || "").trim()) {
     units.push({ audioUrl: cut.narrationAudioUrl, subText: cut.narration.trim() });
@@ -101,22 +108,22 @@ function audioUnits(cut) {
   return units;
 }
 
-// 더빙 없는 컷의 자막 유닛(영상 길이에 비례 배치용).
+// 더빙 없는 컷의 자막 유닛(영상 길이에 비례 배치용) — { text, sx, sy }.
 function subtitleUnits(cut) {
   const units = [];
   if (cut?.bubbles?.length) {
     for (const b of cut.bubbles) {
       if (b.speakerId === "__sfx__") continue;
       const t = (b.text || "").trim();
-      if (t) units.push(t);
+      if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY });
     }
   } else if (cut?.dialogue?.trim()) {
-    units.push(cut.dialogue.trim());
+    units.push({ text: cut.dialogue.trim() });
   }
   if (cut?.narration?.trim()) {
     for (const seg of cut.narration.split(/\n\s*\n/)) {
       const t = seg.trim();
-      if (t) units.push(t);
+      if (t) units.push({ text: t });
     }
   }
   return units;
@@ -180,7 +187,7 @@ export async function runCompose(projectId) {
           aPaths.push(ap);
           const start = acc;
           acc += ad;
-          if (au.subText) caps.push({ text: au.subText, start, end: acc });
+          if (au.subText) caps.push({ text: au.subText, start, end: acc, sx: au.sx, sy: au.sy });
         } catch {}
       }
       let audioLen = acc;
@@ -205,12 +212,12 @@ export async function runCompose(projectId) {
       if (!aPaths.length) {
         const subs = subtitleUnits(s.cut);
         if (subs.length) {
-          const weights = subs.map((t) => Math.max(1, stripMarks(t).replace(/\s/g, "").length));
+          const weights = subs.map((u) => Math.max(1, stripMarks(u.text).replace(/\s/g, "").length));
           const wSum = weights.reduce((a, b) => a + b, 0) || 1;
           let a2 = 0;
-          subs.forEach((t, j) => {
+          subs.forEach((u, j) => {
             const d = Math.max(1.2, (vd * weights[j]) / wSum);
-            caps.push({ text: t, start: a2, end: a2 + d });
+            caps.push({ text: u.text, start: a2, end: a2 + d, sx: u.sx, sy: u.sy });
             a2 += d;
           });
         }
@@ -222,12 +229,16 @@ export async function runCompose(projectId) {
       const speed = vd > 0 && finalDur > vd ? finalDur / vd : 1; // 오디오/자막 길면 영상 슬로모션
 
       // 자막 캡션 PNG(캔버스 재사용). 위치는 자막 있을 때만 계산.
-      const cy = caps.length ? subtitleCenterY(s.cut, H) : Math.round(H * 0.72);
-      const cx = subtitleCenterX(s.cut, W);
+      // 위치 해석: 대사(말풍선)별 지정 > 컷 기본 > 디폴트. 화자가 번갈아 말하면 줄마다 다름.
+      const cyDef = subtitleCenterY(s.cut, H);
+      const cxDef = subtitleCenterX(s.cut, W);
+      const frac = (v) => (typeof v === "number" && isFinite(v) ? Math.max(0.05, Math.min(0.95, v)) : null);
       const capPaths = [];
       for (const c of caps) {
+        const ccy = frac(c.sy) != null ? Math.round(H * frac(c.sy)) : cyDef;
+        const ccx = frac(c.sx) != null ? Math.round(W * frac(c.sx)) : cxDef;
         // 박스 크기 PNG + 프레임 내 좌표 — 전체화면 PNG 대비 ffmpeg 피크 실측 ~100MB↓.
-        const box = await renderCaptionBox(c.text, { W, H, cy, cx });
+        const box = await renderCaptionBox(c.text, { W, H, cy: ccy, cx: ccx });
         if (box) {
           const cp = join(dir, `cap${i}_${capPaths.length}.png`);
           await writeFile(cp, box.buf);

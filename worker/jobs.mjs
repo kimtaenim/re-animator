@@ -178,15 +178,21 @@ function addGapTextRegions(scenes, profile, totalHeight, log) {
   return added;
 }
 
-// 재추출/분할/합병 시 풍선별 화자(speakerId) 보존 — 새 OCR 풍선을 옛 풍선과 글자로 매칭해
-// 화자를 옮긴다. 옛 풍선이 없고 컷 단위 레거시 화자만 있으면 풍선 1개일 때 그걸 물려준다.
+// 재추출/분할/합병 시 풍선별 화자(speakerId)·자막위치(subtitleX/Y) 보존 — 새 OCR 풍선을
+// 옛 풍선과 글자로 매칭해 옮긴다. 옛 풍선이 없고 컷 단위 레거시 화자만 있으면 풍선 1개일 때 물려준다.
 function mergeBubbleSpeakers(newBubbles, oldBubbles, legacySpeakerId) {
   const bubbles = (newBubbles || []).map((b) => ({ text: b.text, box: b.box }));
   const old = oldBubbles || [];
   const norm = (t) => String(t || "").replace(/\s+/g, "").trim();
   for (const nb of bubbles) {
-    const match = old.find((ob) => ob.speakerId && norm(ob.text) === norm(nb.text));
-    if (match) nb.speakerId = match.speakerId;
+    const match = old.find(
+      (ob) => (ob.speakerId || ob.subtitleX != null || ob.subtitleY != null) && norm(ob.text) === norm(nb.text)
+    );
+    if (match) {
+      if (match.speakerId) nb.speakerId = match.speakerId;
+      if (typeof match.subtitleX === "number") nb.subtitleX = match.subtitleX;
+      if (typeof match.subtitleY === "number") nb.subtitleY = match.subtitleY;
+    }
   }
   if (!old.some((o) => o.speakerId) && legacySpeakerId && bubbles.length === 1 && !bubbles[0].speakerId) {
     bubbles[0].speakerId = legacySpeakerId;

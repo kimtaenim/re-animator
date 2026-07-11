@@ -530,6 +530,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     updateCut(sceneId, { bubbles: nb });
   }
 
+  // 이 줄(말풍선)의 자막 위치 지정/해제 — 같은 칸 다시 클릭하면 해제(컷 기본으로 복귀).
+  function setBubblePos(sceneId: string, bi: number, fx: number | null, fy: number | null) {
+    const src = project.scenes.find((x) => x.id === sceneId);
+    const nb = (src?.cut?.bubbles ?? []).map((x, i) =>
+      i === bi ? { ...x, subtitleX: fx ?? undefined, subtitleY: fy ?? undefined } : x
+    );
+    updateCut(sceneId, { bubbles: nb });
+  }
+
   // 이 대사(말풍선)를 앞(위)/뒤(아래) 컷으로 옮기기 — 자동 부착이 틀렸을 때 수동 교정.
   function moveBubble(sceneId: string, bi: number, dir: "prev" | "next") {
     const target = adjacentScene(sceneId, dir);
@@ -688,6 +697,33 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   ↓
                 </button>
               </div>
+              {/* 이 줄 자막 위치(9곳) — 화자가 번갈아 말할 때 줄마다 지정. 다시 클릭=해제(컷 기본). */}
+              {b.speakerId !== SFX_SPEAKER && (
+                <div
+                  className="grid shrink-0 grid-cols-3 gap-px self-center rounded border border-[var(--border)] p-0.5"
+                  title="이 줄 자막 위치 — 9곳 중 선택, 다시 클릭하면 해제(컷 기본위치 사용)"
+                >
+                  {SUB_Y.map((fy) =>
+                    SUB_X.map((fx) => {
+                      const active =
+                        typeof b.subtitleX === "number" &&
+                        typeof b.subtitleY === "number" &&
+                        Math.abs(b.subtitleX - fx) < 0.03 &&
+                        Math.abs(b.subtitleY - fy) < 0.03;
+                      return (
+                        <button
+                          key={`${fx}-${fy}`}
+                          type="button"
+                          onClick={() => (active ? setBubblePos(s.id, bi, null, null) : setBubblePos(s.id, bi, fx, fy))}
+                          className={`h-2.5 w-2.5 rounded-[1px] ${
+                            active ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] hover:bg-[var(--border)]"
+                          }`}
+                        />
+                      );
+                    })
+                  )}
+                </div>
+              )}
               {b.audioUrl ? (
                 <button
                   type="button"
@@ -1103,16 +1139,17 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
 
   // 자막 '유닛' 배열 — 각 말풍선/내레이션 조각이 별개 박스(겹치지 않게). compose 와 동일 규칙.
   // ★효과음(화자=효과음) 줄은 자막에서 제외(소리일 뿐 캡션 아님).
-  function subtitleUnits(cut?: Project["scenes"][number]["cut"]): string[] {
-    const units: string[] = [];
+  // 자막 유닛 — { text, sx, sy }. sx/sy = 이 줄(말풍선)에 지정된 자막 위치(없으면 컷 기본).
+  function subtitleUnits(cut?: Project["scenes"][number]["cut"]): { text: string; sx?: number; sy?: number }[] {
+    const units: { text: string; sx?: number; sy?: number }[] = [];
     if (cut?.bubbles?.length)
       for (const b of cut.bubbles) {
         if (b.speakerId === SFX_SPEAKER) continue;
         const t = (b.text || "").trim();
-        if (t) units.push(t);
+        if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY });
       }
-    else if (cut?.dialogue?.trim()) units.push(cut.dialogue.trim());
-    if (cut?.narration?.trim()) for (const seg of cut.narration.split(/\n\s*\n/)) { const t = seg.trim(); if (t) units.push(t); }
+    else if (cut?.dialogue?.trim()) units.push({ text: cut.dialogue.trim() });
+    if (cut?.narration?.trim()) for (const seg of cut.narration.split(/\n\s*\n/)) { const t = seg.trim(); if (t) units.push({ text: t }); }
     return units;
   }
   // 자막 세로 중심 비율(0=위,1=아래) — compose 의 subtitleCenterY 와 동일 규칙(미리보기==결과 싱크).
@@ -2233,9 +2270,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       )}
                       {/* 대사·내레이션 통합 편집 — 각 줄에 화자(캐릭터/내레이션) 지정. 3단계와 싱크. */}
                       {dialogueEditor(s)}
-                      {/* 자막 위치 — 컷별 9분할(3×3). 인물 얼굴을 피해 빈 곳에 직접 배치. */}
-                      <div className="flex items-center gap-2 text-[10px]" title="자막 위치 — 얼굴을 피하도록 9곳 중 선택(좌상·중상·우상·좌중·중앙·우중·좌하·중하·우하)">
-                        <span className="text-[var(--muted)]">자막위치</span>
+                      {/* 자막 기본위치 — 컷 9분할(3×3). 줄별 지정이 없는 대사·내레이션에 적용. */}
+                      <div className="flex items-center gap-2 text-[10px]" title="자막 기본위치 — 줄별(대사 옆 미니 그리드) 지정이 없는 자막에 적용. 얼굴을 피해 9곳 중 선택">
+                        <span className="text-[var(--muted)]">자막 기본위치</span>
                         <div className="grid grid-cols-3 gap-px rounded border border-[var(--border)] p-0.5">
                           {SUB_Y.map((fy) =>
                             SUB_X.map((fx) => {
@@ -2431,14 +2468,18 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       이미지/영상 없음
                     </div>
                   )}
-                  {units.length > 0 && (
+                  {units.length > 0 && (() => {
+                    const u = units[Math.min(subIdx, units.length - 1)];
+                    const fx = typeof u.sx === "number" ? Math.max(0.05, Math.min(0.95, u.sx)) : subFracX(s.cut);
+                    const fy = typeof u.sy === "number" ? Math.max(0.05, Math.min(0.95, u.sy)) : subFracY(s.cut);
+                    return (
                     <div
                       className="pointer-events-none absolute flex -translate-x-1/2 -translate-y-1/2 justify-center"
-                      style={{ left: `${subFracX(s.cut) * 100}%`, top: `${subFracY(s.cut) * 100}%` }}
+                      style={{ left: `${fx * 100}%`, top: `${fy * 100}%` }}
                     >
-                      {/* 한 번에 한 박스만(순차). [[강조]]는 크게·노랑. */}
+                      {/* 한 번에 한 박스만(순차) — 위치는 그 줄 지정(없으면 컷 기본). [[강조]]는 크게·노랑. */}
                       <span className="max-w-[86vw] whitespace-pre-wrap rounded bg-black/60 px-3 py-1 text-center text-sm font-semibold text-white">
-                        {splitRuns(units[Math.min(subIdx, units.length - 1)]).map((r, ri) =>
+                        {splitRuns(u.text).map((r, ri) =>
                           r.em ? (
                             <span key={ri} className="text-[1.3em] font-extrabold text-[#ffd23f]">
                               {r.t}
@@ -2449,7 +2490,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         )}
                       </span>
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
                 <div className="flex items-center gap-2 text-sm text-white">
                   <span className="opacity-80">컷 {s.order + 1}</span>

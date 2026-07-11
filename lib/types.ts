@@ -88,6 +88,8 @@ export interface DialogueBubble {
   speakerId?: string | null; // 이 풍선을 말하는 캐릭터 id. null=나레이션/미상
   box?: TextBox; // 풍선 영역(0~1)
   audioUrl?: string; // 더빙 오디오 Blob URL (TTS). 화자 목소리로 생성.
+  subtitleX?: number; // 이 줄 자막 가로 중심(0~1). 없으면 컷 기본(cut.subtitleX)
+  subtitleY?: number; // 이 줄 자막 세로 중심(0~1). 화자가 번갈아 말할 때 줄마다 위치 지정
 }
 
 export interface CutOntology {

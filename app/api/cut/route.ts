@@ -43,6 +43,15 @@ function cleanCut(raw: unknown): CutOntology {
               }
             : undefined,
           audioUrl: typeof b.audioUrl === "string" ? b.audioUrl : undefined, // 더빙 오디오 보존
+          // 이 줄 자막 위치(0~1 중심) — 화자가 번갈아 말할 때 줄마다 지정. 없으면 컷 기본.
+          subtitleX:
+            typeof b.subtitleX === "number" && isFinite(b.subtitleX)
+              ? Math.max(0.05, Math.min(0.95, b.subtitleX))
+              : undefined,
+          subtitleY:
+            typeof b.subtitleY === "number" && isFinite(b.subtitleY)
+              ? Math.max(0.05, Math.min(0.95, b.subtitleY))
+              : undefined,
         };
       })
       .slice(0, 12);
