@@ -954,9 +954,12 @@ function estimateVideoSeconds(cut) {
 
 // 영상 모션 프롬프트 = 컷 모션(카메라 워크) + 가이드(스톱모션 느낌). aninews video_motion 계승.
 // 정지컷 내용은 이미지가 담고 있으니 프롬프트엔 '어떻게 움직일지'만 넣는다.
+// ★기본 톤(사용자 지정): 세련되고 빠른 호흡 — 밋밋한 정적 카메라 대신 과감한 영화적 에너지.
+//   단, 일관성 가드(스타일·인물 유지, 새 오브젝트·텍스트·변형 금지)는 그대로 지킨다.
 const MOTION_GUIDANCE =
-  "Keep motion subtle and minimal — small, gentle movements and a slow, steady camera; " +
-  "keep the subject, art style and colors consistent with the still image. No new objects, no text, no morphing.";
+  "Cinematic, stylish and fast-paced: confident dynamic camera energy with bold speed changes, " +
+  "like a slick action-movie or music-video shot — never static or sluggish. " +
+  "Keep the subject, art style and colors consistent with the still image. No new objects, no text, no morphing.";
 // 대사 있는 인물 컷: '말하는 것처럼' 입/얼굴 움직임(진짜 립싱크 아님 — Grok I2V 한계).
 const SPEAKING_GUIDANCE =
   "The character is talking: natural, subtle lip and mouth movement as if speaking, with a slight, " +

@@ -22,23 +22,17 @@ const STEP_LABEL: Record<StepKind, string> = {
   compose: "5. 합성",
 };
 
-// 카메라 워크 프리셋 — 고르면 그 컷 모션 프롬프트(영문)를 이 문구로 채운다(aninews 계승).
-// 모두 '카메라만 움직이고 인물·오브젝트는 거의 정지'를 명시.
+// 카메라 워크 프리셋 — 고르면 그 컷 모션 프롬프트(영문)를 이 문구로 채운다.
+// ★화려·과장 클리셰만(사용자 지정: 차분한 프리셋 제거). 속도 변화를 명시해야 모델이 따라온다.
 const CAMERA_MOVES: [string, string, string][] = [
-  ["zoom-in", "＋ 줌인", "Slow zoom in (push-in) toward the subject — camera only; the subject barely moves."],
-  ["zoom-out", "－ 줌아웃", "Slow zoom out (pull-back) revealing more of the scene — camera only; the subject barely moves."],
-  ["pan-h", "↔ 수평 팬", "Slow horizontal pan across the scene — camera only; the subject stays mostly still."],
-  ["pan-v", "↕ 수직 팬", "Slow vertical pan/tilt across the scene — camera only; the subject stays mostly still."],
-  ["orbit", "⟳ 오비트", "Smooth 120-degree orbit around the subject — camera moves while the subject stays still."],
-  ["dolly-zoom", "🎥 달리 줌", "Dolly zoom (vertigo effect): dolly in while zooming out so the subject stays the same size while the background perspective stretches. Camera only; subject still."],
-  ["static", "■ 고정", "Locked-off static camera, no camera movement — only very subtle ambient motion; the subject stays still."],
-  // ── 과장·화려 클리셰(영화적 카메라 워크) — 속도 변화를 명시해야 모델이 따라온다. ──
   ["crash-in", "⚡ 크래시 줌인", "Camera creeps forward slowly, then suddenly accelerates into a dramatic crash zoom slamming toward the subject — explosive speed ramp from very slow to very fast. Camera only; the subject barely moves."],
   ["crash-out", "💥 크래시 줌아웃", "Camera suddenly whips backward in a dramatic crash zoom out, rapidly pulling far away to reveal the whole scene in one explosive motion. Camera only; the subject barely moves."],
   ["speed-ramp", "🚀 스피드 램프", "Speed-ramped dolly-in: starts in dreamy slow motion, then bursts into a rapid accelerating rush toward the subject — cinematic action-movie energy. Camera only; the subject barely moves."],
-  ["vertigo", "🌀 현기증(강)", "Extreme dolly zoom vertigo effect: aggressive dolly-in while zooming out, the background warping and stretching dramatically around the subject who stays the same size. Camera only."],
+  ["vertigo", "🌀 현기증", "Extreme dolly zoom vertigo effect: aggressive dolly-in while zooming out, the background warping and stretching dramatically around the subject who stays the same size. Camera only."],
   ["whip-pan", "💨 휩 팬", "Fast whip pan with heavy motion blur streaking across the scene, aggressive and energetic. Camera only; the subject stays mostly still."],
-  ["orbit-fast", "⟲ 고속 오비트", "Fast dramatic 180-degree orbit whipping around the subject with slight motion blur, dynamic and showy. Camera moves; the subject stays still."],
+  ["orbit-180", "⟲ 오비트180(빠름)", "Fast dramatic 180-degree orbit whipping around the subject with slight motion blur, dynamic and showy. Camera moves; the subject stays still."],
+  ["orbit-120", "⟳ 오비트120(느림)", "Smooth elegant 120-degree orbit gliding around the subject, slow and cinematic like a luxury commercial. Camera moves; the subject stays still."],
+  ["orbit-spin", "🔄 오비트 무한", "Continuous spinning orbit circling around the subject without stopping, round and round in a stylish hypnotic loop. Camera moves; the subject stays still."],
   ["impact-shake", "📳 임팩트 쉐이크", "Sudden violent camera shake like a shockwave impact, then the camera quickly settles — punchy and dramatic. Camera only; the subject stays still."],
 ];
 
