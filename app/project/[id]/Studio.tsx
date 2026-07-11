@@ -32,6 +32,14 @@ const CAMERA_MOVES: [string, string, string][] = [
   ["orbit", "⟳ 오비트", "Smooth 120-degree orbit around the subject — camera moves while the subject stays still."],
   ["dolly-zoom", "🎥 달리 줌", "Dolly zoom (vertigo effect): dolly in while zooming out so the subject stays the same size while the background perspective stretches. Camera only; subject still."],
   ["static", "■ 고정", "Locked-off static camera, no camera movement — only very subtle ambient motion; the subject stays still."],
+  // ── 과장·화려 클리셰(영화적 카메라 워크) — 속도 변화를 명시해야 모델이 따라온다. ──
+  ["crash-in", "⚡ 크래시 줌인", "Camera creeps forward slowly, then suddenly accelerates into a dramatic crash zoom slamming toward the subject — explosive speed ramp from very slow to very fast. Camera only; the subject barely moves."],
+  ["crash-out", "💥 크래시 줌아웃", "Camera suddenly whips backward in a dramatic crash zoom out, rapidly pulling far away to reveal the whole scene in one explosive motion. Camera only; the subject barely moves."],
+  ["speed-ramp", "🚀 스피드 램프", "Speed-ramped dolly-in: starts in dreamy slow motion, then bursts into a rapid accelerating rush toward the subject — cinematic action-movie energy. Camera only; the subject barely moves."],
+  ["vertigo", "🌀 현기증(강)", "Extreme dolly zoom vertigo effect: aggressive dolly-in while zooming out, the background warping and stretching dramatically around the subject who stays the same size. Camera only."],
+  ["whip-pan", "💨 휩 팬", "Fast whip pan with heavy motion blur streaking across the scene, aggressive and energetic. Camera only; the subject stays mostly still."],
+  ["orbit-fast", "⟲ 고속 오비트", "Fast dramatic 180-degree orbit whipping around the subject with slight motion blur, dynamic and showy. Camera moves; the subject stays still."],
+  ["impact-shake", "📳 임팩트 쉐이크", "Sudden violent camera shake like a shockwave impact, then the camera quickly settles — punchy and dramatic. Camera only; the subject stays still."],
 ];
 
 // 컷 끝 전환(합성 시 적용). 값은 lib/types CutOntology.transition 과 /api/cut 화이트리스트와 일치.
