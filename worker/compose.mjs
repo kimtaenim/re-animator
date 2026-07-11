@@ -128,11 +128,19 @@ function subtitleUnits(cut) {
 //   이미지를 아예 안 건드려서(위치 고정) 안 죽는다 — 그 방식에 맞춘다. 얼굴회피 자동배치는
 //   생성 단계에서 미리 계산해 cut.subtitlePos 로 저장하는 게 맞다(메모리 안전한 지점).
 function subtitleCenterY(cut, H) {
-  const pos = cut?.subtitlePos;
+  const y = cut?.subtitleY; // 컷별 수동 미세조정(0~1 중심 비율) — 있으면 최우선
+  if (typeof y === "number" && isFinite(y)) return Math.round(H * Math.max(0.05, Math.min(0.95, y)));
+  const pos = cut?.subtitlePos; // 레거시 프리셋
   if (pos === "top") return Math.round(H * 0.15);
   if (pos === "middle") return Math.round(H * 0.5);
   if (pos === "bottom") return Math.round(H * 0.85);
   return Math.round(H * 0.72); // 기본: 하단 3/4(바닥엔 안 붙임) — aninews 검증 위치
+}
+// 자막 가로 중심 x — 컷별 9분할 수동(subtitleX). 없으면 중앙.
+function subtitleCenterX(cut, W) {
+  const x = cut?.subtitleX;
+  if (typeof x === "number" && isFinite(x)) return Math.round(W * Math.max(0.05, Math.min(0.95, x)));
+  return Math.round(W * 0.5);
 }
 
 export async function runCompose(projectId) {
@@ -215,9 +223,10 @@ export async function runCompose(projectId) {
 
       // 자막 캡션 PNG(캔버스 재사용). 위치는 자막 있을 때만 계산.
       const cy = caps.length ? subtitleCenterY(s.cut, H) : Math.round(H * 0.72);
+      const cx = subtitleCenterX(s.cut, W);
       const capPaths = [];
       for (const c of caps) {
-        const png = await renderCaptionPng(c.text, { W, H, cy });
+        const png = await renderCaptionPng(c.text, { W, H, cy, cx });
         if (png) {
           const cp = join(dir, `cap${i}_${capPaths.length}.png`);
           await writeFile(cp, png);

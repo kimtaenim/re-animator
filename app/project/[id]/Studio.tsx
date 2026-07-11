@@ -1115,6 +1115,25 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     if (cut?.narration?.trim()) for (const seg of cut.narration.split(/\n\s*\n/)) { const t = seg.trim(); if (t) units.push(t); }
     return units;
   }
+  // 자막 세로 중심 비율(0=위,1=아래) — compose 의 subtitleCenterY 와 동일 규칙(미리보기==결과 싱크).
+  function subFracY(cut?: Project["scenes"][number]["cut"]): number {
+    const y = cut?.subtitleY;
+    if (typeof y === "number" && isFinite(y)) return Math.max(0.05, Math.min(0.95, y));
+    const pos = cut?.subtitlePos;
+    if (pos === "top") return 0.15;
+    if (pos === "middle") return 0.5;
+    if (pos === "bottom") return 0.85;
+    return 0.72;
+  }
+  // 자막 가로 중심 비율(0=왼쪽,1=오른쪽). 기본 중앙.
+  function subFracX(cut?: Project["scenes"][number]["cut"]): number {
+    const x = cut?.subtitleX;
+    if (typeof x === "number" && isFinite(x)) return Math.max(0.05, Math.min(0.95, x));
+    return 0.5;
+  }
+  // 컷별 자막 9분할 앵커(3×3). 상단 맨위·하단 맨아래는 피한 안전 좌표.
+  const SUB_X = [0.27, 0.5, 0.73] as const; // 좌·중·우
+  const SUB_Y = [0.3, 0.5, 0.7] as const; // 상·중·하(가장자리 회피)
   // 씬 미리보기 열면 그 씬 더빙 오디오 자동 재생, 닫으면 멈춤.
   useEffect(() => {
     if (!scenePreview) return;
@@ -2214,30 +2233,28 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       )}
                       {/* 대사·내레이션 통합 편집 — 각 줄에 화자(캐릭터/내레이션) 지정. 3단계와 싱크. */}
                       {dialogueEditor(s)}
-                      {/* 자막 위치 — 자동(얼굴/손 피함) + 수동 상/중/하 대략 지정 */}
-                      <div className="flex flex-wrap items-center gap-1 text-[10px]" title="자막 위치 — 자동은 얼굴/손을 피해 배치, 수동은 상/중/하로 대략 고정">
+                      {/* 자막 위치 — 컷별 9분할(3×3). 인물 얼굴을 피해 빈 곳에 직접 배치. */}
+                      <div className="flex items-center gap-2 text-[10px]" title="자막 위치 — 얼굴을 피하도록 9곳 중 선택(좌상·중상·우상·좌중·중앙·우중·좌하·중하·우하)">
                         <span className="text-[var(--muted)]">자막위치</span>
-                        {(
-                          [
-                            ["auto", "자동"],
-                            ["top", "상"],
-                            ["middle", "중"],
-                            ["bottom", "하"],
-                          ] as const
-                        ).map(([v, label]) => (
-                          <button
-                            key={v}
-                            type="button"
-                            onClick={() => updateCut(s.id, { subtitlePos: v })}
-                            className={`rounded border px-1.5 py-0.5 ${
-                              (s.cut?.subtitlePos ?? "auto") === v
-                                ? "border-[var(--accent)] font-medium text-[var(--accent)]"
-                                : "border-[var(--border)] hover:bg-[var(--panel-2)]"
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
+                        <div className="grid grid-cols-3 gap-px rounded border border-[var(--border)] p-0.5">
+                          {SUB_Y.map((fy) =>
+                            SUB_X.map((fx) => {
+                              const active =
+                                Math.abs(subFracX(s.cut) - fx) < 0.03 && Math.abs(subFracY(s.cut) - fy) < 0.03;
+                              return (
+                                <button
+                                  key={`${fx}-${fy}`}
+                                  type="button"
+                                  onClick={() => updateCut(s.id, { subtitleX: fx, subtitleY: fy })}
+                                  title={`가로 ${Math.round(fx * 100)}% · 세로 ${Math.round(fy * 100)}%`}
+                                  className={`h-4 w-4 rounded-[2px] ${
+                                    active ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] hover:bg-[var(--border)]"
+                                  }`}
+                                />
+                              );
+                            })
+                          )}
+                        </div>
                       </div>
                       {/* 카메라 워크 → 모션 프롬프트 채움. 영상 프롬프트 = 모션(+가이드), 정지컷 내용은 이미지가 담당. */}
                       <div className="flex flex-wrap gap-1">
@@ -2416,16 +2433,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   )}
                   {units.length > 0 && (
                     <div
-                      className={`pointer-events-none absolute inset-x-0 flex justify-center px-4 ${
-                        (s.cut?.subtitlePos ?? "auto") === "top"
-                          ? "top-[12%]"
-                          : s.cut?.subtitlePos === "middle"
-                            ? "top-1/2 -translate-y-1/2"
-                            : "bottom-[12%]"
-                      }`}
+                      className="pointer-events-none absolute flex -translate-x-1/2 -translate-y-1/2 justify-center"
+                      style={{ left: `${subFracX(s.cut) * 100}%`, top: `${subFracY(s.cut) * 100}%` }}
                     >
                       {/* 한 번에 한 박스만(순차). [[강조]]는 크게·노랑. */}
-                      <span className="max-w-[90%] whitespace-pre-wrap rounded bg-black/60 px-3 py-1 text-center text-sm font-semibold text-white">
+                      <span className="max-w-[86vw] whitespace-pre-wrap rounded bg-black/60 px-3 py-1 text-center text-sm font-semibold text-white">
                         {splitRuns(units[Math.min(subIdx, units.length - 1)]).map((r, ri) =>
                           r.em ? (
                             <span key={ri} className="text-[1.3em] font-extrabold text-[#ffd23f]">

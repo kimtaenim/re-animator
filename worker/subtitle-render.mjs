@@ -305,7 +305,7 @@ function roundRectPath(ctx, x, y, w, h, r) {
 
 // ★한 자막 유닛을 '전체 프레임(W×H) 투명 PNG'로 — 박스를 세로중심 cy 에 둔다(합성서 시간구간
 // overlay=0:0 로 얹어 순차 표시). 강조([[..]])·반투명 검은 박스 반영. 실패 시 null.
-export async function renderCaptionPng(text, { W, H, cy }) {
+export async function renderCaptionPng(text, { W, H, cy, cx }) {
   const raw = (text || "").trim();
   if (!raw) return null;
   const mod = await loadCanvas();
@@ -328,8 +328,11 @@ export async function renderCaptionPng(text, { W, H, cy }) {
     const textW = Math.max(...lines.map((l) => l.width), 0);
     const boxW = Math.min(maxW, Math.round(textW + padX * 2));
     const boxH = Math.round(totalH + padY * 2);
-    const cx = W / 2;
-    const bx = Math.round(cx - boxW / 2);
+    // 가로 중심 cx(px) — 좌/우 지정 시 프레임 밖으로 안 나가게 여백 안으로 clamp.
+    const wantCx = typeof cx === "number" && isFinite(cx) ? cx : W / 2;
+    const marginX = Math.round(W * 0.03);
+    const bx = Math.max(marginX, Math.min(Math.round(wantCx - boxW / 2), W - marginX - boxW));
+    const usedCx = bx + boxW / 2;
     const by = Math.round(cy - boxH / 2);
     // 반투명 검은 박스.
     ctx.fillStyle = `rgba(0,0,0,${BG_ALPHA})`;
@@ -342,7 +345,7 @@ export async function renderCaptionPng(text, { W, H, cy }) {
     let yTop = by + padY;
     lines.forEach((l, i) => {
       const baseline = yTop + Math.round(l.size * 0.8);
-      let tx = cx - l.width / 2;
+      let tx = usedCx - l.width / 2;
       for (const seg of l.segs) {
         const sz = seg.em ? emSize : fontPx;
         ctx.font = seg.em ? emF : baseF;

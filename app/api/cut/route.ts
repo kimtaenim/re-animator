@@ -86,6 +86,12 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.subtitlePos === "string" && ["auto", "top", "middle", "bottom"].includes(r.subtitlePos)) {
     c.subtitlePos = r.subtitlePos as CutOntology["subtitlePos"];
   }
+  if (typeof r.subtitleY === "number" && isFinite(r.subtitleY)) {
+    c.subtitleY = Math.max(0.05, Math.min(0.95, r.subtitleY)); // 세로 중심 비율
+  }
+  if (typeof r.subtitleX === "number" && isFinite(r.subtitleX)) {
+    c.subtitleX = Math.max(0.05, Math.min(0.95, r.subtitleX)); // 가로 중심 비율
+  }
   c.confirmed = r.confirmed === true;
   return c;
 }
