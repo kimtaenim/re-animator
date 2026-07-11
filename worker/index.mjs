@@ -95,7 +95,7 @@ async function tick(types) {
 
 // ★메모리 빡빡한 워커라 잡은 '한 번에 하나만' 처리한다(병렬 X → OOM 방지). 더빙 UI 는
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
-console.log("[worker] BUILD = m7-compose-v16 (자막 overlay shortest=1 복원 — 먹통 진짜 원인)");
+console.log("[worker] BUILD = m7-compose-v17 (자막 입력 -t 로 유한화 — 무한입력 2개+ 데드락 수정)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);

@@ -282,7 +282,9 @@ export async function runCompose(projectId) {
         prev = `cv${k}`;
       });
       const args = ["-y", "-i", sd.raw];
-      for (const lc of local) args.push("-loop", "1", "-framerate", String(FPS), "-i", lc.path);
+      // ★각 자막 입력에 -t 로 '유한 스트림'화 — 무한 -loop 입력이 2개 이상이면 ffmpeg 가
+      //   데드락(자막 2부터 먹통). -t 로 끊으면 안전. framerate 는 -loop 앞에 둔다.
+      for (const lc of local) args.push("-loop", "1", "-framerate", String(FPS), "-t", lenI.toFixed(2), "-i", lc.path);
       const out = join(dir, `n${i}.mp4`);
       args.push(
         "-filter_complex", vfilter, "-map", `[${prev}]`, "-an",
