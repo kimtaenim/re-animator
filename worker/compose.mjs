@@ -46,7 +46,12 @@ function run(cmd, args, timeoutMs = 600_000) {
       } catch {}
       rej(new Error(`${cmd} 타임아웃(${Math.round(timeoutMs / 1000)}초) — ffmpeg 마지막: ${err.slice(-400)}`));
     }, timeoutMs);
-    p.stderr.on("data", (d) => (err += d));
+    // ★stderr 를 무한정 쌓으면(자막 많은 씬은 프레임마다 경고 폭증) Node 메모리가 터진다(OOM).
+    //   마지막 부분만 보관 — 에러 진단엔 충분.
+    p.stderr.on("data", (d) => {
+      err += d;
+      if (err.length > 16000) err = err.slice(-16000);
+    });
     p.on("error", (e) => {
       clearTimeout(timer);
       rej(e);
@@ -241,7 +246,8 @@ export async function runCompose(projectId) {
       const fadeIn = FADES_IN.has(scenes[i - 1]?.cut?.transition) || (i === 0 && s.cut?.transition === "fadein");
 
       // ── ffmpeg (aninews 패턴): 입력 0=영상, 1=오디오(없으면 anullsrc), 2..=자막 PNG ──
-      const args = ["-y", "-i", vPath];
+      // -nostats/-loglevel warning: 프레임마다 진행 로그를 stderr 에 쏟지 않게(메모리 폭증 방지).
+      const args = ["-hide_banner", "-nostats", "-loglevel", "warning", "-y", "-i", vPath];
       if (aPath) args.push("-i", aPath);
       else args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100");
       for (const c of capPaths) args.push("-loop", "1", "-framerate", String(FPS), "-i", c.path);
