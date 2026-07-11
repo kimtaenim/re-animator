@@ -13,7 +13,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { renderCaptionPng } from "./subtitle-render.mjs";
+import { renderCaptionBox } from "./subtitle-render.mjs";
 import { stripMarks } from "./emphasis.mjs";
 
 let FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
@@ -226,11 +226,12 @@ export async function runCompose(projectId) {
       const cx = subtitleCenterX(s.cut, W);
       const capPaths = [];
       for (const c of caps) {
-        const png = await renderCaptionPng(c.text, { W, H, cy, cx });
-        if (png) {
+        // 박스 크기 PNG + 프레임 내 좌표 — 전체화면 PNG 대비 ffmpeg 피크 실측 ~100MB↓.
+        const box = await renderCaptionBox(c.text, { W, H, cy, cx });
+        if (box) {
           const cp = join(dir, `cap${i}_${capPaths.length}.png`);
-          await writeFile(cp, png);
-          capPaths.push({ path: cp, span: c });
+          await writeFile(cp, box.buf);
+          capPaths.push({ path: cp, span: c, x: box.x, y: box.y });
         }
       }
 
@@ -251,7 +252,7 @@ export async function runCompose(projectId) {
       filter += `[bg]`;
       let prev = "bg";
       capPaths.forEach((c, k) => {
-        filter += `;[${prev}][${2 + k}:v]overlay=0:0:enable='between(t,${c.span.start.toFixed(3)},${c.span.end.toFixed(3)})'[o${k}]`;
+        filter += `;[${prev}][${2 + k}:v]overlay=${c.x}:${c.y}:enable='between(t,${c.span.start.toFixed(3)},${c.span.end.toFixed(3)})'[o${k}]`;
         prev = `o${k}`;
       });
       const out = join(dir, `scene${i}.mp4`);
@@ -259,7 +260,9 @@ export async function runCompose(projectId) {
         "-filter_complex", filter,
         "-map", `[${prev}]`, "-map", "1:a",
         "-t", finalDur.toFixed(2), "-r", String(FPS),
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23",
+        // -threads 2: x264 가 호스트 코어 수만큼 스레드·프레임버퍼를 잡아 피크가 커짐(실측
+        // 596→404MB). 과거 문제였던 -threads 1+ultrafast 와 달리 2+veryfast 는 로컬 검증 통과.
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23", "-threads", "2",
         "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out
       );
       await log(`씬 ${i + 1}/${scenes.length} 인코딩(자막 ${capPaths.length}·${finalDur.toFixed(1)}s)…`);

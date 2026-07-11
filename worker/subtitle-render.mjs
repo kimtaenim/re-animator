@@ -303,8 +303,72 @@ function roundRectPath(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-// ★한 자막 유닛을 '전체 프레임(W×H) 투명 PNG'로 — 박스를 세로중심 cy 에 둔다(합성서 시간구간
-// overlay=0:0 로 얹어 순차 표시). 강조([[..]])·반투명 검은 박스 반영. 실패 시 null.
+// ★한 자막 유닛을 '박스 크기' PNG 로 + 프레임 내 좌표(x,y) 반환 — 합성이 overlay=x:y 로 얹는다.
+//   전체 프레임(720×1280≈3.7MB/프레임) 대신 박스(≈0.4MB)만 오버레이 체인에 흐르게 해서
+//   ffmpeg 피크 메모리를 실측 ~100MB 절감(596→494MB). 디자인·레이아웃은 기존과 동일.
+export async function renderCaptionBox(text, { W, H, cy, cx }) {
+  const raw = (text || "").trim();
+  if (!raw) return null;
+  const mod = await loadCanvas();
+  if (!mod) return null;
+  const { createCanvas, GlobalFonts } = mod;
+  if (!(await ensureFont(GlobalFonts))) return null;
+  try {
+    // 측정용 미니 캔버스(글자 폭 재기) → 박스 크기 확정 → 박스 크기 캔버스에 그림.
+    const mctx = createCanvas(8, 8).getContext("2d");
+    const maxW = Math.round(W * 0.9);
+    const fontPx = Math.max(20, Math.round(H * 0.04)); // 프레임 높이 비례(기존과 동일)
+    const emSize = Math.round(fontPx * 1.3);
+    const baseF = `700 ${fontPx}px ${FAMILY}, sans-serif`;
+    const emF = `800 ${emSize}px ${FAMILY}, sans-serif`;
+    const padX = Math.round(fontPx * 0.5);
+    const padY = Math.round(fontPx * 0.35);
+    const lines = layoutLines(mctx, raw, maxW - padX * 2, baseF, emF, fontPx, emSize, 3);
+    if (!lines.length) return null;
+    const lineHs = lines.map((l) => Math.round(l.size * 1.3));
+    const totalH = lineHs.reduce((a, b) => a + b, 0);
+    const textW = Math.max(...lines.map((l) => l.width), 0);
+    const boxW = Math.min(maxW, Math.round(textW + padX * 2));
+    const boxH = Math.round(totalH + padY * 2);
+
+    const cv = createCanvas(boxW, boxH);
+    const ctx = cv.getContext("2d");
+    ctx.fillStyle = `rgba(0,0,0,${BG_ALPHA})`;
+    roundRectPath(ctx, 0, 0, boxW, boxH, Math.min(fontPx * 0.4, 20));
+    ctx.fill();
+    ctx.lineJoin = "round";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    let yTop = padY;
+    lines.forEach((l, i) => {
+      const baseline = yTop + Math.round(l.size * 0.8);
+      let tx = boxW / 2 - l.width / 2;
+      for (const seg of l.segs) {
+        const sz = seg.em ? emSize : fontPx;
+        ctx.font = seg.em ? emF : baseF;
+        ctx.lineWidth = Math.max(2, Math.round(sz * 0.12));
+        ctx.strokeStyle = "rgba(0,0,0,0.9)";
+        ctx.strokeText(seg.t, tx, baseline);
+        ctx.fillStyle = seg.em ? EM_COLOR : "#ffffff";
+        ctx.fillText(seg.t, tx, baseline);
+        tx += seg.w;
+      }
+      yTop += lineHs[i];
+    });
+
+    // 프레임 내 좌표 — 가로/세로 중심(cx,cy) 기준, 가장자리 밖으로 안 나가게 clamp.
+    const wantCx = typeof cx === "number" && isFinite(cx) ? cx : W / 2;
+    const marginX = Math.round(W * 0.03);
+    const marginY = Math.round(H * 0.02);
+    const x = Math.max(marginX, Math.min(Math.round(wantCx - boxW / 2), W - marginX - boxW));
+    const y = Math.max(marginY, Math.min(Math.round(cy - boxH / 2), H - marginY - boxH));
+    return { buf: cv.toBuffer("image/png"), x, y };
+  } catch {
+    return null;
+  }
+}
+
+// (레거시) 한 자막 유닛을 '전체 프레임(W×H) 투명 PNG'로 — overlay=0:0 용. 실패 시 null.
 export async function renderCaptionPng(text, { W, H, cy, cx }) {
   const raw = (text || "").trim();
   if (!raw) return null;
