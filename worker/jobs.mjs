@@ -406,6 +406,28 @@ export async function runExtract(projectId) {
   const buffers = [];
   for (const f of files) buffers.push(await download(f.url));
 
+  // ★내레이션 재예약(구조 수정): 분할이 예약한 textRegions 를 G1 경계 저장(/api/boundaries
+  //   cleanCut)이 지워버려 추출은 늘 '밴드 0개'로 돌았다(= 내레이션 반복 소실의 원인).
+  //   소비자인 추출이 시작할 때 '최종 경계' 기준으로 컷 밖 텍스트 밴드를 다시 계산해 예약한다
+  //   → 경계를 어떤 경로(G1 저장·재분할·컷 분할/합병)로 고쳤어도 안 사라진다.
+  //   이미 있는 밴드와 겹치면 스킵(addGapTextRegions 내장)이라 중복 OCR 없음.
+  try {
+    const global = new Float32Array(p.virtualCanvas.totalHeight);
+    let acc = 0;
+    for (const buf of buffers) {
+      const { profile } = await computeRowProfile(buf, p.virtualCanvas.refWidth);
+      const room = global.length - acc;
+      if (room <= 0) break;
+      global.set(room >= profile.length ? profile : profile.subarray(0, room), acc);
+      acc += profile.length;
+    }
+    const gapN = addGapTextRegions(scenes, global, p.virtualCanvas.totalHeight, log);
+    const totalTR = scenes.reduce((n, s) => n + (s.cut?.textRegions?.length || 0), 0);
+    await log(`[진단] 내레이션 밴드: 추출 직전 재예약 ${gapN}개 → 총 ${totalTR}개`);
+  } catch (e) {
+    await log(`내레이션 밴드 재예약 실패(추출은 계속): ${String(e?.message ?? e).slice(0, 80)}`);
+  }
+
   // ★ 증분: 이미 추출된 컷(originalImage 있음 = 경계 안 바뀜)은 건너뛴다. 새/바뀐 컷만.
   const todo = scenes.filter((s) => !s.originalImage);
   await log(`추출 대상 ${todo.length}컷 (전체 ${scenes.length}, 기존 유지 ${scenes.length - todo.length})`);

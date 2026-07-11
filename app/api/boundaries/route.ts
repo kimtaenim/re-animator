@@ -28,6 +28,19 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.description === "string") c.description = r.description.slice(0, 800);
   if (typeof r.promptDraft === "string") c.promptDraft = r.promptDraft.slice(0, 800);
   if (typeof r.motion === "string") c.motion = r.motion.slice(0, 200);
+  // ★textRegions(분할이 예약한 '컷 밖 내레이션 밴드') 보존 — 이걸 안 넘기면 G1 저장이
+  //   예약을 전멸시켜 추출 OCR 이 내레이션을 통째로 놓친다(반복 소실의 원인이었음).
+  if (Array.isArray(r.textRegions)) {
+    c.textRegions = r.textRegions
+      .filter((b): b is Record<string, number> => !!b && typeof b === "object")
+      .map((b) => ({
+        yStart: Number(b.yStart) || 0,
+        yEnd: Number(b.yEnd) || 0,
+        ...(b.xStart != null ? { xStart: Number(b.xStart) } : {}),
+        ...(b.xEnd != null ? { xEnd: Number(b.xEnd) } : {}),
+      }))
+      .slice(0, 24);
+  }
   c.confirmed = r.confirmed === true;
   return c;
 }
