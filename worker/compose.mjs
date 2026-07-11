@@ -13,7 +13,6 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pickSubtitleBand } from "./subtitle-place.mjs";
 import { renderCaptionPng } from "./subtitle-render.mjs";
 import { stripMarks } from "./emphasis.mjs";
 
@@ -80,16 +79,6 @@ async function download(url, dest) {
   if (r.body) await pipeline(Readable.fromWeb(r.body), createWriteStream(dest));
   else await writeFile(dest, Buffer.from(await r.arrayBuffer()));
 }
-async function download2(url) {
-  try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    if (!r.ok) return null;
-    return Buffer.from(await r.arrayBuffer());
-  } catch {
-    return null;
-  }
-}
-
 function targetDims(project) {
   const ar = project?.aspectRatio;
   if (ar === "9:16") return [720, 1280];
@@ -133,23 +122,17 @@ function subtitleUnits(cut) {
   return units;
 }
 
-// 자막 세로중심 y — 수동(top/middle/bottom) 또는 auto(로컬 이미지 분석, gpt-4o 안 씀).
-async function subtitleCenterY(s, W, H) {
-  const pos = s.cut?.subtitlePos;
+// 자막 세로중심 y — 수동(top/middle/bottom)만, auto 는 고정 밴드(하단 3/4).
+// ★compose 루프 안에서 생성 이미지를 다운로드·디코딩(sharp)하면, 그 네이티브 메모리가
+//   바로 뒤따르는 ffmpeg 인코딩과 겹쳐 512MB 워커가 OOM 으로 죽는다. aninews 는 compose 에서
+//   이미지를 아예 안 건드려서(위치 고정) 안 죽는다 — 그 방식에 맞춘다. 얼굴회피 자동배치는
+//   생성 단계에서 미리 계산해 cut.subtitlePos 로 저장하는 게 맞다(메모리 안전한 지점).
+function subtitleCenterY(cut, H) {
+  const pos = cut?.subtitlePos;
   if (pos === "top") return Math.round(H * 0.15);
   if (pos === "middle") return Math.round(H * 0.5);
   if (pos === "bottom") return Math.round(H * 0.85);
-  let cy = Math.round(H * 0.82);
-  if (s.generatedImage) {
-    try {
-      const genBuf = await download2(s.generatedImage);
-      if (genBuf) {
-        const band = await pickSubtitleBand(genBuf, { frameW: W, frameH: H, heightFrac: 0.16 });
-        cy = Math.round(band.y + (H * 0.16) / 2);
-      }
-    } catch {}
-  }
-  return cy;
+  return Math.round(H * 0.72); // 기본: 하단 3/4(바닥엔 안 붙임) — aninews 검증 위치
 }
 
 export async function runCompose(projectId) {
@@ -231,7 +214,7 @@ export async function runCompose(projectId) {
       const speed = vd > 0 && finalDur > vd ? finalDur / vd : 1; // 오디오/자막 길면 영상 슬로모션
 
       // 자막 캡션 PNG(캔버스 재사용). 위치는 자막 있을 때만 계산.
-      const cy = caps.length ? await subtitleCenterY(s, W, H) : Math.round(H * 0.82);
+      const cy = caps.length ? subtitleCenterY(s.cut, H) : Math.round(H * 0.72);
       const capPaths = [];
       for (const c of caps) {
         const png = await renderCaptionPng(c.text, { W, H, cy });
