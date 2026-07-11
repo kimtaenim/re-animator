@@ -130,8 +130,10 @@ function subtitleUnits(cut) {
   return units;
 }
 
-// 자막 세로중심 y — 수동(top/middle/bottom) 또는 auto(얼굴/손 회피).
-async function subtitleCenterY(s, W, H, projectId) {
+// 자막 세로중심 y — 수동(top/middle/bottom) 또는 auto.
+// ★auto 는 gpt-4o 얼굴검출을 안 쓴다(씬마다 호출은 느리고 비용). 대신 이미지 자체의 '복잡한
+//   영역 회피'(로컬·무료·빠름)로 빈 곳에 놓는다. 정확한 얼굴 회피는 나중에 재생성 때 1회 계산.
+async function subtitleCenterY(s, W, H) {
   const pos = s.cut?.subtitlePos;
   if (pos === "top") return Math.round(H * 0.15);
   if (pos === "middle") return Math.round(H * 0.5);
@@ -141,13 +143,7 @@ async function subtitleCenterY(s, W, H, projectId) {
     try {
       const genBuf = await download2(s.generatedImage);
       if (genBuf) {
-        const fh = await detectFaceHandBoxes(genBuf, OPENAI_KEY);
-        if (fh.cost) {
-          try {
-            await recordCost({ projectId, vendor: "openai", model: "gpt-4o", costUsd: fh.cost, meta: { kind: "subtitle-faces" } });
-          } catch {}
-        }
-        const band = await pickSubtitleBand(genBuf, { frameW: W, frameH: H, heightFrac: 0.16, faces: fh.faces, hands: fh.hands });
+        const band = await pickSubtitleBand(genBuf, { frameW: W, frameH: H, heightFrac: 0.16 });
         cy = Math.round(band.y + (H * 0.16) / 2);
       }
     } catch {}
@@ -193,7 +189,7 @@ export async function runCompose(projectId) {
       const subUnits = subtitleUnits(s.cut);
       // 자막(대사/내레이션) 있는 씬만 얼굴검출(gpt-4o) — 없으면 건너뛰어 시간·비용 절약.
       const willHaveCaption = units.some((u) => u.subText) || subUnits.length > 0;
-      const cy = willHaveCaption ? await subtitleCenterY(s, W, H, projectId) : Math.round(H * 0.82);
+      const cy = willHaveCaption ? await subtitleCenterY(s, W, H) : Math.round(H * 0.82);
       sceneData.push({
         raw,
         vd,
@@ -289,8 +285,9 @@ export async function runCompose(projectId) {
       args.push(
         "-filter_complex", vfilter, "-map", `[${prev}]`, "-an",
         "-t", lenI.toFixed(2), "-r", String(FPS),
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "superfast", "-crf", "25",
-        "-threads", "0", "-movflags", "+faststart", out
+        // ★aninews 검증 설정: veryfast/crf23. superfast·-threads 조정은 이 워커에서 매달림(hang).
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23",
+        "-movflags", "+faststart", out
       );
       await log(`씬 ${i + 1}/${sceneData.length} 인코딩(자막 ${local.length})…`);
       await run(FFMPEG, args);
