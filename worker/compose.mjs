@@ -172,33 +172,14 @@ export async function runCompose(projectId) {
   const [W, H] = targetDims(p);
   const dir = await mkdtemp(join(tmpdir(), "recompose-"));
   try {
-    // ── 1) 씬별: 영상 정규화(슬로모션 X) + 더빙 오디오 유닛 다운로드 + 자막 위치 ──
-    const norm = []; // 정규화 영상 경로
-    const sceneData = []; // { vd, units:[{ap,dur,subText}], cy }
+    // ── 1) 씬별 다운로드(영상+더빙 오디오) + 길이/자막위치 수집 (인코딩은 아직 X) ──
+    const sceneData = []; // { raw, vd, units:[{ap,dur,subText}], cy, fadeIn, fadeOut }
     for (let i = 0; i < scenes.length; i++) {
       const s = scenes[i];
-      await log(`씬 준비 ${i + 1}/${scenes.length}…`);
+      await log(`씬 다운로드 ${i + 1}/${scenes.length}…`);
       const raw = join(dir, `raw${i}.mp4`);
       await download(s.videoUrl, raw);
       const vd = (await probeDuration(raw)) || 3;
-      const fadeOut = FADES_OUT.has(s.cut?.transition);
-      const fadeIn = FADES_IN.has(scenes[i - 1]?.cut?.transition) || (i === 0 && s.cut?.transition === "fadein");
-      const vf = [
-        `scale=${W}:${H}:force_original_aspect_ratio=decrease`,
-        `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`,
-        "setsar=1",
-        `fps=${FPS}`,
-      ];
-      if (fadeIn) vf.push(`fade=t=in:st=0:d=${FADE}`);
-      if (fadeOut) vf.push(`fade=t=out:st=${Math.max(0, vd - FADE).toFixed(2)}:d=${FADE}`);
-      const nrm = join(dir, `n${i}.mp4`);
-      await run(FFMPEG, [
-        "-y", "-i", raw, "-vf", vf.join(","), "-an",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "21",
-        "-r", String(FPS), "-movflags", "+faststart", nrm,
-      ]);
-      norm.push(nrm);
-      // 더빙 오디오 유닛
       const units = [];
       for (const au of audioUnits(s.cut)) {
         const ext = au.audioUrl.includes(".wav") ? "wav" : "mp3";
@@ -210,24 +191,26 @@ export async function runCompose(projectId) {
         } catch {}
       }
       const cy = await subtitleCenterY(s, W, H, projectId);
-      sceneData.push({ vd, units, cy });
+      sceneData.push({
+        raw,
+        vd,
+        units,
+        cy,
+        subUnits: subtitleUnits(s.cut), // 더빙 없을 때 자막(오디오 없이 영상 길이에 비례)
+        fadeIn: FADES_IN.has(scenes[i - 1]?.cut?.transition) || (i === 0 && s.cut?.transition === "fadein"),
+        fadeOut: FADES_OUT.has(s.cut?.transition),
+      });
     }
 
-    // ── 2) 정규화 영상 이어붙이기(무손실) → 글로벌 영상 ──
-    await log("영상 이어붙이는 중…");
-    const listFile = join(dir, "list.txt");
-    await writeFile(listFile, norm.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"));
-    const gv = join(dir, "global.mp4");
-    await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", "-movflags", "+faststart", gv]);
-    const videoTotal = (await probeDuration(gv)) || sceneData.reduce((a, sd) => a + sd.vd, 0);
-
-    // ── 3) 타임라인: 씬 시작 Ti, 오디오는 max(Ti, 이전 오디오 끝)에서 시작(겹침 없이 다음 씬으로 흘림) ──
+    // ── 2) 글로벌 타임라인: 씬 시작 Ti, 오디오 시작 = max(Ti, 이전 오디오 끝)(겹침 없이 다음 씬으로 흘림) ──
     const allAudio = []; // { ap, gstart }
     const capItems = []; // { text, gstart, gend, cy }
+    const starts = []; // 씬 시작(비디오 타임라인)
     let prevEnd = 0;
     let Ti = 0;
     for (const sd of sceneData) {
-      let acc = Math.max(Ti, prevEnd); // 이 씬 오디오 시작(늘리지 않고 흘림)
+      starts.push(Ti);
+      let acc = Math.max(Ti, prevEnd);
       if (sd.units.length) {
         for (const u of sd.units) {
           const gstart = acc;
@@ -236,79 +219,116 @@ export async function runCompose(projectId) {
           if (u.subText) capItems.push({ text: u.subText, gstart, gend: acc, cy: sd.cy });
         }
         prevEnd = acc;
-      } else if (Ti > prevEnd) {
-        prevEnd = Ti; // 오디오 없는 씬은 흘림을 이어받되 앞으로 밀지 않음
+      } else if (sd.subUnits.length) {
+        // 더빙 없음 → 자막을 이 씬 영상 길이에 글자수 비례로 순차(오디오 없음).
+        const weights = sd.subUnits.map((t) => Math.max(1, stripMarks(t).replace(/\s/g, "").length));
+        const wSum = weights.reduce((a, b) => a + b, 0) || 1;
+        let t0 = Ti;
+        sd.subUnits.forEach((txt, j) => {
+          const d = Math.max(1.2, (sd.vd * weights[j]) / wSum);
+          capItems.push({ text: txt, gstart: t0, gend: t0 + d, cy: sd.cy });
+          t0 += d;
+        });
+        prevEnd = Math.max(prevEnd, Ti);
+      } else {
+        prevEnd = Math.max(prevEnd, Ti);
       }
       Ti += sd.vd;
     }
-    // 오디오 총 끝(무자막 유닛 포함) 계산.
-    let audioEnd = 0;
-    {
-      let acc = 0, prev = 0, T = 0;
-      for (const sd of sceneData) {
-        acc = Math.max(T, prev);
-        for (const u of sd.units) acc += u.dur;
-        prev = sd.units.length ? acc : (T > prev ? T : prev);
-        T += sd.vd;
-      }
-      audioEnd = prev;
-    }
-    const capEnd = capItems.length ? Math.max(...capItems.map((c) => c.gend)) : 0;
-    const D = Math.max(videoTotal, audioEnd, capEnd);
-    if (capItems.length) {
-      const last = capItems[capItems.length - 1];
-      last.gend = Math.max(last.gend, D) + 0.3; // 마지막 자막은 끝까지
-    }
+    const videoTotal = Ti;
+    const D = Math.max(videoTotal, prevEnd, capItems.length ? Math.max(...capItems.map((c) => c.gend)) : 0);
+    const extra = Math.max(0, D - videoTotal); // 영상 끝 뒤로 흐르는 오디오/자막 → 마지막 씬 프레임 유지
+    if (capItems.length) capItems[capItems.length - 1].gend = D + 0.3;
 
-    // ── 4) 자막 캡션 PNG(각 씬 위치 cy) ──
-    const capPaths = [];
+    // ── 3) 자막 캡션 PNG(각 씬 위치 cy). 중복 없이 유닛마다 하나. ──
     for (let k = 0; k < capItems.length; k++) {
       try {
         const png = await renderCaptionPng(capItems[k].text, { W, H, cy: capItems[k].cy });
         if (png) {
           const cp = join(dir, `cap${k}.png`);
           await writeFile(cp, png);
-          capPaths.push({ path: cp, item: capItems[k] });
+          capItems[k].path = cp;
         }
       } catch {}
     }
 
-    // ── 5) 최종: 글로벌영상(부족하면 마지막 프레임 유지) + 자막 순차 + 오디오(지연배치·믹스) ──
-    await log(`최종 합성(자막 ${capPaths.length}·오디오 ${allAudio.length}·${D.toFixed(1)}s)…`);
-    const A = allAudio.length;
-    const C = capPaths.length;
-    const args = ["-y", "-i", gv];
-    for (const a of allAudio) args.push("-i", a.ap);
-    for (const c of capPaths) args.push("-loop", "1", "-framerate", String(FPS), "-i", c.path);
-    const extra = Math.max(0, D - videoTotal);
-    let vfilter = `[0:v]tpad=stop_mode=clone:stop_duration=${extra.toFixed(2)},fps=${FPS}[bg]`;
-    let prev = "bg";
-    capPaths.forEach((c, k) => {
-      const inIdx = 1 + A + k;
-      const label = `cv${k}`;
-      vfilter += `;[${prev}][${inIdx}:v]overlay=0:0:enable='between(t,${c.item.gstart.toFixed(3)},${c.item.gend.toFixed(3)})'[${label}]`;
-      prev = label;
-    });
-    let audioMap;
-    if (A === 0) {
-      args.push("-f", "lavfi", "-t", D.toFixed(2), "-i", "anullsrc=channel_layout=stereo:sample_rate=44100");
-      audioMap = `${1 + C}:a`;
-    } else {
-      allAudio.forEach((a, j) => {
-        vfilter += `;[${1 + j}:a]adelay=${Math.round(a.gstart * 1000)}:all=1[ad${j}]`;
+    // ── 4) 씬별 인코딩 — ★메모리 안전★: 이 씬 창에 겹치는 자막만 번인(입력 소수). 슬로모션 X. ──
+    const norm = [];
+    for (let i = 0; i < sceneData.length; i++) {
+      const sd = sceneData[i];
+      const isLast = i === sceneData.length - 1;
+      const lenI = sd.vd + (isLast ? extra : 0); // 마지막 씬은 흐르는 오디오만큼 프레임 유지
+      const T0 = starts[i];
+      // 이 씬 창 [T0, T0+lenI] 에 걸치는 자막(경계 걸치면 로컬 시간으로 잘라 번인 → 다음 씬으로 흘러 보임)
+      const local = [];
+      for (const c of capItems) {
+        if (!c.path) continue;
+        const ls = Math.max(0, c.gstart - T0);
+        const le = Math.min(lenI, c.gend - T0);
+        if (le > ls + 0.02) local.push({ path: c.path, ls, le });
+      }
+      let vfilter =
+        `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+        `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
+      if (isLast && extra > 0.05) vfilter += `,tpad=stop_mode=clone:stop_duration=${extra.toFixed(2)}`;
+      vfilter += `,fps=${FPS}`;
+      if (sd.fadeIn) vfilter += `,fade=t=in:st=0:d=${FADE}`;
+      if (sd.fadeOut) vfilter += `,fade=t=out:st=${Math.max(0, lenI - FADE).toFixed(2)}:d=${FADE}`;
+      vfilter += `[bg]`;
+      let prev = "bg";
+      local.forEach((lc, k) => {
+        vfilter += `;[${prev}][${1 + k}:v]overlay=0:0:enable='between(t,${lc.ls.toFixed(3)},${lc.le.toFixed(3)})'[cv${k}]`;
+        prev = `cv${k}`;
       });
-      vfilter += `;${allAudio.map((_, j) => `[ad${j}]`).join("")}amix=inputs=${A}:normalize=0:dropout_transition=0[aout]`;
-      audioMap = "[aout]";
+      const args = ["-y", "-i", sd.raw];
+      for (const lc of local) args.push("-loop", "1", "-framerate", String(FPS), "-i", lc.path);
+      const out = join(dir, `n${i}.mp4`);
+      args.push(
+        "-filter_complex", vfilter, "-map", `[${prev}]`, "-an",
+        "-t", lenI.toFixed(2), "-r", String(FPS),
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "21",
+        "-movflags", "+faststart", out
+      );
+      await log(`씬 ${i + 1}/${sceneData.length} 인코딩(자막 ${local.length})…`);
+      await run(FFMPEG, args);
+      norm.push(out);
     }
+
+    // ── 5) 영상 이어붙이기(무손실) ──
+    await log("영상 이어붙이는 중…");
+    const listFile = join(dir, "list.txt");
+    await writeFile(listFile, norm.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"));
+    const gv = join(dir, "global.mp4");
+    await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", "-movflags", "+faststart", gv]);
+
+    // ── 6) 글로벌 오디오(별도 1패스, 오디오만 → 가벼움): 각 유닛 지연배치 후 믹스 ──
+    let ga = null;
+    if (allAudio.length) {
+      await log(`오디오 합치는 중(${allAudio.length}개)…`);
+      const aArgs = ["-y"];
+      for (const a of allAudio) aArgs.push("-i", a.ap);
+      let af = "";
+      allAudio.forEach((a, j) => {
+        af += `[${j}:a]adelay=${Math.round(a.gstart * 1000)}:all=1[ad${j}];`;
+      });
+      af += `${allAudio.map((_, j) => `[ad${j}]`).join("")}amix=inputs=${allAudio.length}:normalize=0:dropout_transition=0[aout]`;
+      ga = join(dir, "ga.m4a");
+      aArgs.push("-filter_complex", af, "-map", "[aout]", "-t", D.toFixed(2), "-c:a", "aac", "-b:a", "128k", ga);
+      await run(FFMPEG, aArgs);
+    }
+
+    // ── 7) 최종 mux(복사 — 재인코딩 X, 가벼움) ──
+    await log(`최종 mux(${D.toFixed(1)}s)…`);
     const finalPath = join(dir, "final.mp4");
-    args.push(
-      "-filter_complex", vfilter,
-      "-map", `[${prev}]`, "-map", audioMap,
-      "-t", D.toFixed(2), "-r", String(FPS),
-      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "21",
-      "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", finalPath
-    );
-    await run(FFMPEG, args, 600_000);
+    if (ga) {
+      await run(FFMPEG, [
+        "-y", "-i", gv, "-i", ga,
+        "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "copy",
+        "-t", D.toFixed(2), "-movflags", "+faststart", finalPath,
+      ]);
+    } else {
+      await run(FFMPEG, ["-y", "-i", gv, "-c", "copy", "-movflags", "+faststart", finalPath]);
+    }
 
     await log("업로드 중…");
     const { url } = await put(`project/${projectId}/composed-${Date.now()}.mp4`, createReadStream(finalPath), {

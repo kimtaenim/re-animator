@@ -93,16 +93,11 @@ async function tick(types) {
   }
 }
 
-// ★ 더빙(dub)은 가벼운 네트워크 작업이라 무거운 메인 큐(분할·추출·영상·합성)와 '병렬'로 돈다.
-//   → 동영상 생성 중에도 더빙이 동시에 처리된다. 저장은 오디오 필드만 병합(runDub)해 충돌 방지.
-const MAIN_TYPES = TYPES.filter((t) => t !== "dub");
-async function loop(types) {
-  for (;;) {
-    await tick(types);
-    await new Promise((r) => setTimeout(r, POLL_MS));
-  }
+// ★메모리 빡빡한 워커라 잡은 '한 번에 하나만' 처리한다(병렬 X → OOM 방지). 더빙 UI 는
+//   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
+console.log("[worker] BUILD = m7-compose-memsafe-v13 (합성 메모리-안전 재작성 + 병렬 더빙 해제)");
+console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
+for (;;) {
+  await tick(TYPES);
+  await new Promise((r) => setTimeout(r, POLL_MS));
 }
-
-console.log("[worker] BUILD = m7-compose-flow-v12 (합성: 영상 안 늘리고 더빙을 다음 씬으로 흘림)");
-console.log("[worker] 시작 — 메인 큐 + 더빙 큐(병렬) 폴링 중…");
-await Promise.all([loop(MAIN_TYPES), loop(["dub"])]);
