@@ -280,15 +280,12 @@ export async function runCompose(projectId) {
       vfilter += `[bg]`;
       let prev = "bg";
       local.forEach((lc, k) => {
-        // ★shortest=1 필수 — 자막 PNG는 -loop 1(무한)이라, 이게 없으면 영상이 끝나도 오버레이가
-        //   안 끝나 ffmpeg 가 매달린다(먹통). 영상(유한)이 끝나면 오버레이도 끝낸다.
-        vfilter += `;[${prev}][${1 + k}:v]overlay=0:0:shortest=1:enable='between(t,${lc.ls.toFixed(3)},${lc.le.toFixed(3)})'[cv${k}]`;
+        // aninews 패턴 그대로 — overlay + enable, 출력 -t 로 종료(shortest·입력-t 안 씀).
+        vfilter += `;[${prev}][${1 + k}:v]overlay=0:0:enable='between(t,${lc.ls.toFixed(3)},${lc.le.toFixed(3)})'[cv${k}]`;
         prev = `cv${k}`;
       });
       const args = ["-y", "-i", sd.raw];
-      // ★각 자막 입력에 -t 로 '유한 스트림'화 — 무한 -loop 입력이 2개 이상이면 ffmpeg 가
-      //   데드락(자막 2부터 먹통). -t 로 끊으면 안전. framerate 는 -loop 앞에 둔다.
-      for (const lc of local) args.push("-loop", "1", "-framerate", String(FPS), "-t", lenI.toFixed(2), "-i", lc.path);
+      for (const lc of local) args.push("-loop", "1", "-framerate", String(FPS), "-i", lc.path);
       const out = join(dir, `n${i}.mp4`);
       args.push(
         "-filter_complex", vfilter, "-map", `[${prev}]`, "-an",

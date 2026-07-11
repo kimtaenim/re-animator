@@ -38,6 +38,16 @@ async function loadCanvas() {
   return _canvas;
 }
 
+// ★캔버스 재사용(aninews 방식) — 캡션마다 새 캔버스(≈수 MB)를 만들면 메모리 churn 으로
+//   워커가 OOM 난다. 워커는 한 번에 하나씩 렌더하므로 하나를 지워가며 재사용해도 안전.
+let _reuse = null;
+function getReuseCanvas(createCanvas, W, H) {
+  if (!_reuse || _reuse.width !== W || _reuse.height !== H) _reuse = createCanvas(W, H);
+  const ctx = _reuse.getContext("2d");
+  ctx.clearRect(0, 0, W, H);
+  return { canvas: _reuse, ctx };
+}
+
 async function ensureFont(GlobalFonts) {
   if (_fontReady) return _fontOk;
   _fontReady = true;
@@ -303,8 +313,7 @@ export async function renderCaptionPng(text, { W, H, cy }) {
   const { createCanvas, GlobalFonts } = mod;
   if (!(await ensureFont(GlobalFonts))) return null;
   try {
-    const canvas = createCanvas(W, H);
-    const ctx = canvas.getContext("2d");
+    const { canvas, ctx } = getReuseCanvas(createCanvas, W, H);
     const maxW = Math.round(W * 0.9);
     const fontPx = Math.max(20, Math.round(H * 0.04)); // 프레임 높이 비례
     const emSize = Math.round(fontPx * 1.3);
