@@ -999,12 +999,15 @@ function estimateVideoSeconds(cut) {
 // ★기본 톤(사용자 지정): 무조건 스타일리시. '작고 느리고 잔잔하게'는 aninews 용이고
 //   re-animator 는 빠르고 스타일리시하게 — 정적 샷도 허용하되 '디자인된 것처럼' 멋있어야 한다.
 //   일관성 가드(스타일·인물 유지, 새 오브젝트·텍스트·변형 금지)는 그대로 지킨다.
+// ★가드 문구 주의: "consistent with the still image"·"no morphing"·"subject barely moves" 같은
+//   정지 앵커는 과장 카메라 지시와 정면 충돌해 밋밋한 결과로 타협된다(실사용 확인). 가드는
+//   '인물 정체성·그림체'로 좁히고, 큰 프레임 변화는 의도된 것이라고 명시한다.
 const MOTION_GUIDANCE =
-  "Shoot this like a cut from a high-end music video — that is the single reference for every shot: " +
-  "slick, fashion-forward, rhythmic; bold camera moves and confident speed changes, dramatic angles; " +
-  "a static shot is fine only when it feels striking and deliberately designed, like an album-cover frame. " +
-  "Never plain or boring. " +
-  "Keep the subject, art style and colors consistent with the still image. No new objects, no text, no morphing.";
+  "Shoot this like a cut from a high-end music video — that is the single reference for every shot. " +
+  "LARGE, fast camera movement is intended and correct: dramatic zooms, perspective shifts and big " +
+  "reframing are the goal, not an artifact. Never render a timid or barely-moving camera. " +
+  "Keep the character's identity, pose and the art style consistent; do not add new objects or text; " +
+  "do not distort faces.";
 // 대사 있는 인물 컷: '말하는 것처럼' 입/얼굴 움직임(진짜 립싱크 아님 — Grok I2V 한계).
 const SPEAKING_GUIDANCE =
   "The character is talking: natural, subtle lip and mouth movement as if speaking, with a slight, " +

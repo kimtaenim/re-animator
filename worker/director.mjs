@@ -9,25 +9,26 @@
 import sharp from "sharp";
 
 // 카메라 프리셋 — Studio CAMERA_MOVES 와 동기(id·영문 프롬프트 동일해야 함).
+// ★"subject barely moves"류 정지 앵커 금지 — 과장 지시와 충돌해 밋밋하게 타협됨.
 export const CAMERA_PROMPTS = {
   "crash-in":
-    "Camera creeps forward slowly, then suddenly accelerates into a dramatic crash zoom slamming toward the subject — explosive speed ramp from very slow to very fast. Camera only; the subject barely moves.",
+    "CRASH ZOOM IN: the camera creeps forward very slowly, then suddenly ACCELERATES and slams toward the subject at high speed — an explosive speed ramp ending in a tight dramatic close-up. Large, fast frame movement is intended.",
   "crash-out":
-    "Camera suddenly whips backward in a dramatic crash zoom out, rapidly pulling far away to reveal the whole scene in one explosive motion. Camera only; the subject barely moves.",
+    "CRASH ZOOM OUT: the camera explosively pulls far away from the subject in one fast continuous motion, revealing the whole scene — the frame changes dramatically from close-up to wide.",
   "speed-ramp":
-    "Speed-ramped dolly-in: starts in dreamy slow motion, then bursts into a rapid accelerating rush toward the subject — cinematic action-movie energy. Camera only; the subject barely moves.",
+    "SPEED RAMP: dreamy slow motion at first, then the camera suddenly rushes toward the subject with rapidly increasing speed — music-video energy, big frame change.",
   vertigo:
-    "Extreme dolly zoom vertigo effect: aggressive dolly-in while zooming out, the background warping and stretching dramatically around the subject who stays the same size. Camera only.",
+    "DOLLY ZOOM (vertigo effect): the camera pushes in while the lens zooms out — the subject stays the same size while the background stretches and warps dramatically around them.",
   "whip-pan":
-    "Fast whip pan with heavy motion blur streaking across the scene, aggressive and energetic. Camera only; the subject stays mostly still.",
+    "WHIP PAN: the camera whips sideways extremely fast with heavy motion blur streaks, then snaps to a stop on the subject.",
   "orbit-180":
-    "Fast dramatic 180-degree orbit whipping around the subject with slight motion blur, dynamic and showy. Camera moves; the subject stays still.",
+    "FAST ORBIT: the camera sweeps a fast 180-degree arc around the subject with motion blur, showy and dynamic.",
   "orbit-120":
-    "Smooth elegant 120-degree orbit gliding around the subject, slow and cinematic like a luxury commercial. Camera moves; the subject stays still.",
+    "ELEGANT ORBIT: the camera glides smoothly in a wide 120-degree arc around the subject, slow and luxurious like a high-end commercial.",
   "orbit-spin":
-    "Continuous spinning orbit circling around the subject without stopping, round and round in a stylish hypnotic loop. Camera moves; the subject stays still.",
+    "ENDLESS SPIN: the camera keeps circling around the subject continuously without stopping, hypnotic and stylish.",
   "impact-shake":
-    "Sudden violent camera shake like a shockwave impact, then the camera quickly settles — punchy and dramatic. Camera only; the subject stays still.",
+    "IMPACT SHAKE: a sudden violent camera shake like a shockwave hit — hard jolt, quick rattling decay, then still.",
 };
 const CAMERA_IDS = [...Object.keys(CAMERA_PROMPTS), "none"];
 const EMOTION_IDS = ["shout", "angry", "cry", "whisper", "laugh", "shock", "excited", "sigh", "none"];
