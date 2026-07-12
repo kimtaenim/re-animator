@@ -203,6 +203,7 @@ function mergeBubbleSpeakers(newBubbles, oldBubbles, legacySpeakerId) {
   return bubbles;
 }
 import { loadSplitConfig } from "./config.mjs";
+import { directCut, CAMERA_PROMPTS } from "./director.mjs";
 
 async function download(url) {
   const r = await fetch(url);
@@ -472,6 +473,8 @@ export async function runExtract(projectId) {
     let done = 0;
     let trTotal = 0; // [진단] textRegion(넘어온 내레이션 밴드) OCR 시도/성공 수
     let trHit = 0;
+    let dirOk = 0; // [진단] AI 연출 성공 컷 수
+    let dirCost = 0; // AI 연출 비용 합계(USD)
     for (let i = 0; i < ocrTodo.length; i += C) {
       const chunk = ocrTodo.slice(i, i + C);
       await Promise.all(
@@ -519,6 +522,28 @@ export async function runExtract(projectId) {
               .slice(0, 500);
             if (sfx) s.cut.sfx = sfx;
             s.cut.textBoxes = own.boxes; // 마스크는 '이 컷 이미지 안' 글자만(흡수 밴드는 이미지에 없음)
+            // ── AI 연출: 카메라워크·감정 디폴트를 Claude 가 채움(사용자 지정값은 안 덮음) ──
+            const needCam = !(s.cut.motion || "").trim();
+            const needEmo = (s.cut.bubbles ?? []).some((b) => !b.emotion && b.speakerId !== "__sfx__" && (b.text || "").trim());
+            if (needCam || needEmo) {
+              try {
+                const lines = (s.cut.bubbles ?? [])
+                  .map((b, bi) => ({ index: bi, speaker: b.speakerId === "__sfx__" ? null : b.speakerId ? "character" : "narration", text: (b.text || "").trim() }))
+                  .filter((l) => l.speaker && l.text);
+                const d = await directCut(png, s.cut, lines);
+                if (d) {
+                  if (needCam && d.camera !== "none" && CAMERA_PROMPTS[d.camera]) s.cut.motion = CAMERA_PROMPTS[d.camera];
+                  for (const e of d.emotions) {
+                    const b = s.cut.bubbles?.[e.index];
+                    if (b && !b.emotion && b.speakerId !== "__sfx__" && e.emotion !== "none") b.emotion = e.emotion;
+                  }
+                  dirOk++;
+                  dirCost += d.costUsd || 0;
+                }
+              } catch (e) {
+                await log(`컷 ${s.order + 1} ${String(e?.message ?? e).slice(0, 120)}`);
+              }
+            }
           } catch (e) {
             await log(`컷 ${s.order + 1} 글씨읽기 실패: ${String(e?.message ?? e).slice(0, 100)}`);
           }
@@ -528,6 +553,20 @@ export async function runExtract(projectId) {
       await log(`글씨 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%)`);
     }
     await log(`[진단] 내레이션 밴드 OCR: ${trHit}/${trTotal} 성공(글자 잡힘) — 0/0이면 밴드가 분할서 안 넘어온 것`);
+    if (dirOk > 0) {
+      await log(`[진단] AI 연출: ${dirOk}컷에 카메라·감정 디폴트 채움(Claude, $${dirCost.toFixed(3)})`);
+      try {
+        await recordCost({
+          projectId,
+          vendor: "anthropic",
+          model: process.env.CLAUDE_DIRECTOR_MODEL || "claude-opus-4-8",
+          costUsd: dirCost,
+          meta: { kind: "direct", cuts: dirOk },
+        });
+      } catch {}
+    } else if (!process.env.ANTHROPIC_API_KEY) {
+      await log("AI 연출 건너뜀 — 워커 env 에 ANTHROPIC_API_KEY 를 넣으면 카메라·감정 자동 지정");
+    }
   }
 
   const p2 = await getProject(projectId);

@@ -9,6 +9,7 @@
     "cli": "node cli.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.111.0",
     "@upstash/redis": "^1.37.0",
     "@vercel/blob": "^2.3.3",
     "sharp": "^0.34.1"

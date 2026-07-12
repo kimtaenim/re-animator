@@ -93,7 +93,7 @@ async function tick(types) {
 
 // ★메모리 빡빡한 워커라 잡은 '한 번에 하나만' 처리한다(병렬 X → OOM 방지). 더빙 UI 는
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
-console.log("[worker] BUILD = m7-compose-v31 (더빙 감정 연기 — ElevenLabs v3 + 오디오 태그, 줄별 감정 셀렉트)");
+console.log("[worker] BUILD = m7-compose-v32 (AI 연출 — Claude 가 컷 이미지·대사 읽고 카메라워크·감정 디폴트 지정)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);
