@@ -132,7 +132,7 @@ function addGapTextRegions(scenes, profile, totalHeight, log) {
   // 글자 행의 위·아래 끝을 찾아 그 밴드로 좁혀 저장 → 추출이 그 부분만 OCR 해 이웃 컷에 붙인다.
   const TEXT_STD = Number(process.env.GAP_TEXT_STD || 8); // 이 이상 = 글자(잉크) 있는 행
   const MIN_ROWS = Number(process.env.GAP_MIN_ROWS || 4); // 글자 행이 이만큼은 있어야 텍스트
-  const MAX_BANDS = Number(process.env.GAP_MAX_BANDS || 120); // ★24였음 — 내레이션 많은 만화(갭 76개)에서 뒷부분 통째 유실
+  const MAX_BANDS = Number(process.env.GAP_MAX_BANDS || 240); // ★24→120→240: 중국 만화 실측서 120도 14개 초과(그림 run 이 슬롯을 먹음)
   // absorbTextCuts 가 이미 넘긴 밴드는 건너뛴다(중복 OCR·중복 대사 방지).
   const existing = [];
   for (const s of scenes) for (const tr of s.cut?.textRegions ?? []) existing.push([tr.yStart, tr.yEnd]);

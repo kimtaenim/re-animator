@@ -363,7 +363,11 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
   return (
     <div>
       <div className="mb-2 flex items-center justify-between text-xs text-[var(--muted)]">
-        <span>왼쪽: 박스 드래그=경계 · 빈 곳 더블클릭=추가 · 오른쪽 카드에서 중심·내용 편집 (자동 저장)</span>
+        <span>
+          왼쪽: 박스 드래그=경계 · 빈 곳 더블클릭=추가 · 오른쪽 카드에서 중심·내용 편집 (자동 저장) ·{" "}
+          <span className="rounded border border-dashed border-cyan-300/80 bg-cyan-400/20 px-1">하늘색 점선</span>
+          =내레이션 OCR 예약(추출 때 이웃 컷 대사로 들어감)
+        </span>
         <button
           onClick={save}
           disabled={saving}
@@ -404,6 +408,24 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                 style={{ top: d.top * scale, height: d.height * scale }}
               />
             ))}
+
+            {/* 내레이션 OCR 예약 밴드(하늘색 점선) — 컷 밖 텍스트가 '잡혀 있음'을 보이게.
+                안 보이면 사용자가 유실로 오해한다(실제로는 추출 때 이웃 컷 대사로 붙음). */}
+            {regions.flatMap((r, ri) =>
+              (r.cut?.textRegions ?? []).map((tr, ti) => (
+                <div
+                  key={`band-${ri}-${ti}`}
+                  className="pointer-events-none absolute border border-dashed border-cyan-300/80 bg-cyan-400/20"
+                  style={{
+                    top: tr.yStart * scale,
+                    height: Math.max(2, (tr.yEnd - tr.yStart) * scale),
+                    left: (tr.xStart ?? 0) * scale,
+                    width: ((tr.xEnd ?? canvas.refWidth) - (tr.xStart ?? 0)) * scale,
+                  }}
+                  title="내레이션 OCR 예약 — 추출(2단계) 때 이 영역 글자를 이웃 컷 대사로 붙입니다"
+                />
+              ))
+            )}
 
             {regions.map((r, i) => {
               const xs = r.xStart ?? 0;
