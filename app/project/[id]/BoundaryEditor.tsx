@@ -573,13 +573,13 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                       rows={2}
                       className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[11px] leading-tight text-[var(--text)]"
                     />
-                    {/* 분할이 미리 읽은 내레이션·대사 — '처음부터' 글자로 보이게(정본은 추출 후 편집기). */}
+                    {/* 분할이 미리 읽은 대사(내레이션 포함 — 내레이션도 대사다) — '처음부터' 보이게. */}
                     {(cut.bubbles?.length ?? 0) > 0 && (
                       <div
                         className="flex flex-col gap-0.5 rounded border border-cyan-300/40 bg-cyan-400/10 px-1 py-0.5"
-                        title="분할 단계에서 미리 읽은 글자 — 추출(2단계) 후 대사 편집기에서 화자 지정·수정"
+                        title="이 컷의 대사(내레이션 포함) — 추출(2단계) 후 대사 편집기에서 화자 지정·수정"
                       >
-                        <span className="text-[9px] text-cyan-300/90">잡힌 텍스트 {cut.bubbles!.length}줄</span>
+                        <span className="text-[9px] text-cyan-300/90">대사 {cut.bubbles!.length}줄</span>
                         {cut.bubbles!.slice(0, 3).map((b, bi) => (
                           <span key={bi} className="truncate text-[10px]" title={b.text}>
                             {b.text}
