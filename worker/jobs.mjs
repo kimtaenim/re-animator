@@ -461,27 +461,34 @@ export async function runSplit(projectId) {
   //   바로 OCR 해 컷 bubbles(내레이션)로 붙인다 → G1 카드에서 즉시 글자로 확인 가능.
   //   추출(2단계)이 나중에 전체를 다시 읽어 덮어쓰므로 여기서 실패해도 유실은 아니다.
   if (key && totalTR > 0) {
+    // ★순서 보존: 동시 OCR 은 하되(속도), 부착은 전부 끝난 뒤 '위치(y) 오름차순'으로.
+    //   응답 순서대로 붙이면 위 문장이 아래로 가는 등 읽는 순서가 뒤집힌다(사용자 실측).
     const units = [];
-    for (const s of scenes) for (const tr of s.cut?.textRegions ?? []) units.push({ s, tr });
+    for (const s of scenes) {
+      const trs = (s.cut?.textRegions ?? []).slice().sort((a, b) => a.yStart - b.yStart);
+      for (const tr of trs) units.push({ s, tr, out: null });
+    }
     await log(`내레이션 미리 읽기 ${units.length}개 밴드…`);
-    let got = 0;
     const C2 = 3;
     for (let i = 0; i < units.length; i += C2) {
       await Promise.all(
-        units.slice(i, i + C2).map(async ({ s, tr }) => {
+        units.slice(i, i + C2).map(async (u) => {
           try {
-            const png = await extractRegion(canvas, buffers, tr.yStart, tr.yEnd, tr.xStart, tr.xEnd);
+            const png = await extractRegion(canvas, buffers, u.tr.yStart, u.tr.yEnd, u.tr.xStart, u.tr.xEnd);
             const t = await readCutText(png, key, VLM_MODEL);
-            if (t.bubbles?.length) {
-              if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
-              s.cut.bubbles = [...(s.cut.bubbles ?? []), ...t.bubbles.map((b) => ({ text: b.text }))];
-              got++;
-            }
+            if (t.bubbles?.length) u.out = t.bubbles.map((b) => ({ text: b.text }));
           } catch {}
         })
       );
       const done = Math.min(i + C2, units.length);
       if (done === units.length || done % 15 < C2) await log(`내레이션 미리 읽기 ${done}/${units.length}…`);
+    }
+    let got = 0;
+    for (const u of units) {
+      if (!u.out) continue;
+      if (!u.s.cut) u.s.cut = { dialogue: "", sfx: "", type: null };
+      u.s.cut.bubbles = [...(u.s.cut.bubbles ?? []), ...u.out];
+      got++;
     }
     await log(`내레이션 미리 읽기 완료 — ${got}개 밴드에서 글자 확보(G1 컷 카드에 표시)`);
   }
@@ -601,10 +608,13 @@ export async function runExtract(projectId) {
             const own = await readCutText(png, key, OCR_MODEL);
             if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
             // ★ OCR(풀해상도)이 이 컷 대사의 유일 정답. 자기 이미지 안 글자 = own.
-            let allBubbles = [...(own.bubbles || [])];
+            // ★읽는 순서 보존: 밴드를 y 오름차순으로 돌고, 컷 '위' 밴드 글은 컷 안 글보다
+            //   앞에, '아래' 밴드 글은 뒤에 둔다(위 문장이 아래로 가는 역전 방지).
+            const above = [];
+            const below = [];
             let sfx = own.sfx || "";
-            // 흡수된 '대사만' 밴드: 그 영역만 따로 추출·OCR → 대사를 이 컷에 붙인다(이미지엔 안 합침).
-            for (const tr of s.cut.textRegions ?? []) {
+            const trs = (s.cut.textRegions ?? []).slice().sort((a, b) => a.yStart - b.yStart);
+            for (const tr of trs) {
               try {
                 const tpng = await extractRegion(
                   p.virtualCanvas,
@@ -617,12 +627,13 @@ export async function runExtract(projectId) {
                 const t = await readCutText(tpng, key, OCR_MODEL);
                 trTotal++;
                 if (t.bubbles?.length) {
-                  allBubbles = allBubbles.concat(t.bubbles);
+                  (tr.yStart < s.sourceRegion.yStart ? above : below).push(...t.bubbles);
                   trHit++;
                 }
                 if (t.sfx) sfx = sfx ? `${sfx} ${t.sfx}` : t.sfx;
               } catch {}
             }
+            let allBubbles = [...above, ...(own.bubbles || []), ...below];
             // 풍선별 speakerId 는 기존 값(텍스트 매칭)으로 보존해 화자 귀속이 안 날아가게.
             s.cut.bubbles = mergeBubbleSpeakers(allBubbles, s.cut.bubbles, s.cut.speakerId);
             s.cut.dialogue = allBubbles
