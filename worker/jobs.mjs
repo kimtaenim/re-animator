@@ -111,6 +111,55 @@ function absorbTextCuts(scenes) {
   return reals;
 }
 
+// ★가장자리 확장 — 컷 위/아래 가장자리가 '내용 행'과 맞닿아 이어지면 내용이 끝나는 데까지
+//   컷을 늘린다. 어두운 만화에서 거터 오판으로 그림 중간(머리통 등)에 경계가 서는 문제의
+//   결정론적 수술(사용자 실측: 컷 가장자리 밖으로 그림이 이어져 잘려 보임). 텍스트 밴드가
+//   맞닿아 있으면 컷 안으로 들어오는데, 컷 안 글자는 정상 경로(OCR+textBoxes 마스크)라 무해.
+function extendRegionEdges(regions, profile, totalH) {
+  const STD = Number(process.env.EDGE_EXT_STD || 8); // 이 이상 = 내용 있는 행
+  const BLANK_OK = 10; // 그림 내 미세 공백 허용(px) — 이보다 길게 비면 진짜 여백으로 보고 중단
+  const MAX_EXT = 1600; // 폭주 방지
+  const sorted = regions.slice().sort((a, b) => a.yStart - b.yStart);
+  let grown = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const r = sorted[i];
+    const before = r.yEnd - r.yStart;
+    // 아래쪽 가장자리
+    const nextStart = Math.round(sorted[i + 1]?.yStart ?? totalH);
+    let y = Math.round(r.yEnd);
+    let blank = 0;
+    let moved = 0;
+    while (y < nextStart - 4 && moved < MAX_EXT) {
+      if (profile[y] > STD) {
+        r.yEnd = y + 1;
+        blank = 0;
+      } else if (++blank > BLANK_OK) break;
+      y++;
+      moved++;
+    }
+    // 위쪽 가장자리(앞 컷은 이미 확장 완료된 yEnd 를 경계로)
+    const prevEnd = Math.round(sorted[i - 1]?.yEnd ?? 0);
+    y = Math.round(r.yStart) - 1;
+    blank = 0;
+    moved = 0;
+    while (y > prevEnd + 4 && moved < MAX_EXT) {
+      if (profile[y] > STD) {
+        r.yStart = y;
+        blank = 0;
+      } else if (++blank > BLANK_OK) break;
+      y--;
+      moved++;
+    }
+    if (r.yEnd - r.yStart > before + 24) {
+      grown++;
+      // 세로로 크게 늘었으면 트림된 가로 크롭이 새 내용과 안 맞을 수 있어 전체 폭으로 해제.
+      delete r.xStart;
+      delete r.xEnd;
+    }
+  }
+  return grown;
+}
+
 // ★ 컷이 아닌 '빈 구간'(내레이션 밴드 등)도 텍스트가 있을 수 있다. 컷들이 안 덮은 y 구간 중
 // '내용 있는'(행별 평탄도 프로파일이 높은) 곳을 가장 가까운 컷의 textRegions 로 추가 → 추출 때
 // 따로 OCR 해 대사/내레이션을 그 컷에 붙인다. 평탄한 거터(내용 없음)는 건너뛴다.
@@ -369,6 +418,9 @@ export async function runSplit(projectId) {
     trimmed.push(box);
   }
   regions = trimmed;
+  // 가장자리가 그림을 자르고 있으면 내용 끝까지 확장(머리통 절단 방지).
+  const grown = extendRegionEdges(regions, global, canvas.totalHeight);
+  if (grown) await log(`경계 확장: ${grown}개 컷 가장자리가 그림에 걸려 있어 내용 끝까지 늘림`);
   await log(`최종 장면 ${regions.length}개`);
 
   // 4) 컷 온톨로지 분류 — 각 컷의 타입(중심)+내용. 사람이 G1 에서 확정.
