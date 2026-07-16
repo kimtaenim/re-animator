@@ -554,6 +554,22 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     updateCut(sceneId, { bubbles: nb });
   }
 
+  // 이 대사 줄을 '무성영화 자막 씬'으로 분리 — 검은 화면+테두리에 자막·더빙만 나오는 씬.
+  async function makeCardScene(sceneId: string, bi: number) {
+    try {
+      const r = await fetch("/api/scene", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneId, bubbleIndex: bi }),
+      });
+      const d = await r.json();
+      if (d.ok && d.project) setProject(d.project);
+      else alert(d.error ?? "자막 씬 분리 실패");
+    } catch {
+      alert("자막 씬 분리 실패(네트워크)");
+    }
+  }
+
   // 이 줄(말풍선)의 자막 위치 지정/해제 — 같은 칸 다시 클릭하면 해제(컷 기본으로 복귀).
   function setBubblePos(sceneId: string, bi: number, fx: number | null, fy: number | null) {
     const src = project.scenes.find((x) => x.id === sceneId);
@@ -769,6 +785,18 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     })
                   )}
                 </div>
+              )}
+              {/* 무성영화 자막 씬으로 분리 — 이 줄만 검은 화면+자막+더빙 씬이 됨 */}
+              {b.speakerId !== SFX_SPEAKER && (
+                <button
+                  type="button"
+                  onClick={() => makeCardScene(s.id, bi)}
+                  disabled={busy}
+                  title="이 대사를 무성영화 자막 씬으로 분리 — 검은 화면+테두리에 자막·더빙만"
+                  className="shrink-0 rounded border border-[var(--border)] px-1.5 py-1 leading-none text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-40"
+                >
+                  🎬
+                </button>
               )}
               {b.audioUrl ? (
                 <button
@@ -2126,8 +2154,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
 
           <div className="space-y-2">
             {project.scenes
-              .filter((s) => s.generatedImage)
+              .filter((s) => s.generatedImage || (s.cut?.type === "text" && (s.cut?.bubbles?.length ?? 0) > 0))
               .map((s) => {
+                const isCardScene = !s.generatedImage; // 무성영화 자막 씬(영상·이미지 불필요)
                 const bubs = s.cut?.bubbles ?? [];
                 const spkIds = bubs.length
                   ? [...new Set(bubs.map((b) => b.speakerId).filter((x): x is string => !!x))]
@@ -2164,29 +2193,47 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2"
                   >
                     <div className="flex w-6 shrink-0 flex-col items-center gap-1 pt-8">
-                      <input
-                        type="checkbox"
-                        checked={selForVideo.has(s.id)}
-                        onChange={() => toggleVideoSel(s.id)}
-                        title="다중 선택 생성용"
-                      />
+                      {!isCardScene && (
+                        <input
+                          type="checkbox"
+                          checked={selForVideo.has(s.id)}
+                          onChange={() => toggleVideoSel(s.id)}
+                          title="다중 선택 생성용"
+                        />
+                      )}
                       <span className="text-xs text-[var(--muted)]">{s.order + 1}</span>
                     </div>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={s.generatedImage}
-                      alt="생성"
-                      onClick={() => setScenePreview(s.id)}
-                      className="h-28 w-auto shrink-0 cursor-zoom-in rounded border border-[var(--border)]"
-                    />
-                    <button
-                      onClick={() => videoOne(s.id)}
-                      disabled={busy || vidPending.has(s.id)}
-                      title={s.videoUrl ? "동영상 다시 생성" : "동영상 생성 시작"}
-                      className="shrink-0 pt-11 text-lg text-[var(--muted)] hover:text-[var(--accent)] disabled:opacity-40"
-                    >
-                      ▶
-                    </button>
+                    {isCardScene ? (
+                      // 무성영화 자막 씬 — 합성이 검은 배경+테두리를 만들고 글자는 자막으로 나감.
+                      <div
+                        onClick={() => setScenePreview(s.id)}
+                        title="자막 씬 — 미리보기"
+                        className="relative grid h-28 w-40 shrink-0 cursor-zoom-in place-items-center rounded border border-[var(--border)] bg-black px-3 text-center"
+                      >
+                        <span className="pointer-events-none absolute inset-1.5 rounded border border-[#f4efe4]/60" />
+                        <span className="line-clamp-3 text-[11px] font-semibold text-[#f4efe4]">
+                          {bubs[0]?.text || "자막 씬"}
+                        </span>
+                      </div>
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={s.generatedImage}
+                        alt="생성"
+                        onClick={() => setScenePreview(s.id)}
+                        className="h-28 w-auto shrink-0 cursor-zoom-in rounded border border-[var(--border)]"
+                      />
+                    )}
+                    {!isCardScene && (
+                      <button
+                        onClick={() => videoOne(s.id)}
+                        disabled={busy || vidPending.has(s.id)}
+                        title={s.videoUrl ? "동영상 다시 생성" : "동영상 생성 시작"}
+                        className="shrink-0 pt-11 text-lg text-[var(--muted)] hover:text-[var(--accent)] disabled:opacity-40"
+                      >
+                        ▶
+                      </button>
+                    )}
                     {vidPending.has(s.id) ? (
                       // 생성 중이면 최우선 — 옛 영상이 남아 있어도 스피너를 보여준다(재생성 피드백).
                       <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--accent)] px-1 text-center text-[10px] text-[var(--accent)]">
@@ -2205,13 +2252,18 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         onClick={() => setScenePreview(s.id)}
                         className="h-28 w-auto shrink-0 cursor-zoom-in rounded border border-[var(--ok)] object-cover"
                       />
-                    ) : (
+                    ) : isCardScene ? null : (
                       <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] px-1 text-center text-[10px] text-[var(--muted)]">
                         {s.videoError ? `실패: ${s.videoError}` : "미생성"}
                       </div>
                     )}
                     <div className="flex min-w-0 flex-1 flex-col gap-1 text-[11px]">
                       <div className="flex flex-wrap items-center gap-2">
+                        {isCardScene ? (
+                          <span className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)]" title="합성 때 검은 화면+테두리 위에 자막·더빙으로 렌더 — 이미지·영상 생성 불필요">
+                            🎞 자막 씬(무성영화) — 영상 생성 불필요
+                          </span>
+                        ) : (
                         <button
                           onClick={() => videoOne(s.id)}
                           disabled={busy || vidPending.has(s.id)}
@@ -2220,6 +2272,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         >
                           {vidPending.has(s.id) ? "생성 중…" : s.videoUrl ? "🎬 다시" : "🎬 동영상"}
                         </button>
+                        )}
                         <div
                           className="flex items-center gap-1 text-[var(--muted)]"
                           title="영상 길이(초) · 0.5초 단위. 장면전환 등 무대사 컷은 여기서 늘리세요. '자동'=대사/타입 기준."
@@ -2510,6 +2563,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   ) : s.generatedImage ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={s.generatedImage} alt="" className="max-h-[70vh] max-w-[86vw] rounded" />
+                  ) : s.cut?.type === "text" && units.length > 0 ? (
+                    // 무성영화 자막 씬 — 검은 배경+이중 테두리(합성과 동일 룩), 글자는 아래 자막 오버레이가 표시.
+                    <div className="relative h-[60vh] w-[min(86vw,30rem)] rounded bg-black">
+                      <span className="pointer-events-none absolute inset-[4%] border-2 border-[#f4efe4]/80" />
+                      <span className="pointer-events-none absolute inset-[5.2%] border border-[#f4efe4]/60" />
+                    </div>
                   ) : (
                     <div className="grid h-40 w-72 place-items-center rounded bg-[var(--panel)] text-sm text-[var(--muted)]">
                       이미지/영상 없음
@@ -2518,7 +2577,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   {units.length > 0 && (() => {
                     const u = units[Math.min(subIdx, units.length - 1)];
                     const fx = typeof u.sx === "number" ? Math.max(0.05, Math.min(0.95, u.sx)) : subFracX(s.cut);
-                    const fy = typeof u.sy === "number" ? Math.max(0.05, Math.min(0.95, u.sy)) : subFracY(s.cut);
+                    const cardDefault = s.cut?.type === "text" && !s.cut?.subtitlePos && s.cut?.subtitleY == null; // 카드 씬 기본=정중앙
+                    const fy =
+                      typeof u.sy === "number" ? Math.max(0.05, Math.min(0.95, u.sy)) : cardDefault ? 0.5 : subFracY(s.cut);
                     return (
                     <div
                       className="pointer-events-none absolute flex -translate-x-1/2 -translate-y-1/2 justify-center"

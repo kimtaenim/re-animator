@@ -368,6 +368,30 @@ export async function renderCaptionBox(text, { W, H, cy, cx }) {
   }
 }
 
+// ★무성영화 자막 씬 배경 — 검은 바탕 + 이중 테두리만(글자 없음). 글자는 일반 자막
+//   파이프라인이 순차 표시·강조·더빙 싱크까지 처리한다(사용자 지정 설계). 실패 시 null.
+export async function renderIntertitleFrame({ W, H }) {
+  const mod = await loadCanvas();
+  if (!mod) return null;
+  const { createCanvas } = mod;
+  try {
+    const { canvas, ctx } = getReuseCanvas(createCanvas, W, H);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, W, H);
+    // 이중 테두리(무성영화 카드 느낌)
+    const m1 = Math.round(Math.min(W, H) * 0.045);
+    const m2 = m1 + Math.round(Math.min(W, H) * 0.012);
+    ctx.strokeStyle = "rgba(244,239,228,0.85)"; // 살짝 바랜 흰색(빈티지)
+    ctx.lineWidth = 3;
+    ctx.strokeRect(m1, m1, W - m1 * 2, H - m1 * 2);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(m2, m2, W - m2 * 2, H - m2 * 2);
+    return canvas.toBuffer("image/png");
+  } catch {
+    return null;
+  }
+}
+
 // (레거시) 한 자막 유닛을 '전체 프레임(W×H) 투명 PNG'로 — overlay=0:0 용. 실패 시 null.
 export async function renderCaptionPng(text, { W, H, cy, cx }) {
   const raw = (text || "").trim();

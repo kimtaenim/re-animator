@@ -13,7 +13,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { renderCaptionBox } from "./subtitle-render.mjs";
+import { renderCaptionBox, renderIntertitlePng } from "./subtitle-render.mjs";
 import { stripMarks } from "./emphasis.mjs";
 
 let FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
@@ -160,7 +160,12 @@ export async function runCompose(projectId) {
 
   const p = await getProject(projectId);
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
-  const scenes = (p.scenes ?? []).slice().sort((a, b) => a.order - b.order).filter((s) => s.videoUrl);
+  // 자막 씬(무성영화 카드, text 컷)은 영상 없이도 합성 대상 — 검은 배경+카드로 직접 렌더.
+  const isCardScene = (s) => !s.videoUrl && s.cut?.type === "text" && subtitleUnits(s.cut).length > 0;
+  const scenes = (p.scenes ?? [])
+    .slice()
+    .sort((a, b) => a.order - b.order)
+    .filter((s) => s.videoUrl || isCardScene(s));
   if (scenes.length === 0) throw new Error("묶을 영상이 없어요(먼저 동영상 생성)");
 
   const [W, H] = targetDims(p);
@@ -169,10 +174,15 @@ export async function runCompose(projectId) {
     const sceneFiles = [];
     for (let i = 0; i < scenes.length; i++) {
       const s = scenes[i];
-      await log(`씬 ${i + 1}/${scenes.length}: 다운로드…`);
-      const vPath = join(dir, `v${i}.mp4`);
-      await download(s.videoUrl, vPath);
-      const vd = (await probeDuration(vPath)) || 3;
+      const isCard = isCardScene(s); // 무성영화 자막 씬 — 영상 없음, 카드로 렌더
+      let vPath = null;
+      let vd = 0;
+      if (!isCard) {
+        await log(`씬 ${i + 1}/${scenes.length}: 다운로드…`);
+        vPath = join(dir, `v${i}.mp4`);
+        await download(s.videoUrl, vPath);
+        vd = (await probeDuration(vPath)) || 3;
+      }
 
       // 더빙 오디오 유닛 다운로드 + 자막 시간구간(유닛 실제 길이 기준)
       const aPaths = [];
@@ -208,15 +218,19 @@ export async function runCompose(projectId) {
         await run(FFMPEG, cc);
       }
 
-      // 더빙 없으면 자막을 영상 길이에 글자수 비례로 순차.
+      // 더빙 없으면 자막을 영상 길이에 글자수 비례로 순차. (카드 씬은 글자수 기반 길이)
       if (!aPaths.length) {
         const subs = subtitleUnits(s.cut);
         if (subs.length) {
+          const textLen = subs.reduce((n, u) => n + stripMarks(u.text).replace(/\s/g, "").length, 0);
+          const baseDur = isCard
+            ? Math.max(2.5, Math.min(10, Number(s.cut?.durationSec) || textLen * 0.14))
+            : vd;
           const weights = subs.map((u) => Math.max(1, stripMarks(u.text).replace(/\s/g, "").length));
           const wSum = weights.reduce((a, b) => a + b, 0) || 1;
           let a2 = 0;
           subs.forEach((u, j) => {
-            const d = Math.max(1.2, (vd * weights[j]) / wSum);
+            const d = Math.max(1.2, (baseDur * weights[j]) / wSum);
             caps.push({ text: u.text, start: a2, end: a2 + d, sx: u.sx, sy: u.sy });
             a2 += d;
           });
@@ -224,13 +238,16 @@ export async function runCompose(projectId) {
       }
 
       const capTotal = caps.length ? caps[caps.length - 1].end : 0;
-      const finalDur = Math.max(audioLen, capTotal) || vd;
+      const finalDur = Math.max(audioLen, capTotal) || (isCard ? 2.5 : vd);
       if (caps.length) caps[caps.length - 1].end = finalDur + 0.5; // 마지막 자막 끝까지
       const speed = vd > 0 && finalDur > vd ? finalDur / vd : 1; // 오디오/자막 길면 영상 슬로모션
 
       // 자막 캡션 PNG(캔버스 재사용). 위치는 자막 있을 때만 계산.
-      // 위치 해석: 대사(말풍선)별 지정 > 컷 기본 > 디폴트. 화자가 번갈아 말하면 줄마다 다름.
-      const cyDef = subtitleCenterY(s.cut, H);
+      // 위치 해석: 대사(말풍선)별 지정 > 컷 기본 > 디폴트. 카드 씬 기본은 정중앙(무성영화).
+      const cyDef =
+        isCard && !s.cut?.subtitlePos && s.cut?.subtitleY == null
+          ? Math.round(H * 0.5)
+          : subtitleCenterY(s.cut, H);
       const cxDef = subtitleCenterX(s.cut, W);
       const frac = (v) => (typeof v === "number" && isFinite(v) ? Math.max(0.05, Math.min(0.95, v)) : null);
       const capPaths = [];
@@ -249,15 +266,25 @@ export async function runCompose(projectId) {
       const fadeOut = FADES_OUT.has(s.cut?.transition);
       const fadeIn = FADES_IN.has(scenes[i - 1]?.cut?.transition) || (i === 0 && s.cut?.transition === "fadein");
 
-      // ── ffmpeg (aninews 패턴): 입력 0=영상, 1=오디오(없으면 anullsrc), 2..=자막 PNG ──
+      // ── ffmpeg (aninews 패턴): 입력 0=영상(카드 씬은 검정+테두리 프레임), 1=오디오, 2..=자막 PNG ──
       // -nostats/-loglevel warning: 프레임마다 진행 로그를 stderr 에 쏟지 않게(메모리 폭증 방지).
-      const args = ["-hide_banner", "-nostats", "-loglevel", "warning", "-y", "-i", vPath];
+      const args = ["-hide_banner", "-nostats", "-loglevel", "warning", "-y"];
+      if (isCard) {
+        const frame = await renderIntertitleFrame({ W, H });
+        if (!frame) throw new Error("자막 씬 배경 렌더 실패(canvas 미설치?)");
+        const fp = join(dir, `frame${i}.png`);
+        await writeFile(fp, frame);
+        args.push("-loop", "1", "-framerate", String(FPS), "-i", fp);
+      } else {
+        args.push("-i", vPath);
+      }
       if (aPath) args.push("-i", aPath);
       else args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100");
       for (const c of capPaths) args.push("-loop", "1", "-framerate", String(FPS), "-i", c.path);
-      let filter =
-        `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
-        `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,setpts=${speed.toFixed(4)}*PTS,fps=${FPS}`;
+      let filter = isCard
+        ? `[0:v]setsar=1,fps=${FPS}` // 프레임이 이미 W×H 정확 — 스케일·슬로모션 불필요
+        : `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+          `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,setpts=${speed.toFixed(4)}*PTS,fps=${FPS}`;
       if (fadeIn) filter += `,fade=t=in:st=0:d=${FADE}`;
       if (fadeOut) filter += `,fade=t=out:st=${Math.max(0, finalDur - FADE).toFixed(2)}:d=${FADE}`;
       filter += `[bg]`;
