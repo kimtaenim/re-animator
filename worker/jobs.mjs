@@ -132,49 +132,78 @@ function addGapTextRegions(scenes, profile, totalHeight, log) {
   // 글자 행의 위·아래 끝을 찾아 그 밴드로 좁혀 저장 → 추출이 그 부분만 OCR 해 이웃 컷에 붙인다.
   const TEXT_STD = Number(process.env.GAP_TEXT_STD || 8); // 이 이상 = 글자(잉크) 있는 행
   const MIN_ROWS = Number(process.env.GAP_MIN_ROWS || 4); // 글자 행이 이만큼은 있어야 텍스트
+  const MAX_BANDS = Number(process.env.GAP_MAX_BANDS || 120); // ★24였음 — 내레이션 많은 만화(갭 76개)에서 뒷부분 통째 유실
   // absorbTextCuts 가 이미 넘긴 밴드는 건너뛴다(중복 OCR·중복 대사 방지).
   const existing = [];
   for (const s of scenes) for (const tr of s.cut?.textRegions ?? []) existing.push([tr.yStart, tr.yEnd]);
   const overlapsExisting = (a, b) => existing.some(([x, y]) => Math.min(b, y) - Math.max(a, x) > 8);
-  const textyBand = (a, b) => {
+  // ★갭 안의 '내용 있는 행'을 연속 구간(run)별로 쪼갠다(빈 행 20px 이상이면 분리).
+  //   예전엔 갭당 첫~끝 행을 밴드 1개로 묶고, 흡수 밴드와 겹치면 갭 전체를 버렸다 —
+  //   같은 갭에 있던 다른 내레이션까지 같이 유실(중국 만화에서 실측 확인). run 단위로
+  //   각각 판정하면 겹치는 run 만 스킵되고 나머지는 산다.
+  const textyRuns = (a, b) => {
     const y0 = Math.max(0, Math.floor(a));
     const y1 = Math.min(profile.length, Math.ceil(b));
+    const runs = [];
     let first = -1;
     let last = -1;
     let count = 0;
+    let blank = 0;
+    const flush = () => {
+      if (first >= 0 && count >= MIN_ROWS) runs.push({ yStart: Math.max(y0, first - 6), yEnd: Math.min(y1, last + 6) });
+      first = -1;
+      last = -1;
+      count = 0;
+    };
     for (let y = y0; y < y1; y++) {
       if (profile[y] > TEXT_STD) {
         if (first < 0) first = y;
         last = y;
         count++;
+        blank = 0;
+      } else if (first >= 0 && ++blank >= 20) {
+        flush();
+        blank = 0;
       }
     }
-    if (count < MIN_ROWS || first < 0) return null;
-    return { yStart: Math.max(y0, first - 6), yEnd: Math.min(y1, last + 6) }; // 상하 6px 여유
+    flush();
+    // ★run 이 갭 끝에 붙어 있으면(=글줄이 씬 경계에 잘려 이어짐) 이웃 씬 쪽으로 90px 연장해
+    //   잘린 줄 전체가 OCR 되게 한다(밴드는 OCR 전용이라 씬 영역과 겹쳐도 무해).
+    for (const r of runs) {
+      if (r.yStart <= y0 + 8) r.yStart = Math.max(0, y0 - 90);
+      if (r.yEnd >= y1 - 8) r.yEnd = Math.min(profile.length, y1 + 90);
+    }
+    return runs;
   };
   let added = 0;
+  let dropped = 0;
   for (const g of gaps) {
-    if (added >= 24) break;
-    const band = textyBand(g.yStart, g.yEnd);
-    if (!band) continue; // 글자 행 없음 = 순수 거터 → 스킵
-    if (overlapsExisting(band.yStart, band.yEnd)) continue; // 이미 흡수로 넘어간 밴드
-    const gc = (band.yStart + band.yEnd) / 2;
-    let best = null;
-    let bd = Infinity;
-    for (const s of scenes) {
-      const c = (s.sourceRegion.yStart + s.sourceRegion.yEnd) / 2;
-      const d = Math.abs(c - gc);
-      if (d < bd) {
-        bd = d;
-        best = s;
+    for (const band of textyRuns(g.yStart, g.yEnd)) {
+      if (overlapsExisting(band.yStart, band.yEnd)) continue; // 이미 흡수로 넘어간 run 만 스킵
+      if (added >= MAX_BANDS) {
+        dropped++;
+        continue;
       }
+      const gc = (band.yStart + band.yEnd) / 2;
+      let best = null;
+      let bd = Infinity;
+      for (const s of scenes) {
+        const c = (s.sourceRegion.yStart + s.sourceRegion.yEnd) / 2;
+        const d = Math.abs(c - gc);
+        if (d < bd) {
+          bd = d;
+          best = s;
+        }
+      }
+      if (!best) continue;
+      if (!best.cut) best.cut = { dialogue: "", sfx: "", type: null };
+      if (!best.cut.textRegions) best.cut.textRegions = [];
+      best.cut.textRegions.push({ yStart: band.yStart, yEnd: band.yEnd });
+      added++;
     }
-    if (!best) continue;
-    if (!best.cut) best.cut = { dialogue: "", sfx: "", type: null };
-    if (!best.cut.textRegions) best.cut.textRegions = [];
-    best.cut.textRegions.push({ yStart: band.yStart, yEnd: band.yEnd });
-    added++;
   }
+  // ★침묵 상한 금지 — 잘렸으면 로그로 알린다(예전엔 24개에서 조용히 중단 = 유실 은폐).
+  if (dropped > 0 && log) log(`⚠ 텍스트 밴드 상한(${MAX_BANDS}) 초과 — ${dropped}개 구간 예약 못함(GAP_MAX_BANDS 상향 필요)`);
   return added;
 }
 
