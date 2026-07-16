@@ -405,6 +405,35 @@ export async function runSplit(projectId) {
   await log(`[진단] 컷 타입 ${JSON.stringify(typeCounts)}`);
   await log(`[진단] 텍스트 밴드 예약 총 ${totalTR}개(흡수+갭) — 이 수만큼 내레이션이 이웃 컷 OCR에 붙음`);
 
+  // ★내레이션 미리 읽기(사용자 요구: "처음부터 나와야지") — 예약 밴드를 분할 단계에서
+  //   바로 OCR 해 컷 bubbles(내레이션)로 붙인다 → G1 카드에서 즉시 글자로 확인 가능.
+  //   추출(2단계)이 나중에 전체를 다시 읽어 덮어쓰므로 여기서 실패해도 유실은 아니다.
+  if (key && totalTR > 0) {
+    const units = [];
+    for (const s of scenes) for (const tr of s.cut?.textRegions ?? []) units.push({ s, tr });
+    await log(`내레이션 미리 읽기 ${units.length}개 밴드…`);
+    let got = 0;
+    const C2 = 3;
+    for (let i = 0; i < units.length; i += C2) {
+      await Promise.all(
+        units.slice(i, i + C2).map(async ({ s, tr }) => {
+          try {
+            const png = await extractRegion(canvas, buffers, tr.yStart, tr.yEnd, tr.xStart, tr.xEnd);
+            const t = await readCutText(png, key, VLM_MODEL);
+            if (t.bubbles?.length) {
+              if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
+              s.cut.bubbles = [...(s.cut.bubbles ?? []), ...t.bubbles.map((b) => ({ text: b.text }))];
+              got++;
+            }
+          } catch {}
+        })
+      );
+      const done = Math.min(i + C2, units.length);
+      if (done === units.length || done % 15 < C2) await log(`내레이션 미리 읽기 ${done}/${units.length}…`);
+    }
+    await log(`내레이션 미리 읽기 완료 — ${got}개 밴드에서 글자 확보(G1 컷 카드에 표시)`);
+  }
+
   // 최신 프로젝트를 다시 읽어 결과만 병합(중간에 다른 갱신 있었을 수 있음).
   const p2 = await getProject(projectId);
   if (!p2) throw new Error("프로젝트가 사라졌어요");
