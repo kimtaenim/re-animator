@@ -2073,6 +2073,32 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           {(project.cast?.length ?? 0) > 0 && (
             <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5 text-[11px]">
               <span className="font-medium text-[var(--muted)]">🎭 목소리</span>
+              {/* 나레이터(내레이션 목소리) — 캐릭터와 같은 자리에서 지정(캐스팅 화면과 싱크) */}
+              <span className="flex items-center gap-1">
+                <span className="max-w-[90px] truncate font-medium" title="내레이션(화자 없는 줄)을 읽는 목소리">
+                  📖 나레이션
+                </span>
+                <select
+                  value={project.narratorVoice?.id ?? ""}
+                  onChange={(e) => {
+                    const v = voiceList.find((x) => x.id === e.target.value);
+                    void setNarratorVoice(
+                      v ? { provider: v.provider ?? "eleven", id: v.id, name: v.name } : null
+                    );
+                  }}
+                  className={`max-w-[150px] rounded border bg-[var(--panel-2)] px-1 py-0.5 ${
+                    project.narratorVoice ? "border-[var(--border)]" : "border-dashed border-[var(--danger)]"
+                  }`}
+                  title="나레이터 목소리 — 캐스팅 화면의 나레이터 선택과 동기화됨"
+                >
+                  <option value="">목소리…</option>
+                  {voiceList.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+              </span>
               {(project.cast ?? []).map((c) => (
                 <span key={c.id} className="flex items-center gap-1">
                   <span className="max-w-[90px] truncate" title={c.label}>
