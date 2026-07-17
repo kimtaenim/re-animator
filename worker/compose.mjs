@@ -13,7 +13,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { renderCaptionBox, renderIntertitlePng } from "./subtitle-render.mjs";
+import { renderCaptionBox, renderIntertitleFrame } from "./subtitle-render.mjs";
 import { stripMarks } from "./emphasis.mjs";
 
 let FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";

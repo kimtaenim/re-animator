@@ -113,7 +113,7 @@ async function tick(types) {
 
 // ★메모리 빡빡한 워커라 잡은 '한 번에 하나만' 처리한다(병렬 X → OOM 방지). 더빙 UI 는
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
-console.log("[worker] BUILD = m7-compose-v40 (크래시 가드 — unhandledRejection 로그·생존, 복구 경로 방어)");
+console.log("[worker] BUILD = m7-compose-v41 (긴급 — v39 임포트 이름 불일치로 워커 크래시 루프, 수정)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);
