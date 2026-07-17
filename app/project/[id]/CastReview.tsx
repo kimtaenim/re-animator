@@ -246,6 +246,43 @@ export default function CastReview({
   function rename(charId: string, label: string) {
     setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, label } : c)));
   }
+  // ★캐릭터 통합 — source 를 target 으로 통째로 합친다(썸네일 하나하나 옮기는 수고 제거).
+  //   컷 목록 union + 화자 지정(컷·풍선·내레이션) 전부 리매핑. 라벨·목소리·실사는 남는 쪽 우선,
+  //   비어 있으면 합쳐지는 쪽 값을 물려받는다.
+  function mergeInto(sourceId: string, targetId: string) {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    setCast((prev) => {
+      const src = prev.find((c) => c.id === sourceId);
+      const tgt = prev.find((c) => c.id === targetId);
+      if (!src || !tgt) return prev;
+      return prev
+        .filter((c) => c.id !== sourceId)
+        .map((c) =>
+          c.id === targetId
+            ? {
+                ...c,
+                sceneIds: [...new Set([...c.sceneIds, ...src.sceneIds])],
+                refSceneId: c.refSceneId ?? src.refSceneId,
+                description: c.description || src.description,
+                voice: c.voice ?? src.voice,
+                voiceName: c.voice ? c.voiceName : src.voiceName,
+                voiceProvider: c.voice ? c.voiceProvider : src.voiceProvider,
+                realImage: c.realImage ?? src.realImage,
+                realPrompt: c.realPrompt ?? src.realPrompt,
+                realEthnicity: c.realEthnicity ?? src.realEthnicity,
+              }
+            : c
+        );
+    });
+    // 화자 지정 리매핑(컷·풍선·내레이션 공용 맵) — 병합된 캐릭터를 가리키던 대사가 전부 따라온다.
+    setSpeakerMap((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) if (next[k] === sourceId) next[k] = targetId;
+      return next;
+    });
+    scheduleSave();
+  }
+
   // 화면 밖(오프스크린) 목소리 캐릭터 — 등장 컷 0개로 추가(전화·해설·신 등). 화자로 지정 가능.
   function addOffscreen() {
     const label = window.prompt("화면 밖 인물 이름 (예: 전화 목소리, 해설자)", "화면 밖 인물")?.trim();
@@ -474,9 +511,41 @@ export default function CastReview({
                   )}
                 </div>
               </div>
-              <span className="ml-auto shrink-0 text-xs text-[var(--muted)]">
-                {c.sceneIds.length ? `${c.sceneIds.length}컷` : "화면 밖"}
-              </span>
+              <div className="ml-auto flex shrink-0 flex-col items-end gap-1">
+                <span className="text-xs text-[var(--muted)]">
+                  {c.sceneIds.length ? `${c.sceneIds.length}컷` : "화면 밖"}
+                </span>
+                {/* 캐릭터 통합 — 같은 인물이 둘로 쪼개졌을 때 통째로 합치기(컷·화자 지정 전부 이사) */}
+                {cast.length > 1 && (
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const t = e.target.value;
+                      if (!t) return;
+                      const tgt = cast.find((x) => x.id === t);
+                      if (
+                        tgt &&
+                        window.confirm(
+                          `'${c.label}'을(를) '${tgt.label}'(으)로 합칠까요?\n컷 ${c.sceneIds.length}개와 화자 지정이 모두 옮겨지고 '${c.label}'은 사라집니다.`
+                        )
+                      )
+                        mergeInto(c.id, t);
+                      e.target.value = "";
+                    }}
+                    title="이 캐릭터를 다른 캐릭터와 통째로 합치기 — 컷·화자 지정 전부 이동"
+                    className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 text-[10px] text-[var(--muted)]"
+                  >
+                    <option value="">🔀 합치기…</option>
+                    {cast
+                      .filter((x) => x.id !== c.id)
+                      .map((x) => (
+                        <option key={x.id} value={x.id}>
+                          → {x.label}
+                        </option>
+                      ))}
+                  </select>
+                )}
+              </div>
             </div>
             {/* 실사화 얼굴 고정용 초상 — 3단계 '실사화' 재생성에서 이 캐릭터 얼굴 레퍼런스로 쓰임 */}
             <div className="mb-2 flex items-center gap-2">
