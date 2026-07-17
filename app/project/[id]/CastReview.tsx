@@ -52,10 +52,12 @@ interface Props {
 }
 
 // 컷의 대사 단위 목록 — bubbles 있으면 풍선별(idx≥0), 없으면 레거시 통대사(idx=-1).
-function bubblesOf(s: Scene): { idx: number; text: string }[] {
+function bubblesOf(s: Scene): { idx: number; text: string; translation?: string }[] {
   const bs = s.cut?.bubbles;
   if (bs && bs.length) {
-    return bs.map((b, i) => ({ idx: i, text: b.text ?? "" })).filter((b) => b.text.trim() !== "");
+    return bs
+      .map((b, i) => ({ idx: i, text: b.text ?? "", translation: b.translation }))
+      .filter((b) => b.text.trim() !== "");
   }
   const legacy = s.cut?.dialogue?.trim();
   return legacy ? [{ idx: -1, text: legacy }] : [];
@@ -801,7 +803,7 @@ export default function CastReview({
                     {rows.length > 1 ? ` · 말풍선 ${rows.length}개` : ""}
                   </div>
                   <div className="space-y-1">
-                    {rows.map(({ idx, text }) => {
+                    {rows.map(({ idx, text, translation }) => {
                       const key = `${s.id}#${idx}`;
                       const sc = cast.find((c) => c.id === speakerMap[key]);
                       return (
@@ -823,8 +825,14 @@ export default function CastReview({
                               </option>
                             ))}
                           </select>
-                          <span className="truncate" title={text}>
+                          <span className="min-w-0 flex-1 truncate" title={text}>
                             “{text}”
+                            {(translation || "").trim() && (
+                              <span className="text-[var(--muted)]" title="편집·화자 파악용 번역 (더빙은 원문 그대로)">
+                                {" "}
+                                <span className="italic">역: {translation}</span>
+                              </span>
+                            )}
                           </span>
                         </div>
                       );
@@ -855,8 +863,11 @@ export default function CastReview({
                                 </option>
                               ))}
                             </select>
-                            <span className="truncate italic text-[var(--muted)]" title={narrationOf(s)}>
+                            <span className="min-w-0 flex-1 truncate italic text-[var(--muted)]" title={narrationOf(s)}>
                               ({narrationOf(s)})
+                              {(s.cut?.narrationTranslation || "").trim() && (
+                                <span title="편집·화자 파악용 번역 (더빙은 원문 그대로)"> · 역: {s.cut?.narrationTranslation}</span>
+                              )}
                             </span>
                           </div>
                         );

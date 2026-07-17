@@ -899,6 +899,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 ×
               </button>
               </div>
+              {/* 번역(편집자용 주석) — 외국어 원문 아래 한국어 뜻. 더빙은 원문으로 나감. */}
+              {b.speakerId !== SFX_SPEAKER && (b.translation || "").trim() && (
+                <div className="pl-7 text-[11px] italic text-[var(--muted)]" title="편집·화자 파악용 번역 (더빙은 원문 그대로)">
+                  역: {b.translation}
+                </div>
+              )}
               {b.speakerId !== SFX_SPEAKER && emphChips(bi, b.text)}
             </div>
           ))}
@@ -1389,8 +1395,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     for (const s of project.scenes) {
       const nar = s.cut?.narration?.trim();
       if (nar) {
+        const tr = s.cut?.narrationTranslation?.trim();
         updateCut(s.id, {
-          bubbles: [...(s.cut?.bubbles ?? []), { text: nar, speakerId: null }],
+          bubbles: [...(s.cut?.bubbles ?? []), { text: nar, speakerId: null, ...(tr ? { translation: tr } : {}) }],
           narration: "",
         });
       }

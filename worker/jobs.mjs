@@ -34,6 +34,7 @@ import {
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { readCutText } from "./ocr.mjs";
+import { translateBubbles, translateTexts } from "./translate.mjs";
 import { synthesize, synthSfx } from "./tts.mjs";
 
 // 만화 효과음(한글 의성어) → ElevenLabs Sound Effects 용 짧은 영어 사운드 묘사. 실패 시 원문.
@@ -274,6 +275,7 @@ function mergeBubbleSpeakers(newBubbles, oldBubbles, legacySpeakerId) {
       if (typeof match.subtitleX === "number") nb.subtitleX = match.subtitleX;
       if (typeof match.subtitleY === "number") nb.subtitleY = match.subtitleY;
       if (match.emotion) nb.emotion = match.emotion; // 감정 연기도 화자처럼 보존
+      if (match.translation) nb.translation = match.translation; // 번역도 보존 → 재추출 때 재번역 안 함(원문 같으면)
     }
   }
   if (!old.some((o) => o.speakerId) && legacySpeakerId && bubbles.length === 1 && !bubbles[0].speakerId) {
@@ -593,6 +595,8 @@ export async function runExtract(projectId) {
     let trHit = 0;
     let dirOk = 0; // [진단] AI 연출 성공 컷 수
     let dirCost = 0; // AI 연출 비용 합계(USD)
+    let trlOk = 0; // [진단] 번역 채운 줄 수(외국어 원문 → 한국어 주석)
+    let trlCost = 0; // 번역 비용 합계(USD)
     for (let i = 0; i < ocrTodo.length; i += C) {
       const chunk = ocrTodo.slice(i, i + C);
       await Promise.all(
@@ -644,6 +648,19 @@ export async function runExtract(projectId) {
               .slice(0, 500);
             if (sfx) s.cut.sfx = sfx;
             s.cut.textBoxes = own.boxes; // 마스크는 '이 컷 이미지 안' 글자만(흡수 밴드는 이미지에 없음)
+            // ── 대사 번역(편집자용 주석) — 외국어 원문에 한국어 뜻을 곁들인다. 원문 text·더빙은 불변.
+            //   translateBubbles 가 한국어·이미 번역된 줄은 스킵(재실행 보존). 실패해도 대사엔 무해.
+            try {
+              const { translated, cost } = await translateBubbles(s.cut.bubbles, key);
+              trlOk += translated;
+              trlCost += cost;
+              // 레거시 내레이션 문자열(별도 필드)도 번역 — 대부분 bubbles 로 흡수되지만 있으면 채움.
+              if ((s.cut.narration || "").trim() && !(s.cut.narrationTranslation || "").trim()) {
+                const { translations, cost: nc } = await translateTexts([s.cut.narration], key);
+                if (translations[0]) s.cut.narrationTranslation = translations[0];
+                trlCost += nc;
+              }
+            } catch {}
             // ── AI 연출: 카메라워크·감정 디폴트를 Claude 가 채움(사용자 지정값은 안 덮음) ──
             const needCam = !(s.cut.motion || "").trim();
             const needEmo = (s.cut.bubbles ?? []).some((b) => !b.emotion && b.speakerId !== "__sfx__" && (b.text || "").trim());
@@ -675,6 +692,18 @@ export async function runExtract(projectId) {
       await log(`글씨 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%)`);
     }
     await log(`[진단] 내레이션 밴드 OCR: ${trHit}/${trTotal} 성공(글자 잡힘) — 0/0이면 밴드가 분할서 안 넘어온 것`);
+    if (trlOk > 0) {
+      await log(`[진단] 대사 번역: ${trlOk}줄에 한국어 주석 채움(외국어 원문, $${trlCost.toFixed(3)}) — 원문·더빙은 그대로`);
+      try {
+        await recordCost({
+          projectId,
+          vendor: "openai",
+          model: process.env.OPENAI_TRANSLATE_MODEL || "gpt-4o-mini",
+          costUsd: trlCost,
+          meta: { kind: "translate", lines: trlOk },
+        });
+      } catch {}
+    }
     if (dirOk > 0) {
       await log(`[진단] AI 연출: ${dirOk}컷에 카메라·감정 디폴트 채움(Claude, $${dirCost.toFixed(3)})`);
       try {
@@ -932,7 +961,7 @@ export async function runCast(projectId) {
             const ctx = (x) =>
               x
                 ? `컷${x.order + 1}(${x.cut?.type ?? "?"}): ${(x.cut?.description ?? "").slice(0, 80)} / 대사: ${(x.cut?.bubbles ?? [])
-                    .map((b) => (b.text || "").slice(0, 25))
+                    .map((b) => (b.translation || b.text || "").slice(0, 25))
                     .join(" | ")
                     .slice(0, 120)}`
                 : "(없음)";
@@ -946,7 +975,7 @@ export async function runCast(projectId) {
             );
             const img = await sharp(png).resize({ width: 512, withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer();
             const ask = (s.cut.bubbles ?? [])
-              .map((b, bi) => ({ bi, t: (b.text || "").trim(), open: open(b) }))
+              .map((b, bi) => ({ bi, t: (b.text || "").trim(), tr: (b.translation || "").trim(), open: open(b) }))
               .filter((l) => l.open);
             if (!ask.length) return;
             const body = {
@@ -963,7 +992,7 @@ export async function runCast(projectId) {
                       text:
                         `웹툰 컷 이미지와 앞뒤 맥락으로 각 대사 줄의 화자를 정하라.\n등장인물 명단(id: 이름):\n${roster}\n\n` +
                         `앞 컷: ${ctx(scList[idx - 1])}\n뒤 컷: ${ctx(scList[idx + 1])}\n\n이 컷의 대사 줄:\n` +
-                        ask.map((l) => `${l.bi}. ${l.t.slice(0, 60)}`).join("\n") +
+                        ask.map((l) => `${l.bi}. ${l.t.slice(0, 60)}${l.tr ? ` (뜻: ${l.tr.slice(0, 60)})` : ""}`).join("\n") +
                         `\n\n규칙: 장면 밖 서술·해설이면 "narration". 명단 인물이 말하는 대사면 그 id(입 모양·시선·말풍선 꼬리·앞뒤 대화 흐름으로 판단). ★이 컷 화면에 안 보이는 인물이 말할 수도 있다(오프스크린 대사) — 호명·대화 흐름상 명단 인물이 확실하면 그 id 를 써라. 판단이 어려우면 "unknown". ` +
                         `JSON 만: {"speakers":[{"i":줄번호,"s":"id|narration|unknown"}]}`,
                     },
