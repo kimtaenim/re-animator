@@ -17,6 +17,7 @@ import {
   saveRowProfile,
   recordCost,
 } from "./store.mjs";
+import sharp from "sharp";
 import { computeRowProfile, extractRegion, trimBox } from "./imaging.mjs";
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
@@ -865,10 +866,10 @@ export async function runCast(projectId) {
   await log(`인물 컷 ${charScenes.length}개 (전체 ${scenes.length})`);
 
   let cast = [];
+  const buffers = []; // 화자 추론 패스도 씀 — 블록 밖으로 호이스트
   if (charScenes.length > 0) {
     const files = sortedFiles(p);
     await log(`소스 ${files.length}개 다운로드…`);
-    const buffers = [];
     for (const f of files) buffers.push(await download(f.url));
 
     const key = process.env.OPENAI_API_KEY;
@@ -904,6 +905,102 @@ export async function runCast(projectId) {
     }
   }
   await log(`화자 자동 귀속 ${attributed}건`);
+
+  // ★화자 자동 배정(VLM) — 컷 이미지 + 앞뒤 컷 맥락 + 캐스트 명단으로 각 대사 줄의 화자를
+  //   추론해 기본값으로 채운다(사용자 요구: 자동으로 골라주고 사람은 나중에 터치만).
+  //   이미 지정된 줄(speakerId !== undefined)은 절대 안 건드린다. 판단 불가는 미지정으로 남김.
+  const keyA = process.env.OPENAI_API_KEY;
+  const VLM_A = process.env.OPENAI_VLM_MODEL || "gpt-4o";
+  if (keyA && cast.length > 0 && buffers.length > 0) {
+    const scList = (p2.scenes ?? []).slice().sort((a, b) => a.order - b.order);
+    const todo = scList.filter((s) =>
+      (s.cut?.bubbles ?? []).some((b) => b.speakerId === undefined && (b.text || "").trim())
+    );
+    const roster = cast.map((c) => `${c.id}: ${c.label}${c.note ? " — " + c.note : ""}`).join("\n");
+    const castIds = new Set(cast.map((c) => c.id));
+    await log(`화자 추론(앞뒤 맥락) 대상 ${todo.length}컷…`);
+    let assigned = 0;
+    let usdA = 0;
+    const CC = 2;
+    for (let i = 0; i < todo.length; i += CC) {
+      await Promise.all(
+        todo.slice(i, i + CC).map(async (s) => {
+          try {
+            const idx = scList.findIndex((x) => x.id === s.id);
+            const ctx = (x) =>
+              x
+                ? `컷${x.order + 1}(${x.cut?.type ?? "?"}): ${(x.cut?.description ?? "").slice(0, 80)} / 대사: ${(x.cut?.bubbles ?? [])
+                    .map((b) => (b.text || "").slice(0, 25))
+                    .join(" | ")
+                    .slice(0, 120)}`
+                : "(없음)";
+            const png = await extractRegion(
+              p2.virtualCanvas,
+              buffers,
+              s.sourceRegion.yStart,
+              s.sourceRegion.yEnd,
+              s.sourceRegion.xStart,
+              s.sourceRegion.xEnd
+            );
+            const img = await sharp(png).resize({ width: 512, withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer();
+            const ask = (s.cut.bubbles ?? [])
+              .map((b, bi) => ({ bi, t: (b.text || "").trim(), open: b.speakerId === undefined && (b.text || "").trim() }))
+              .filter((l) => l.open);
+            if (!ask.length) return;
+            const body = {
+              model: VLM_A,
+              temperature: 0,
+              response_format: { type: "json_object" },
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "image_url", image_url: { url: "data:image/jpeg;base64," + img.toString("base64") } },
+                    {
+                      type: "text",
+                      text:
+                        `웹툰 컷 이미지와 앞뒤 맥락으로 각 대사 줄의 화자를 정하라.\n등장인물 명단(id: 이름):\n${roster}\n\n` +
+                        `앞 컷: ${ctx(scList[idx - 1])}\n뒤 컷: ${ctx(scList[idx + 1])}\n\n이 컷의 대사 줄:\n` +
+                        ask.map((l) => `${l.bi}. ${l.t.slice(0, 60)}`).join("\n") +
+                        `\n\n규칙: 화면 밖 서술·해설이면 "narration". 명단 인물이 말하는 대사면 그 id(입 모양·시선·말풍선 꼬리·앞뒤 대화 흐름으로 판단). 판단이 어려우면 "unknown". ` +
+                        `JSON 만: {"speakers":[{"i":줄번호,"s":"id|narration|unknown"}]}`,
+                    },
+                  ],
+                },
+              ],
+            };
+            const r = await fetch("https://api.openai.com/v1/chat/completions", {
+              method: "POST",
+              headers: { authorization: `Bearer ${keyA}`, "content-type": "application/json" },
+              body: JSON.stringify(body),
+              signal: AbortSignal.timeout(60_000),
+            });
+            if (!r.ok) return;
+            const j = await r.json();
+            usdA += ((j.usage?.prompt_tokens ?? 0) * 2.5 + (j.usage?.completion_tokens ?? 0) * 10) / 1e6;
+            const out = JSON.parse(j.choices?.[0]?.message?.content ?? "{}");
+            for (const e of out.speakers ?? []) {
+              const b = s.cut.bubbles?.[e.i];
+              if (!b || b.speakerId !== undefined) continue; // 이미 지정된 줄 보호
+              if (e.s === "narration") {
+                b.speakerId = null;
+                assigned++;
+              } else if (castIds.has(e.s)) {
+                b.speakerId = e.s;
+                assigned++;
+              }
+            }
+          } catch {}
+        })
+      );
+      const done = Math.min(i + CC, todo.length);
+      if (done === todo.length || done % 10 < CC) await log(`화자 추론 ${done}/${todo.length}…`);
+    }
+    await log(`[진단] 화자 자동 배정 ${assigned}줄 (~$${usdA.toFixed(3)}) — unknown 은 미지정, 캐스팅 화면에서 확인·수정`);
+    try {
+      await recordCost({ projectId, vendor: "openai", model: VLM_A, costUsd: usdA, meta: { kind: "speakers", lines: assigned } });
+    } catch {}
+  }
 
   p2.steps.cast = {
     ...p2.steps.cast,
