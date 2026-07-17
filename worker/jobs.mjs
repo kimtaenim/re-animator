@@ -1223,12 +1223,17 @@ function estimateVideoSeconds(cut) {
 //   '피사체를 크게 움직여라'로 해석 — 쓸데없는 인물 동작만 커지고 정작 카메라 문법(급가속·
 //   스냅)은 실종(사용자: "싸구려"). 역할 분리로 재설계: 프리셋(cut.motion)이 카메라의
 //   '무엇·언제'를 시간 구조로 지시하고, 공통 지침은 '그대로 정밀 실행 + 피사체는 정지'만.
+// 인물 동작 규칙(2026-07-18 사용자 확정): 잔잔한 동작은 살리되 작게 — 고개 들기/내리기/돌리기
+// 같은 3D 움직임 권장, 표정은 원본 그대로, ★없는 인물·사물 생성 절대 금지★.
 const MOTION_GUIDANCE =
   "Execute the camera direction above EXACTLY, especially its timing profile (the slow and fast phases) — " +
   "clean, controlled, professional camera work like a high-end music video. " +
-  "ALL movement energy comes from the CAMERA: the subject holds their pose with only minimal natural motion " +
-  "(hair, cloth, breathing, blinking) and performs NO new actions. " +
-  "Keep the character's identity, the art style and colors; no new objects, no text; do not distort faces.";
+  "Characters may move subtly and naturally: small 3D head movements (slowly raising, lowering or turning the head), " +
+  "breathing, blinking, hair and cloth motion, a slight shift of weight — but keep every movement SMALL and calm; " +
+  "no big gestures, no walking, no new actions. " +
+  "Keep each character's facial EXPRESSION exactly as drawn in the still image — do not change the emotion. " +
+  "NEVER add characters, people or objects that are not in the still image. " +
+  "Keep the art style and colors; no text; do not distort faces.";
 // 프리셋이 비어 있을 때의 기본 카메라(공통 지침은 '실행 지침'이라 자체 동작 지시가 없음).
 const DEFAULT_MOTION = "Camera direction: slow, confident cinematic push-in toward the subject.";
 // 대사 있는 인물 컷: '말하는 것처럼' 입/얼굴 움직임(진짜 립싱크 아님 — Grok I2V 한계).
