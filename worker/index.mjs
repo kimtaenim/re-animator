@@ -27,6 +27,17 @@ async function jobFn(type) {
   return map[type] ?? _jobs.runSplit;
 }
 
+// ★크래시 가드 — 'Exited with status 1'(2026-07-17 00:03Z, 유휴 중 사망) 재발 방지.
+//   떠돌이 promise 거부는 로그만 남기고 계속(폴러는 무상태라 안전), 동기 예외는
+//   원인을 로그에 남긴 뒤 종료(Render 재시작) — 원인 불명 사망 금지.
+process.on("unhandledRejection", (e) => {
+  console.error("[worker] unhandledRejection(계속 실행):", e?.stack ?? e?.message ?? e);
+});
+process.on("uncaughtException", (e) => {
+  console.error("[worker] uncaughtException(종료→재시작):", e?.stack ?? e?.message ?? e);
+  process.exit(1);
+});
+
 const POLL_MS = 3000;
 const JOB_TIMEOUT_MS = 12 * 60 * 1000; // 12분(재생성 배치 여유)
 
@@ -85,15 +96,24 @@ async function tick(types) {
   } catch (e) {
     const msg = String(e?.message ?? e);
     console.error(`[worker] ${type} 실패 job=${job.id}:`, msg);
-    await updateJob(job.id, { status: "error", error: msg });
+    // ★복구 경로가 다시 던지면(Redis 순단 등) 메인 루프까지 뚫고 프로세스가 죽는다 — 각각 방어.
+    try {
+      await updateJob(job.id, { status: "error", error: msg });
+    } catch (e2) {
+      console.error("[worker] updateJob(error) 실패:", e2?.message ?? e2);
+    }
     // dub 은 단계 상태를 안 씀(비디오와 병렬) → scene 단계 건드리지 않는다.
-    if (type !== "dub") await failStep(job.projectId, msg, JOB_STEP[type] ?? "source");
+    try {
+      if (type !== "dub") await failStep(job.projectId, msg, JOB_STEP[type] ?? "source");
+    } catch (e2) {
+      console.error("[worker] failStep 실패:", e2?.message ?? e2);
+    }
   }
 }
 
 // ★메모리 빡빡한 워커라 잡은 '한 번에 하나만' 처리한다(병렬 X → OOM 방지). 더빙 UI 는
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
-console.log("[worker] BUILD = m7-compose-v39 (무성영화 자막 씬 — 대사 한 줄을 검은 화면+테두리+자막+더빙 씬으로 분리)");
+console.log("[worker] BUILD = m7-compose-v40 (크래시 가드 — unhandledRejection 로그·생존, 복구 경로 방어)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);
