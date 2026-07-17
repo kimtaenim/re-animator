@@ -72,26 +72,25 @@ const TRANSITIONS: [string, string][] = [
 // 대사 줄의 화자 특수값 — 효과음(소리 생성). 캐릭터 id 와 안 겹치는 센티넬.
 const SFX_SPEAKER = "__sfx__";
 
-// ★목록용 지연 비디오 — 화면에 보일 때만 재생, 벗어나면 정지. 수십 개 <video autoPlay> 가
-//   동시에 디코더를 돌려 크롬 전체가 버벅이던 문제의 수술(사용자 확인: 오토플레이가 원인).
-//   preload=metadata 라 첫 프레임만 받아 썸네일처럼 보이고, 재생은 뷰포트 안에서만.
+// ★목록용 지연 비디오 — ★마우스를 올린 것만★ 재생, 떼면 정지(사용자 지정 — '보이면 재생'도
+//   여러 개가 동시에 돌 수 있어 강화). 평소엔 첫 프레임만 썸네일처럼 표시(preload=metadata).
+//   수십 개 <video autoPlay> 동시 디코딩이 크롬 버벅임의 원인이었음.
 function LazyVideo({ src, onClick, className }: { src: string; onClick?: () => void; className?: string }) {
   const ref = useRef<HTMLVideoElement | null>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const io = new IntersectionObserver(
-      ([e]) => {
-        if (e.isIntersecting) el.play().catch(() => {});
-        else el.pause();
-      },
-      { threshold: 0.2 }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
   return (
-    <video ref={ref} src={src} muted loop playsInline preload="metadata" onClick={onClick} className={className} />
+    <video
+      ref={ref}
+      src={src}
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      onMouseEnter={() => ref.current?.play().catch(() => {})}
+      onMouseLeave={() => ref.current?.pause()}
+      onClick={onClick}
+      title="마우스를 올리면 재생 · 클릭하면 미리보기"
+      className={className}
+    />
   );
 }
 
