@@ -1229,8 +1229,9 @@ const MOTION_GUIDANCE =
   "Execute the camera direction above EXACTLY, especially its timing profile (the slow and fast phases) — " +
   "clean, controlled, professional camera work like a high-end music video. " +
   "Characters may move subtly and naturally: small 3D head movements (slowly raising, lowering or turning the head), " +
-  "breathing, blinking, hair and cloth motion, a slight shift of weight — but keep every movement SMALL and calm; " +
-  "no big gestures, no walking, no new actions. " +
+  "breathing, blinking, hair and cloth motion, a slight shift of weight — keep these movements SMALL and calm. " +
+  "CONTINUE any action already depicted in the still image (someone drawn mid-walk keeps walking, someone running keeps running, at the same pace); " +
+  "but do not START new actions or gestures that are not already happening in the still. " +
   "Keep each character's facial EXPRESSION exactly as drawn in the still image — do not change the emotion. " +
   "NEVER add characters, people or objects that are not in the still image. " +
   "Keep the art style and colors; no text; do not distort faces.";
