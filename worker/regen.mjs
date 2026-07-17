@@ -183,8 +183,10 @@ export async function buildMaskInputs(scene, imgBuf, project, model) {
     .png()
     .toBuffer();
 
-  // ★ 여백(옆 밴드)은 이미 블러 배경으로 꽉 차 있으니 '보존'으로 둔다 — 모델이 옆을 그려
-  // 채우려다 그림을 가로로 늘리는(번지는) 현상 제거. 채움(재생성)은 '글씨 박스'만.
+  // ★ 여백(옆·위아래 밴드)은 '채움'(아웃페인팅) — 예전엔 블러본을 깔고 '보존'으로 잠갔는데
+  //   결과가 "배경을 블러로 때운" 화면이라 사용자 거부(2026-07-17). 이제 밴드를 마스크로 열고
+  //   프롬프트로 '같은 화풍으로 배경을 이어 그려라'를 명시한다(블러본은 색 힌트 밑그림으로만).
+  //   패널 경계 4px 를 겹쳐 열어 이음새를 자연스럽게 섞는다.
   // OpenAI: alpha 255=보존/0=채움.  fal: 검정(0)=보존/흰(255)=채움. 기본을 '보존'으로.
   const rgba = Buffer.alloc(TW * TH * 4); // RGB 0, alpha 는 아래서 255(보존)로 채움
   for (let i = 3; i < rgba.length; i += 4) rgba[i] = 255;
@@ -206,23 +208,35 @@ export async function buildMaskInputs(scene, imgBuf, project, model) {
       }
     }
   };
+  // 여백 밴드 = 채움(아웃페인팅). 패널 안쪽으로 4px 겹쳐 이음새를 섞는다.
+  const OV = 4;
+  if (px > 0) {
+    setFill(0, 0, px + OV, TH); // 왼쪽 밴드
+    setFill(px + pw - OV, 0, TW, TH); // 오른쪽 밴드
+  }
+  if (py > 0) {
+    setFill(0, 0, TW, py + OV); // 위 밴드
+    setFill(0, py + ph - OV, TW, TH); // 아래 밴드
+  }
   for (const b of scene.cut?.textBoxes ?? []) {
-    setFill(px + b.left * pw, py + b.top * ph, px + b.right * pw, py + b.bottom * ph); // 글씨 자리만
+    setFill(px + b.left * pw, py + b.top * ph, px + b.right * pw, py + b.bottom * ph); // 글씨 자리
   }
   const openaiMask = await sharp(rgba, { raw: { width: TW, height: TH, channels: 4 } }).png().toBuffer();
   const falMask = await sharp(gray, { raw: { width: TW, height: TH, channels: 3 } }).png().toBuffer();
 
   const prompt =
-    "This image already fills the whole frame. Only where the mask marks text — speech bubbles, lettering, captions, sound effects — remove the text and fill that exact spot with plausible background continuation matching the immediately surrounding art. " +
-    "Do NOT redraw, restyle, extend, stretch, or move anything else; do not touch the outer areas. Keep every other pixel exactly as-is. No text, letters, or watermark in the output.";
+    "Edit ONLY where the mask marks, two kinds of edits: " +
+    "(1) OUTER MARGINS: extend the panel's artwork outward to completely fill them — seamlessly continue the background, sky, ground, lighting and effect lines from the panel edges, in the exact same drawing style and color palette. The margins must become finished drawn illustration. NEVER fill them with blur, gradients, stretched or mirrored pixels, solid bars, letterboxing, or vignette. Do not add new characters or objects there. " +
+    "(2) TEXT SPOTS inside the panel: remove the text (speech bubbles, lettering, captions, sound effects) and fill that exact spot with plausible background continuation matching the immediately surrounding art. " +
+    "Everything unmasked must stay exactly as-is: do NOT redraw, restyle, move, or stretch the original panel. No text, letters, or watermark in the output.";
 
   return { composed, openaiMask, falMask, prompt, TW, TH, hasFill: filled };
 }
 
-// 마스크 재생성(OpenAI images/edits) — 원본 컷 보존(옆은 블러 배경) + 글씨 자리만 지움.
+// 마스크 재생성(OpenAI images/edits) — 원본 컷 보존 + 여백은 아웃페인팅 + 글씨 자리 지움.
 export async function regenSceneMasked(scene, imgBuf, project, key, model) {
   const { composed, openaiMask, prompt, TW, TH, hasFill } = await buildMaskInputs(scene, imgBuf, project, model);
-  // 지울 글씨가 없으면 모델 호출 불필요 — 합성본(컷+블러밴드)을 그대로.
+  // 채울 곳(여백·글씨)이 하나도 없으면(비율 일치+글자 없음) 모델 호출 불필요.
   if (!hasFill) return { buf: await fitBuffer(composed, project), cost: 0 };
   const form = new FormData();
   form.append("model", model);
