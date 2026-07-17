@@ -85,6 +85,37 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
   const [scenePreview, setScenePreview] = useState<string | null>(null); // 씬 미리보기(영상+자막+더빙)
   const [subIdx, setSubIdx] = useState(0); // 미리보기 자막 박스 순차 표시 인덱스(하나씩)
+  // 4단계 목소리 캐스팅 패널용 목소리 카탈로그(config/voices.json) — 캐스팅 화면과 같은 원천.
+  const [voiceList, setVoiceList] = useState<{ provider?: string; id: string; name: string; note?: string }[]>([]);
+  useEffect(() => {
+    fetch("/api/voices").then((r) => r.json()).then((d) => setVoiceList(d.voices ?? [])).catch(() => {});
+  }, []);
+  // 캐스트 저장(목소리 변경·화면 밖 인물 추가) — 캐스팅 화면과 같은 PUT /api/cast = 항상 싱크.
+  async function saveCastVoices(next: Character[]) {
+    setProject((prev) => ({ ...prev, cast: next }));
+    await fetch("/api/cast", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId: project.id, cast: next }),
+    }).catch(() => {});
+  }
+  function setCastVoice(charId: string, voiceId: string) {
+    const v = voiceList.find((x) => x.id === voiceId);
+    const next = (project.cast ?? []).map((c) =>
+      c.id === charId
+        ? { ...c, voice: voiceId || undefined, voiceName: v?.name, voiceProvider: v?.provider }
+        : c
+    );
+    void saveCastVoices(next);
+  }
+  function addOffscreenChar() {
+    const label = window.prompt("화면 밖 인물 이름 (예: 전화 목소리, 해설자)", "화면 밖 인물")?.trim();
+    if (!label) return;
+    void saveCastVoices([
+      ...(project.cast ?? []),
+      { id: `char-off-${Date.now().toString(36)}`, label, description: "", sceneIds: [] } as Character,
+    ]);
+  }
   const [portraitPending, setPortraitPending] = useState<Map<string, string>>(() => new Map()); // 실사 초상 생성 중(값=옛 realImage url)
   const [genModel, setGenModel] = useState("gpt-image-2"); // 재생성 모델(비교용)
   const [costKrw, setCostKrw] = useState<number | null>(null);
@@ -2038,6 +2069,42 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       {/* ── 4단계: 동영상 생성(Grok I2V) + 더빙 정보 ── */}
       {approved && project.scenes.some((s) => s.generatedImage) && (
         <section className="mb-6">
+          {/* 🎭 목소리 캐스팅 — 더빙 단계에서도 지정 가능(캐스팅 화면과 같은 저장소 = 싱크). */}
+          {(project.cast?.length ?? 0) > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5 text-[11px]">
+              <span className="font-medium text-[var(--muted)]">🎭 목소리</span>
+              {(project.cast ?? []).map((c) => (
+                <span key={c.id} className="flex items-center gap-1">
+                  <span className="max-w-[90px] truncate" title={c.label}>
+                    {c.sceneIds.length ? "" : "🎙"}{c.label}
+                  </span>
+                  <select
+                    value={c.voice ?? ""}
+                    onChange={(e) => setCastVoice(c.id, e.target.value)}
+                    className={`max-w-[150px] rounded border bg-[var(--panel-2)] px-1 py-0.5 ${
+                      c.voice ? "border-[var(--border)]" : "border-dashed border-[var(--danger)]"
+                    }`}
+                    title={`${c.label} 더빙 목소리 — 캐스팅 화면과 동기화됨`}
+                  >
+                    <option value="">목소리…</option>
+                    {voiceList.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </span>
+              ))}
+              <button
+                type="button"
+                onClick={addOffscreenChar}
+                title="화면에 등장하지 않는 목소리 캐릭터 추가(전화·해설·신 등)"
+                className="rounded border border-dashed border-[var(--border)] px-1.5 py-0.5 text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              >
+                + 화면 밖 인물
+              </button>
+            </div>
+          )}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <h2 className="text-sm font-semibold">{STEP_LABEL.scene}</h2>
             <span className="text-xs text-[var(--muted)]">

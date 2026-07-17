@@ -95,12 +95,13 @@ export async function PUT(req: NextRequest) {
     const sceneIds = Array.isArray(r.sceneIds)
       ? [...new Set(r.sceneIds.map(String).filter((id) => validIds.has(id)))]
       : [];
-    if (sceneIds.length === 0) continue;
+    // ★sceneIds 가 비어도 유지 — '화면 밖(오프스크린) 목소리' 캐릭터(전화·신·해설자 등).
+    //   예전엔 여기서 버려서 화면에 안 나오는 인물은 저장할 수 없었다.
     idx++;
     const refSceneId =
       typeof r.refSceneId === "string" && sceneIds.includes(r.refSceneId)
         ? r.refSceneId
-        : sceneIds[0];
+        : sceneIds[0]; // 0컷이면 undefined(대표컷 없음)
     clean.push({
       id: typeof r.id === "string" ? r.id : `char-${idx}`,
       label: typeof r.label === "string" && r.label.trim() ? r.label.slice(0, 40) : `캐릭터 ${idx}`,

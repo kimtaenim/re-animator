@@ -246,6 +246,16 @@ export default function CastReview({
   function rename(charId: string, label: string) {
     setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, label } : c)));
   }
+  // 화면 밖(오프스크린) 목소리 캐릭터 — 등장 컷 0개로 추가(전화·해설·신 등). 화자로 지정 가능.
+  function addOffscreen() {
+    const label = window.prompt("화면 밖 인물 이름 (예: 전화 목소리, 해설자)", "화면 밖 인물")?.trim();
+    if (!label) return;
+    setCast((prev) => [
+      ...prev,
+      { id: `char-off-${Date.now().toString(36)}`, label, description: "", sceneIds: [] } as Character,
+    ]);
+    scheduleSave();
+  }
   function setDescription(charId: string, description: string) {
     setCast((prev) => prev.map((c) => (c.id === charId ? { ...c, description } : c)));
   }
@@ -315,7 +325,11 @@ export default function CastReview({
     { v: "none", t: "제외" },
   ];
 
-  function Thumb({ sceneId, cls = "h-16 w-16" }: { sceneId: string; cls?: string }) {
+  function Thumb({ sceneId, cls = "h-16 w-16" }: { sceneId?: string; cls?: string }) {
+    if (!sceneId) {
+      // 화면 밖(오프스크린) 캐릭터 — 대표 컷 없음
+      return <div className={`grid ${cls} place-items-center rounded bg-black/40 text-lg`} title="화면 밖 목소리">🎙</div>;
+    }
     const s = sceneById.get(sceneId);
     if (!s?.originalImage) {
       return <div className={`grid ${cls} place-items-center rounded bg-black/40 text-[9px] text-[var(--muted)]`}>?</div>;
@@ -372,6 +386,14 @@ export default function CastReview({
         >
           ✕ 제외
         </div>
+        <button
+          type="button"
+          onClick={addOffscreen}
+          title="화면에 등장하지 않는 목소리 캐릭터 추가(전화·해설·신 등) — 대사 화자로 지정 가능"
+          className="rounded border border-dashed border-[var(--border)] px-3 py-1.5 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+        >
+          🎙 + 화면 밖 인물
+        </button>
       </div>
 
       <div className="space-y-3">
@@ -452,7 +474,9 @@ export default function CastReview({
                   )}
                 </div>
               </div>
-              <span className="ml-auto shrink-0 text-xs text-[var(--muted)]">{c.sceneIds.length}컷</span>
+              <span className="ml-auto shrink-0 text-xs text-[var(--muted)]">
+                {c.sceneIds.length ? `${c.sceneIds.length}컷` : "화면 밖"}
+              </span>
             </div>
             {/* 실사화 얼굴 고정용 초상 — 3단계 '실사화' 재생성에서 이 캐릭터 얼굴 레퍼런스로 쓰임 */}
             <div className="mb-2 flex items-center gap-2">

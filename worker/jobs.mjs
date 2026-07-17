@@ -964,7 +964,7 @@ export async function runCast(projectId) {
                         `웹툰 컷 이미지와 앞뒤 맥락으로 각 대사 줄의 화자를 정하라.\n등장인물 명단(id: 이름):\n${roster}\n\n` +
                         `앞 컷: ${ctx(scList[idx - 1])}\n뒤 컷: ${ctx(scList[idx + 1])}\n\n이 컷의 대사 줄:\n` +
                         ask.map((l) => `${l.bi}. ${l.t.slice(0, 60)}`).join("\n") +
-                        `\n\n규칙: 화면 밖 서술·해설이면 "narration". 명단 인물이 말하는 대사면 그 id(입 모양·시선·말풍선 꼬리·앞뒤 대화 흐름으로 판단). 판단이 어려우면 "unknown". ` +
+                        `\n\n규칙: 장면 밖 서술·해설이면 "narration". 명단 인물이 말하는 대사면 그 id(입 모양·시선·말풍선 꼬리·앞뒤 대화 흐름으로 판단). ★이 컷 화면에 안 보이는 인물이 말할 수도 있다(오프스크린 대사) — 호명·대화 흐름상 명단 인물이 확실하면 그 id 를 써라. 판단이 어려우면 "unknown". ` +
                         `JSON 만: {"speakers":[{"i":줄번호,"s":"id|narration|unknown"}]}`,
                     },
                   ],
