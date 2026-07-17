@@ -86,6 +86,7 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.description === "string") c.description = r.description.slice(0, 800);
   if (typeof r.promptDraft === "string") c.promptDraft = r.promptDraft.slice(0, 800);
   if (typeof r.motion === "string") c.motion = r.motion.slice(0, 800); // 프롬프트 잘림 방지
+  if (typeof r.action === "string") c.action = r.action.slice(0, 200); // 인물 동작(이어가기) 힌트 — 빈 문자열도 저장(동작 없음 확정)
   if (typeof r.durationSec === "number" && r.durationSec > 0) {
     c.durationSec = Math.max(0.5, Math.min(15, Math.round(r.durationSec * 2) / 2)); // 0.5초 단위
   }

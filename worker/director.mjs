@@ -39,8 +39,9 @@ const CAMERA_IDS = [...Object.keys(CAMERA_PROMPTS), "none"];
 const EMOTION_IDS = ["shout", "angry", "cry", "whisper", "laugh", "shock", "excited", "sigh", "none"];
 // 컷 끝 전환 — lib/types CutOntology.transition · /api/cut 화이트리스트와 일치해야 함.
 const TRANSITION_IDS = ["none", "fadeout", "fadein", "black", "dissolve"];
-// 자막 세로 위치(0=위,0.5=가운데,1=아래) — 화자 얼굴·입을 안 가리게 고른다.
-const SUBTITLE_Y = [0, 0.5, 1];
+// 자막 세로 위치 — Studio SUB_Y(9분할 토글)와 동일 값이어야 자동값이 UI 하이라이트와 맞는다.
+// 0.3=위, 0.5=가운데, 0.7=아래(가장자리 회피).
+const SUBTITLE_Y = [0.3, 0.5, 0.7];
 
 // 구조화 출력 스키마 — 풀 연출안: 카메라 + 컷길이 + 전환 + 인물동작(이어가기) + 줄별(감정·자막위치).
 const SCHEMA = {
@@ -136,7 +137,7 @@ export async function directCut(png, cut, lines) {
                 `shout, angry, cry, whisper, laugh, shock, excited, sigh, or "none" for flat informational lines ` +
                 `(prefer expressive when the meaning has charge). ` +
                 `subtitleY — where to place that line's subtitle vertically so it does NOT cover the speaker's face/mouth: ` +
-                `0 = top, 0.5 = middle, 1 = bottom (prefer 1/bottom by default; use 0/top only if the lower area holds the face). ` +
+                `0.3 = top, 0.5 = middle, 0.7 = bottom (prefer 0.7/bottom by default; use 0.3/top only if the lower area holds the face). ` +
                 `Return one entry per dialogue line index.`,
             },
           ],
