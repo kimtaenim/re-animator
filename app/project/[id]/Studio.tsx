@@ -72,6 +72,29 @@ const TRANSITIONS: [string, string][] = [
 // 대사 줄의 화자 특수값 — 효과음(소리 생성). 캐릭터 id 와 안 겹치는 센티넬.
 const SFX_SPEAKER = "__sfx__";
 
+// ★목록용 지연 비디오 — 화면에 보일 때만 재생, 벗어나면 정지. 수십 개 <video autoPlay> 가
+//   동시에 디코더를 돌려 크롬 전체가 버벅이던 문제의 수술(사용자 확인: 오토플레이가 원인).
+//   preload=metadata 라 첫 프레임만 받아 썸네일처럼 보이고, 재생은 뷰포트 안에서만.
+function LazyVideo({ src, onClick, className }: { src: string; onClick?: () => void; className?: string }) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([e]) => {
+        if (e.isIntersecting) el.play().catch(() => {});
+        else el.pause();
+      },
+      { threshold: 0.2 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return (
+    <video ref={ref} src={src} muted loop playsInline preload="metadata" onClick={onClick} className={className} />
+  );
+}
+
 export default function Studio({ initialProject }: { initialProject: Project }) {
   const [project, setProject] = useState<Project>(initialProject);
   const projectRef = useRef(project);
@@ -2339,12 +2362,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         </span>
                       </div>
                     ) : s.videoUrl ? (
-                      <video
+                      <LazyVideo
                         src={s.videoUrl}
-                        autoPlay
-                        loop
-                        muted
-                        playsInline
                         onClick={() => setScenePreview(s.id)}
                         className="h-28 w-auto shrink-0 cursor-zoom-in rounded border border-[var(--ok)] object-cover"
                       />
