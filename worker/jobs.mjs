@@ -913,9 +913,11 @@ export async function runCast(projectId) {
   const VLM_A = process.env.OPENAI_VLM_MODEL || "gpt-4o";
   if (keyA && cast.length > 0 && buffers.length > 0) {
     const scList = (p2.scenes ?? []).slice().sort((a, b) => a.order - b.order);
-    const todo = scList.filter((s) =>
-      (s.cut?.bubbles ?? []).some((b) => b.speakerId === undefined && (b.text || "").trim())
-    );
+    // ★추론 대상 = 캐릭터로 안 정해진 모든 줄(undefined + null). null(내레이션)도 다시 판정한다 —
+    //   추출/화면 저장 경로가 전 줄을 null 로 깔아버려 '미지정만' 조건이면 대상 0개가 됨(실측).
+    //   보호는 문자열 id(캐릭터·효과음)만: 사람이 캐릭터로 고른 줄은 절대 안 덮는다.
+    const open = (b) => b.speakerId == null && (b.text || "").trim();
+    const todo = scList.filter((s) => (s.cut?.bubbles ?? []).some(open));
     const roster = cast.map((c) => `${c.id}: ${c.label}${c.note ? " — " + c.note : ""}`).join("\n");
     const castIds = new Set(cast.map((c) => c.id));
     await log(`화자 추론(앞뒤 맥락) 대상 ${todo.length}컷…`);
@@ -944,7 +946,7 @@ export async function runCast(projectId) {
             );
             const img = await sharp(png).resize({ width: 512, withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer();
             const ask = (s.cut.bubbles ?? [])
-              .map((b, bi) => ({ bi, t: (b.text || "").trim(), open: b.speakerId === undefined && (b.text || "").trim() }))
+              .map((b, bi) => ({ bi, t: (b.text || "").trim(), open: open(b) }))
               .filter((l) => l.open);
             if (!ask.length) return;
             const body = {
@@ -981,7 +983,7 @@ export async function runCast(projectId) {
             const out = JSON.parse(j.choices?.[0]?.message?.content ?? "{}");
             for (const e of out.speakers ?? []) {
               const b = s.cut.bubbles?.[e.i];
-              if (!b || b.speakerId !== undefined) continue; // 이미 지정된 줄 보호
+              if (!b || typeof b.speakerId === "string") continue; // 캐릭터·효과음으로 지정된 줄만 보호
               if (e.s === "narration") {
                 b.speakerId = null;
                 assigned++;
