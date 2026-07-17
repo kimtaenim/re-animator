@@ -8,24 +8,19 @@
 
 const PRICING = { "gpt-4o-mini": { input: 0.15, output: 0.6 } };
 
-// 언어 감지 — Hangul 이 CJK 표의문자(한자)+일본어 가나보다 많으면 '한국어 원문'으로 보고 스킵.
-// 한글이 하나도 없고 한자/가나가 있으면 번역 필요. 글자 없으면(기호·숫자만) 스킵.
+// 언어 감지 — 한글(Hangul)만 '모국어'로 보고, 그 외 모든 언어(영어·중국어·일본어·러시아어·
+// 태국어·베트남어 등)는 번역 대상. 규칙: 글자(letter)가 없으면(숫자·기호만) 스킵, 한글 외
+// 문자가 하나도 없으면(한글전용) 스킵, 한글보다 비한글 글자가 많으면(=외국어 위주) 번역.
+// → 한글에 외국어 몇 글자 섞인 한국어 문장은 보호하고, 외국어 문장은 언어 불문 번역한다.
 export function needsTranslation(text) {
   const t = String(text || "");
   if (!t.trim()) return false;
-  let hangul = 0;
-  let foreign = 0; // 한자(CJK Unified/확장) + 일본어 히라가나·가타카나
-  for (const ch of t) {
-    const c = ch.codePointAt(0);
-    if (c >= 0xac00 && c <= 0xd7a3) hangul++; // 한글 음절
-    else if (c >= 0x1100 && c <= 0x11ff) hangul++; // 한글 자모
-    else if (c >= 0x4e00 && c <= 0x9fff) foreign++; // CJK 한자
-    else if (c >= 0x3400 && c <= 0x4dbf) foreign++; // CJK 확장 A
-    else if (c >= 0x3040 && c <= 0x30ff) foreign++; // 히라가나·가타카나
-    else if (c >= 0xf900 && c <= 0xfaff) foreign++; // CJK 호환 한자
-  }
-  if (foreign === 0) return false; // 한글전용·영문·기호만 → 번역 불필요(편집자가 이미 읽음)
-  return foreign > hangul; // 외국문자가 더 많을 때만(한글 섞인 한국어 문장 보호)
+  const letters = t.match(/\p{L}/gu) || []; // 모든 문자(스크립트 무관)
+  if (letters.length === 0) return false; // 숫자·기호만 → 번역할 게 없음
+  const hangul = (t.match(/\p{Script=Hangul}/gu) || []).length;
+  const other = letters.length - hangul; // 한글 아닌 글자(라틴·한자·가나·키릴·타이…)
+  if (other === 0) return false; // 한글전용 → 스킵
+  return other > hangul; // 비한글 글자가 더 많으면 외국어 문장으로 보고 번역
 }
 
 function costUsd(model, usage) {
