@@ -2339,7 +2339,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         <th className="p-1">확정</th>
                         <th className="p-1">#</th>
                         <th className="p-1">컷</th>
-                        <th className="p-1 min-w-[180px]">대사(역)·감정</th>
+                        <th className="p-1 min-w-[200px]">대사(역)·화자·감정</th>
                         <th className="p-1">카메라</th>
                         <th className="p-1">길이</th>
                         <th className="p-1">전환</th>
@@ -2377,6 +2377,24 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                                       {(b.translation || "").trim() && (
                                         <span className="italic text-[var(--muted)]">역: {b.translation!.slice(0, 40)}</span>
                                       )}
+                                      {/* 화자 — runCast 가 자동 분류한 기본값. 여기서 인라인 보정. */}
+                                      <select
+                                        value={b.speakerId ?? ""}
+                                        onChange={(e) => {
+                                          const v = e.target.value || null; // "" = 나레이션/미상
+                                          const nb = (s.cut?.bubbles ?? []).map((x) => (x === b ? { ...x, speakerId: v } : x));
+                                          updateCut(s.id, { bubbles: nb });
+                                        }}
+                                        className={`rounded border bg-[var(--panel-2)] px-0.5 py-0.5 text-[10px] ${
+                                          b.speakerId ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)]"
+                                        }`}
+                                        title="화자 — 자네가 만화·대사 보고 자동 분류. 틀리면 여기서 고침"
+                                      >
+                                        <option value="">🎙 나레이션/미상</option>
+                                        {(project.cast ?? []).map((c) => (
+                                          <option key={c.id} value={c.id}>{c.label}</option>
+                                        ))}
+                                      </select>
                                       <select
                                         value={b.emotion ?? ""}
                                         onChange={(e) => {
