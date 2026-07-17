@@ -27,22 +27,35 @@ const STEP_LABEL: Record<StepKind, string> = {
 // ★화려·과장 클리셰만(사용자 지정: 차분한 프리셋 제거). 속도 변화를 명시해야 모델이 따라온다.
 // ★"subject barely moves"류 정지 앵커 금지 — 과장 지시와 충돌해 밋밋하게 타협됨(가드는 MOTION_GUIDANCE 가 담당).
 const CAMERA_MOVES: [string, string, string][] = [
-  ["crash-in", "⚡ 크래시 줌인", "CRASH ZOOM IN: the camera creeps forward very slowly, then suddenly ACCELERATES and slams toward the subject at high speed — an explosive speed ramp ending in a tight dramatic close-up. Large, fast frame movement is intended."],
-  ["crash-out", "💥 크래시 줌아웃", "CRASH ZOOM OUT: the camera explosively pulls far away from the subject in one fast continuous motion, revealing the whole scene — the frame changes dramatically from close-up to wide."],
-  ["speed-ramp", "🚀 스피드 램프", "SPEED RAMP: dreamy slow motion at first, then the camera suddenly rushes toward the subject with rapidly increasing speed — music-video energy, big frame change."],
-  ["vertigo", "🌀 현기증", "DOLLY ZOOM (vertigo effect): the camera pushes in while the lens zooms out — the subject stays the same size while the background stretches and warps dramatically around them."],
-  ["whip-pan", "💨 휩 팬", "WHIP PAN: the camera whips sideways extremely fast with heavy motion blur streaks, then snaps to a stop on the subject."],
-  ["orbit-180", "⟲ 오비트180(빠름)", "FAST ORBIT: the camera sweeps a fast 180-degree arc around the subject with motion blur, showy and dynamic."],
-  ["orbit-120", "⟳ 오비트120(느림)", "ELEGANT ORBIT: the camera glides smoothly in a wide 120-degree arc around the subject, slow and luxurious like a high-end commercial."],
-  ["orbit-spin", "🔄 오비트 무한", "ENDLESS SPIN: the camera keeps circling around the subject continuously without stopping, hypnotic and stylish."],
-  ["impact-shake", "📳 임팩트 쉐이크", "IMPACT SHAKE: a sudden violent camera shake like a shockwave hit — hard jolt, quick rattling decay, then still."],
-  // 완급 조절용 — '의도된 정적/느림'(앨범 커버 프레임 톤)이라 기본 톤과 충돌 없음.
-  ["static", "■ 고정(정적)", "DELIBERATE STATIC SHOT: locked-off camera, completely still framing like a striking album-cover frame — only subtle ambient motion (drifting particles, hair, cloth, flickering light). The stillness is intentional and stylish."],
-  ["slow-in", "🐢 느린 푸시인", "SLOW CINEMATIC PUSH-IN: the camera glides forward very slowly and steadily toward the subject, calm and controlled, building quiet tension — smooth and elegant, no sudden speed changes."],
+  // ★시간 구조(느림/빠름 구간)를 명시해야 I2V 가 '급가속 스냅'을 구현한다. '크게 움직여라'류
+  //   막연한 강조는 피사체 동작만 키움(싸구려) — 각 문구는 Camera direction 으로 시작.
+  ["crash-in", "⚡ 크래시 줌인", "Camera direction — CRASH ZOOM IN, two speeds only: for most of the clip the camera pushes in almost imperceptibly slowly; then at the very end it SNAPS forward in one instant burst to a tight dramatic close-up. The acceleration is sudden, not gradual."],
+  ["crash-out", "💥 크래시 줌아웃", "Camera direction — CRASH ZOOM OUT: hold a tight close-up almost still for a beat; then in one instant burst the camera snaps far back, revealing the whole scene. A single sudden burst, not a gradual pull."],
+  ["speed-ramp", "🚀 스피드 램프", "Camera direction — SPEED RAMP IN: the camera starts gliding forward very slowly, then smoothly but rapidly accelerates, arriving fast and close to the subject right at the end. One continuous accelerating move."],
+  ["vertigo", "🌀 현기증", "Camera direction — DOLLY ZOOM (vertigo): the camera slowly pushes in while the lens zooms out, so the subject stays the same size while the background stretches and warps. Slow, continuous, unsettling."],
+  ["whip-pan", "💨 휩 팬", "Camera direction — WHIP PAN: the camera holds still for a beat, then whips sideways extremely fast with motion blur and snaps to a stop. One single whip."],
+  ["orbit-180", "⟲ 오비트180(빠름)", "Camera direction — FAST ORBIT: the camera sweeps one fast 180-degree arc around the subject in a single smooth motion with slight motion blur."],
+  ["orbit-120", "⟳ 오비트120(느림)", "Camera direction — ELEGANT ORBIT: the camera glides in a slow, smooth 120-degree arc around the subject, luxurious and steady like a high-end commercial."],
+  ["orbit-spin", "🔄 오비트 무한", "Camera direction — ENDLESS SPIN: the camera circles the subject continuously at a steady speed without stopping, hypnotic and stylish."],
+  ["impact-shake", "📳 임팩트 쉐이크", "Camera direction — IMPACT SHAKE: one sudden violent jolt like a shockwave, a fast rattling decay within half a second, then completely still."],
+  ["static", "■ 고정(정적)", "Camera direction — DELIBERATE STATIC SHOT: locked-off camera, completely still framing like a striking album-cover frame — only subtle ambient motion (drifting particles, hair, cloth, flickering light)."],
+  ["slow-in", "🐢 느린 푸시인", "Camera direction — SLOW CINEMATIC PUSH-IN: the camera glides forward very slowly and steadily toward the subject, calm and controlled, no sudden speed changes."],
 ];
 
 // (레거시) 예전 프리셋 문구 — 이미 저장된 컷의 motion 에서 지울 때만 사용(프리셋 교체 시 잔류 방지).
 const LEGACY_MOVE_PHRASES: string[] = [
+  // v37~v46 세대(피사체 동작 폭주 세대)
+  "CRASH ZOOM IN: the camera creeps forward very slowly, then suddenly ACCELERATES and slams toward the subject at high speed — an explosive speed ramp ending in a tight dramatic close-up. Large, fast frame movement is intended.",
+  "CRASH ZOOM OUT: the camera explosively pulls far away from the subject in one fast continuous motion, revealing the whole scene — the frame changes dramatically from close-up to wide.",
+  "SPEED RAMP: dreamy slow motion at first, then the camera suddenly rushes toward the subject with rapidly increasing speed — music-video energy, big frame change.",
+  "DOLLY ZOOM (vertigo effect): the camera pushes in while the lens zooms out — the subject stays the same size while the background stretches and warps dramatically around them.",
+  "WHIP PAN: the camera whips sideways extremely fast with heavy motion blur streaks, then snaps to a stop on the subject.",
+  "FAST ORBIT: the camera sweeps a fast 180-degree arc around the subject with motion blur, showy and dynamic.",
+  "ELEGANT ORBIT: the camera glides smoothly in a wide 120-degree arc around the subject, slow and luxurious like a high-end commercial.",
+  "ENDLESS SPIN: the camera keeps circling around the subject continuously without stopping, hypnotic and stylish.",
+  "IMPACT SHAKE: a sudden violent camera shake like a shockwave hit — hard jolt, quick rattling decay, then still.",
+  "DELIBERATE STATIC SHOT: locked-off camera, completely still framing like a striking album-cover frame — only subtle ambient motion (drifting particles, hair, cloth, flickering light). The stillness is intentional and stylish.",
+  "SLOW CINEMATIC PUSH-IN: the camera glides forward very slowly and steadily toward the subject, calm and controlled, building quiet tension — smooth and elegant, no sudden speed changes.",
   "Camera creeps forward slowly, then suddenly accelerates into a dramatic crash zoom slamming toward the subject — explosive speed ramp from very slow to very fast. Camera only; the subject barely moves.",
   "Camera suddenly whips backward in a dramatic crash zoom out, rapidly pulling far away to reveal the whole scene in one explosive motion. Camera only; the subject barely moves.",
   "Speed-ramped dolly-in: starts in dreamy slow motion, then bursts into a rapid accelerating rush toward the subject — cinematic action-movie energy. Camera only; the subject barely moves.",

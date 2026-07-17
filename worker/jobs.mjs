@@ -1219,15 +1219,18 @@ function estimateVideoSeconds(cut) {
 // ★기본 톤(사용자 지정): 무조건 스타일리시. '작고 느리고 잔잔하게'는 aninews 용이고
 //   re-animator 는 빠르고 스타일리시하게 — 정적 샷도 허용하되 '디자인된 것처럼' 멋있어야 한다.
 //   일관성 가드(스타일·인물 유지, 새 오브젝트·텍스트·변형 금지)는 그대로 지킨다.
-// ★가드 문구 주의: "consistent with the still image"·"no morphing"·"subject barely moves" 같은
-//   정지 앵커는 과장 카메라 지시와 정면 충돌해 밋밋한 결과로 타협된다(실사용 확인). 가드는
-//   '인물 정체성·그림체'로 좁히고, 큰 프레임 변화는 의도된 것이라고 명시한다.
+// ★설계 교훈(2026-07-18): 공통 지침에 'LARGE fast movement 가 정답'을 넣었더니 모델이
+//   '피사체를 크게 움직여라'로 해석 — 쓸데없는 인물 동작만 커지고 정작 카메라 문법(급가속·
+//   스냅)은 실종(사용자: "싸구려"). 역할 분리로 재설계: 프리셋(cut.motion)이 카메라의
+//   '무엇·언제'를 시간 구조로 지시하고, 공통 지침은 '그대로 정밀 실행 + 피사체는 정지'만.
 const MOTION_GUIDANCE =
-  "Shoot this like a cut from a high-end music video — that is the single reference for every shot. " +
-  "LARGE, fast camera movement is intended and correct: dramatic zooms, perspective shifts and big " +
-  "reframing are the goal, not an artifact. Never render a timid or barely-moving camera. " +
-  "Keep the character's identity, pose and the art style consistent; do not add new objects or text; " +
-  "do not distort faces.";
+  "Execute the camera direction above EXACTLY, especially its timing profile (the slow and fast phases) — " +
+  "clean, controlled, professional camera work like a high-end music video. " +
+  "ALL movement energy comes from the CAMERA: the subject holds their pose with only minimal natural motion " +
+  "(hair, cloth, breathing, blinking) and performs NO new actions. " +
+  "Keep the character's identity, the art style and colors; no new objects, no text; do not distort faces.";
+// 프리셋이 비어 있을 때의 기본 카메라(공통 지침은 '실행 지침'이라 자체 동작 지시가 없음).
+const DEFAULT_MOTION = "Camera direction: slow, confident cinematic push-in toward the subject.";
 // 대사 있는 인물 컷: '말하는 것처럼' 입/얼굴 움직임(진짜 립싱크 아님 — Grok I2V 한계).
 const SPEAKING_GUIDANCE =
   "The character is talking: natural, subtle lip and mouth movement as if speaking, with a slight, " +
@@ -1242,8 +1245,8 @@ function hasSpokenDialogue(cut) {
   return (cut.dialogue || "").trim() !== "";
 }
 function buildVideoPrompt(cut) {
-  const motion = String(cut?.motion || "").trim();
-  const base = motion ? `${motion}. ${MOTION_GUIDANCE}` : MOTION_GUIDANCE;
+  const motion = String(cut?.motion || "").trim() || DEFAULT_MOTION;
+  const base = `${motion}. ${MOTION_GUIDANCE}`;
   return hasSpokenDialogue(cut) ? `${base} ${SPEAKING_GUIDANCE}` : base;
 }
 
