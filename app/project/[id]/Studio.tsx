@@ -2473,14 +2473,27 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           </button>
                         ))}
                       </div>
-                      {/* 프롬프트(컷 설명) — 3단계와 같은 순서(프롬프트 위, 대사 아래)로 통일. */}
-                      {s.cut?.description?.trim() && (
-                        <p
-                          className="truncate text-[10px] text-[var(--muted)] opacity-70"
-                          title={s.cut.description}
-                        >
-                          컷: {s.cut.description.trim()}
-                        </p>
+                      {/* 프롬프트(컷 설명) — 4단계에서도 수정+다시 그리기 가능. Grok 이 정책
+                          (moderation)으로 거부할 때 그림 수위를 낮춰 재생성 → 재도전하는 용도. */}
+                      {!isCardScene && (
+                        <div className="flex items-start gap-1">
+                          <textarea
+                            value={s.cut?.description ?? ""}
+                            onChange={(e) => updateCut(s.id, { description: e.target.value })}
+                            rows={2}
+                            placeholder="컷 설명(그림 프롬프트) — 수정 후 🖼 로 다시 그리기 (정책 거부 시 수위 조절)"
+                            className="min-w-0 flex-1 resize-none rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 text-[10px] leading-tight text-[var(--muted)]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => regenOne(s.id)}
+                            disabled={busy || regenPending.has(s.id)}
+                            title="수정한 설명으로 이 컷 이미지 다시 그리기 — 완료 후 🎬 동영상 재생성"
+                            className="shrink-0 rounded border border-[var(--border)] px-1.5 py-1 text-sm text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-40"
+                          >
+                            {regenPending.has(s.id) ? "…" : "🖼"}
+                          </button>
+                        </div>
                       )}
                       {/* 대사·내레이션 통합 편집 — 각 줄에 화자(캐릭터/내레이션) 지정. 3단계와 싱크. */}
                       {dialogueEditor(s)}
