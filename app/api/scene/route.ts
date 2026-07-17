@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     id: randomUUID(),
     order: src.order + 1,
     sourceRegion: { ...src.sourceRegion },
-    cut: { ...blankCut(), type: "text", textKind: "narration", bubbles: [bubble], confirmed: true },
+    cut: { ...blankCut(), type: "text", textKind: "caption", bubbles: [bubble], confirmed: true },
     status: "approved",
   };
   for (const s of project.scenes) if (s.order > src.order) s.order += 1;
