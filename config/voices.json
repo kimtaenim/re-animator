@@ -1,20 +1,20 @@
 {
-  "_help": "더빙 목소리 카탈로그. voice_id 는 공개값이라 여기서 관리한다(=env·API 조회 대신). 캐스팅/나레이터가 이 목록을 골라 붙인다. 실제 음성 생성 때만 워커/미리듣기가 API 키(TYPECAST_API_KEY / ELEVENLABS_API_KEY)를 쓴다. narration:true = 나레이터 후보로 표시. provider=typecast|eleven, id=voice_id, name, lang, gender, note.",
+  "_help": "더빙 목소리 카탈로그. voice_id 는 공개값이라 여기서 관리한다(=env·API 조회 대신). 캐스팅/나레이터가 이 목록을 골라 붙인다. 실제 음성 생성 때만 워커/미리듣기가 API 키(TYPECAST_API_KEY / ELEVENLABS_API_KEY)를 쓴다. narration:true = 나레이터 후보로 표시. provider=typecast|eleven, id=voice_id, name, lang, gender, note. ※일레븐랩스(v3)는 텍스트 언어 자동 감지(70+개어)+감정 태그 연기라 다국어·연기용 1순위, Typecast 는 한국어 잔잔 톤 전용.",
   "voices": [
-    { "provider": "typecast", "id": "tc_67e38d8c771b5511659c4534", "name": "내레이터 A", "lang": "ko", "narration": true, "note": "내레이션 후보" },
-    { "provider": "typecast", "id": "tc_677f2aa4a854ddffa0ebda89", "name": "내레이터 B", "lang": "ko", "narration": true, "note": "내레이션 후보" },
-    { "provider": "typecast", "id": "tc_66e26710ac44cf7c7ebfdb71", "name": "내레이터 C", "lang": "ko", "narration": true, "note": "내레이션 후보" },
-    { "provider": "typecast", "id": "tc_64b0eede22ce103fdc1d9f78", "name": "내레이터 D", "lang": "ko", "narration": true, "note": "내레이션 후보" },
-    { "provider": "typecast", "id": "tc_6335062fd260d463f7d7abb9", "name": "내레이터 E", "lang": "ko", "narration": true, "note": "내레이션 후보" },
+    { "provider": "typecast", "id": "tc_67e38d8c771b5511659c4534", "name": "내레이터 A (타입캐스트·한국어)", "lang": "ko", "narration": true, "note": "내레이션 후보" },
+    { "provider": "typecast", "id": "tc_677f2aa4a854ddffa0ebda89", "name": "내레이터 B (타입캐스트·한국어)", "lang": "ko", "narration": true, "note": "내레이션 후보" },
+    { "provider": "typecast", "id": "tc_66e26710ac44cf7c7ebfdb71", "name": "내레이터 C (타입캐스트·한국어)", "lang": "ko", "narration": true, "note": "내레이션 후보" },
+    { "provider": "typecast", "id": "tc_64b0eede22ce103fdc1d9f78", "name": "내레이터 D (타입캐스트·한국어)", "lang": "ko", "narration": true, "note": "내레이션 후보" },
+    { "provider": "typecast", "id": "tc_6335062fd260d463f7d7abb9", "name": "내레이터 E (타입캐스트·한국어)", "lang": "ko", "narration": true, "note": "내레이션 후보" },
 
-    { "provider": "eleven", "id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel", "lang": "multi", "gender": "male", "narration": true, "note": "보조 · 뉴스 앵커풍" },
-    { "provider": "eleven", "id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel", "lang": "multi", "gender": "female", "narration": true, "note": "보조 · 차분한 여성" },
-    { "provider": "eleven", "id": "JBFqnCBsd6RMkjVDRZzb", "name": "George", "lang": "multi", "gender": "male", "note": "따뜻한 중년 남성" },
-    { "provider": "eleven", "id": "pNInz6obpgDQGcFmaJgB", "name": "Adam", "lang": "multi", "gender": "male", "note": "깊고 묵직한 남성" },
-    { "provider": "eleven", "id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam", "lang": "multi", "gender": "male", "note": "젊은 남성" },
-    { "provider": "eleven", "id": "N2lVS1w4EtoT3dr4eOWO", "name": "Callum", "lang": "multi", "gender": "male", "note": "거칠고 음산한 남성" },
-    { "provider": "eleven", "id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah", "lang": "multi", "gender": "female", "note": "부드러운 여성" },
-    { "provider": "eleven", "id": "XB0fDUnXU5powFXDhCwa", "name": "Charlotte", "lang": "multi", "gender": "female", "note": "젊은 여성" },
-    { "provider": "eleven", "id": "XrExE9yKIg1WjnnlVkGX", "name": "Matilda", "lang": "multi", "gender": "female", "note": "밝고 또렷한 여성" }
+    { "provider": "eleven", "id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel (일레븐·다국어·앵커풍 남성)", "lang": "multi", "gender": "male", "narration": true, "note": "뉴스 앵커풍 · 다국어 자동" },
+    { "provider": "eleven", "id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel (일레븐·다국어·차분 여성)", "lang": "multi", "gender": "female", "narration": true, "note": "차분한 여성 · 다국어 자동" },
+    { "provider": "eleven", "id": "JBFqnCBsd6RMkjVDRZzb", "name": "George (일레븐·다국어·따뜻한 중년)", "lang": "multi", "gender": "male", "narration": true, "note": "따뜻한 중년 남성 · 다국어 자동" },
+    { "provider": "eleven", "id": "pNInz6obpgDQGcFmaJgB", "name": "Adam (일레븐·다국어·묵직 남성)", "lang": "multi", "gender": "male", "narration": true, "note": "깊고 묵직한 남성 · 다국어 자동" },
+    { "provider": "eleven", "id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam (일레븐·다국어·젊은 남성)", "lang": "multi", "gender": "male", "narration": true, "note": "젊은 남성 · 다국어 자동" },
+    { "provider": "eleven", "id": "N2lVS1w4EtoT3dr4eOWO", "name": "Callum (일레븐·다국어·음산 남성)", "lang": "multi", "gender": "male", "narration": true, "note": "거칠고 음산한 남성 · 다국어 자동" },
+    { "provider": "eleven", "id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah (일레븐·다국어·부드러운 여성)", "lang": "multi", "gender": "female", "narration": true, "note": "부드러운 여성 · 다국어 자동" },
+    { "provider": "eleven", "id": "XB0fDUnXU5powFXDhCwa", "name": "Charlotte (일레븐·다국어·젊은 여성)", "lang": "multi", "gender": "female", "narration": true, "note": "젊은 여성 · 다국어 자동" },
+    { "provider": "eleven", "id": "XrExE9yKIg1WjnnlVkGX", "name": "Matilda (일레븐·다국어·밝은 여성)", "lang": "multi", "gender": "female", "narration": true, "note": "밝고 또렷한 여성 · 다국어 자동" }
   ]
 }
