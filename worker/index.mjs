@@ -113,7 +113,7 @@ async function tick(types) {
 
 // ★메모리 빡빡한 워커라 잡은 '한 번에 하나만' 처리한다(병렬 X → OOM 방지). 더빙 UI 는
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
-console.log("[worker] BUILD = m7-compose-v45 (화면 밖 캐릭터 지원 — 0컷 캐스트 저장 허용, 오프스크린 화자 추론)");
+console.log("[worker] BUILD = m7-compose-v46 (카메라 완급 — 고정·느린 푸시인 추가, AI 연출도 리듬 완급 지시)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);

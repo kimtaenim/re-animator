@@ -29,6 +29,11 @@ export const CAMERA_PROMPTS = {
     "ENDLESS SPIN: the camera keeps circling around the subject continuously without stopping, hypnotic and stylish.",
   "impact-shake":
     "IMPACT SHAKE: a sudden violent camera shake like a shockwave hit — hard jolt, quick rattling decay, then still.",
+  // 완급 조절용 — '의도된 정적/느림'(앨범 커버 프레임 톤).
+  static:
+    "DELIBERATE STATIC SHOT: locked-off camera, completely still framing like a striking album-cover frame — only subtle ambient motion (drifting particles, hair, cloth, flickering light). The stillness is intentional and stylish.",
+  "slow-in":
+    "SLOW CINEMATIC PUSH-IN: the camera glides forward very slowly and steadily toward the subject, calm and controlled, building quiet tension — smooth and elegant, no sudden speed changes.",
 };
 const CAMERA_IDS = [...Object.keys(CAMERA_PROMPTS), "none"];
 const EMOTION_IDS = ["shout", "angry", "cry", "whisper", "laugh", "shock", "excited", "sigh", "none"];
@@ -101,9 +106,11 @@ export async function directCut(png, cut, lines) {
                 `Camera options: crash-in (slow creep then explosive zoom in), crash-out (explosive pull-back reveal), ` +
                 `speed-ramp (slow-motion bursting into a rush), vertigo (dolly-zoom background warp), whip-pan, ` +
                 `orbit-180 (fast half orbit), orbit-120 (slow elegant orbit), orbit-spin (endless spinning), ` +
-                `impact-shake (shockwave hit). Use "none" only when the cut is pure text/UI.\n` +
-                `Prefer BOLD dramatic choices — match the cut's content and mood (impact-shake for hits/surprise, ` +
-                `crash-in for reveals/declarations, vertigo for dread, orbit for showcase moments).\n\n` +
+                `impact-shake (shockwave hit), static (deliberate album-cover stillness), slow-in (slow elegant push-in). ` +
+                `Use "none" only when the cut is pure text/UI.\n` +
+                `Prefer BOLD dramatic choices, but VARY THE RHYTHM — a music video alternates fast and slow: ` +
+                `impact-shake for hits/surprise, crash-in for reveals/declarations, vertigo for dread, orbit for ` +
+                `showcase moments, static/slow-in for quiet, emotional or lingering beats (do not make every cut fast).\n\n` +
                 `Dialogue lines (index. [speaker] text):\n${lineDesc}\n\n` +
                 `Emotion options: shout, angry, cry, whisper, laugh, shock, excited, sigh. ` +
                 `Use "none" for flat informational lines. Prefer expressive choices when the text has any charge ` +

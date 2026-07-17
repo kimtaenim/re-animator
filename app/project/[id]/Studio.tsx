@@ -36,6 +36,9 @@ const CAMERA_MOVES: [string, string, string][] = [
   ["orbit-120", "⟳ 오비트120(느림)", "ELEGANT ORBIT: the camera glides smoothly in a wide 120-degree arc around the subject, slow and luxurious like a high-end commercial."],
   ["orbit-spin", "🔄 오비트 무한", "ENDLESS SPIN: the camera keeps circling around the subject continuously without stopping, hypnotic and stylish."],
   ["impact-shake", "📳 임팩트 쉐이크", "IMPACT SHAKE: a sudden violent camera shake like a shockwave hit — hard jolt, quick rattling decay, then still."],
+  // 완급 조절용 — '의도된 정적/느림'(앨범 커버 프레임 톤)이라 기본 톤과 충돌 없음.
+  ["static", "■ 고정(정적)", "DELIBERATE STATIC SHOT: locked-off camera, completely still framing like a striking album-cover frame — only subtle ambient motion (drifting particles, hair, cloth, flickering light). The stillness is intentional and stylish."],
+  ["slow-in", "🐢 느린 푸시인", "SLOW CINEMATIC PUSH-IN: the camera glides forward very slowly and steadily toward the subject, calm and controlled, building quiet tension — smooth and elegant, no sudden speed changes."],
 ];
 
 // (레거시) 예전 프리셋 문구 — 이미 저장된 컷의 motion 에서 지울 때만 사용(프리셋 교체 시 잔류 방지).
