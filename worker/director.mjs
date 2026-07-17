@@ -37,23 +37,31 @@ export const CAMERA_PROMPTS = {
 };
 const CAMERA_IDS = [...Object.keys(CAMERA_PROMPTS), "none"];
 const EMOTION_IDS = ["shout", "angry", "cry", "whisper", "laugh", "shock", "excited", "sigh", "none"];
+// 컷 끝 전환 — lib/types CutOntology.transition · /api/cut 화이트리스트와 일치해야 함.
+const TRANSITION_IDS = ["none", "fadeout", "fadein", "black", "dissolve"];
+// 자막 세로 위치(0=위,0.5=가운데,1=아래) — 화자 얼굴·입을 안 가리게 고른다.
+const SUBTITLE_Y = [0, 0.5, 1];
 
-// 구조화 출력 스키마 — 카메라 1개 + 줄별 감정.
+// 구조화 출력 스키마 — 풀 연출안: 카메라 + 컷길이 + 전환 + 인물동작(이어가기) + 줄별(감정·자막위치).
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["camera", "emotions"],
+  required: ["camera", "durationSec", "transition", "action", "emotions"],
   properties: {
     camera: { type: "string", enum: CAMERA_IDS },
+    durationSec: { type: "number" }, // 이 컷 권장 길이(초)
+    transition: { type: "string", enum: TRANSITION_IDS },
+    action: { type: "string" }, // 인물/피사체 동작 — ★그림에 이미 있는 동작의 '이어가기'만. 없으면 빈 문자열.
     emotions: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["index", "emotion"],
+        required: ["index", "emotion", "subtitleY"],
         properties: {
           index: { type: "integer" },
           emotion: { type: "string", enum: EMOTION_IDS },
+          subtitleY: { type: "number", enum: SUBTITLE_Y }, // 이 줄 자막 세로 위치
         },
       },
     },
@@ -77,8 +85,9 @@ const MODEL = process.env.CLAUDE_DIRECTOR_MODEL || "claude-opus-4-8";
 const IN_USD = 5 / 1e6;
 const OUT_USD = 25 / 1e6;
 
-// 한 컷 연출: png(컷 이미지 버퍼)+cut → { camera, emotions, costUsd } 또는 null(스킵/실패).
-// lines = 감정 대상 줄들 [{ index, speaker, text }] (효과음 제외, 호출측이 구성).
+// 한 컷 연출: png(컷 이미지 버퍼)+cut → { camera, durationSec, transition, action, emotions, costUsd }
+// 또는 null(스킵/실패). lines = 대상 줄들 [{ index, speaker, text, translation }] (효과음 제외, 호출측 구성).
+// translation(있으면)을 함께 줘 '내용을 읽고' 연출하게 한다(외국어 원문만으론 뜻을 모름).
 export async function directCut(png, cut, lines) {
   const client = await getClient();
   if (!client) return null;
@@ -86,11 +95,13 @@ export async function directCut(png, cut, lines) {
     // 이미지 축소(폭 512 jpeg) — 토큰·비용 절감, 연출 판단엔 충분.
     const img = await sharp(png).resize({ width: 512, withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer();
     const lineDesc = lines.length
-      ? lines.map((l) => `${l.index}. [${l.speaker}] ${l.text}`).join("\n")
+      ? lines
+          .map((l) => `${l.index}. [${l.speaker}] ${l.text}${l.translation ? ` (meaning: ${l.translation})` : ""}`)
+          .join("\n")
       : "(no dialogue lines)";
     const res = await client.messages.create({
       model: MODEL,
-      max_tokens: 700,
+      max_tokens: 900,
       output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
       messages: [
         {
@@ -101,20 +112,32 @@ export async function directCut(png, cut, lines) {
               type: "text",
               text:
                 `You are the director of a high-end music-video-style adaptation of a webtoon. ` +
-                `For this cut (type: ${cut?.type ?? "unknown"}), pick the single most fitting EXAGGERATED cliché camera move, ` +
-                `and for each dialogue line pick an exaggerated voice-acting emotion.\n\n` +
-                `Camera options: crash-in (slow creep then explosive zoom in), crash-out (explosive pull-back reveal), ` +
+                `READ the dialogue meaning and the image, then design the full shot for this cut (type: ${cut?.type ?? "unknown"}).\n\n` +
+                `1) camera — pick the single most fitting EXAGGERATED cliché move. Options: ` +
+                `crash-in (slow creep then explosive zoom in), crash-out (explosive pull-back reveal), ` +
                 `speed-ramp (slow-motion bursting into a rush), vertigo (dolly-zoom background warp), whip-pan, ` +
                 `orbit-180 (fast half orbit), orbit-120 (slow elegant orbit), orbit-spin (endless spinning), ` +
                 `impact-shake (shockwave hit), static (deliberate album-cover stillness), slow-in (slow elegant push-in). ` +
-                `Use "none" only when the cut is pure text/UI.\n` +
-                `Prefer BOLD dramatic choices, but VARY THE RHYTHM — a music video alternates fast and slow: ` +
+                `Use "none" only when the cut is pure text/UI. ` +
+                `Prefer BOLD choices but VARY THE RHYTHM — a music video alternates fast and slow: ` +
                 `impact-shake for hits/surprise, crash-in for reveals/declarations, vertigo for dread, orbit for ` +
                 `showcase moments, static/slow-in for quiet, emotional or lingering beats (do not make every cut fast).\n\n` +
-                `Dialogue lines (index. [speaker] text):\n${lineDesc}\n\n` +
-                `Emotion options: shout, angry, cry, whisper, laugh, shock, excited, sigh. ` +
-                `Use "none" for flat informational lines. Prefer expressive choices when the text has any charge ` +
-                `(exclamation marks, ellipses, interjections). Return one entry per dialogue line index.`,
+                `2) durationSec — how long this cut should stay on screen (a number of seconds). ` +
+                `Base it on the dialogue length (roughly enough time to read/speak it) and the beat: ` +
+                `quick reaction 1-1.5s, a normal line 2-3s, a long or dramatic lingering beat up to 6-8s.\n\n` +
+                `3) transition — the cut-END transition. Options: none (hard cut, the default for most cuts), ` +
+                `fadeout (fade to black at the end, for a scene/chapter break), fadein, black, ` +
+                `dissolve (soft cross-blend, for a time skip or dreamy shift). Use "none" unless a break is clearly called for.\n\n` +
+                `4) action — ★STRICT RULE★: describe ONLY the continuation of an action ALREADY visibly happening in the still ` +
+                `(e.g. "the man keeps walking forward", "her hair keeps blowing"). If nothing is clearly mid-action, return "". ` +
+                `NEVER invent a new action, gesture, or movement that is not already depicted — that ruins the shot. Keep it one short clause.\n\n` +
+                `Dialogue lines (index. [speaker] text (meaning)):\n${lineDesc}\n\n` +
+                `5) For EACH dialogue line return: emotion — an exaggerated voice-acting emotion from ` +
+                `shout, angry, cry, whisper, laugh, shock, excited, sigh, or "none" for flat informational lines ` +
+                `(prefer expressive when the meaning has charge). ` +
+                `subtitleY — where to place that line's subtitle vertically so it does NOT cover the speaker's face/mouth: ` +
+                `0 = top, 0.5 = middle, 1 = bottom (prefer 1/bottom by default; use 0/top only if the lower area holds the face). ` +
+                `Return one entry per dialogue line index.`,
             },
           ],
         },
@@ -124,7 +147,15 @@ export async function directCut(png, cut, lines) {
     const out = res.parsed_output ?? JSON.parse(res.content.find((b) => b.type === "text")?.text ?? "{}");
     const costUsd = (res.usage?.input_tokens ?? 0) * IN_USD + (res.usage?.output_tokens ?? 0) * OUT_USD;
     if (!out || !CAMERA_IDS.includes(out.camera)) return null;
-    return { camera: out.camera, emotions: Array.isArray(out.emotions) ? out.emotions : [], costUsd };
+    const dur = Number(out.durationSec);
+    return {
+      camera: out.camera,
+      durationSec: Number.isFinite(dur) && dur > 0 ? Math.max(0.5, Math.min(15, Math.round(dur * 2) / 2)) : null,
+      transition: TRANSITION_IDS.includes(out.transition) ? out.transition : "none",
+      action: typeof out.action === "string" ? out.action.trim().slice(0, 200) : "",
+      emotions: Array.isArray(out.emotions) ? out.emotions : [],
+      costUsd,
+    };
   } catch (e) {
     // 연출 실패는 추출을 막지 않는다 — 호출측이 로그.
     throw new Error(`AI 연출 실패: ${String(e?.message ?? e).slice(0, 120)}`);

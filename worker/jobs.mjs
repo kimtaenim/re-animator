@@ -661,20 +661,30 @@ export async function runExtract(projectId) {
                 trlCost += nc;
               }
             } catch {}
-            // ── AI 연출: 카메라워크·감정 디폴트를 Claude 가 채움(사용자 지정값은 안 덮음) ──
+            // ── AI 연출: 번역을 읽고 풀 연출안(카메라·길이·전환·동작·줄별 감정·자막위치)을
+            //   디폴트로 채운다. ★사용자가 이미 지정한 값은 절대 안 덮는다(미지정 필드만).
             const needCam = !(s.cut.motion || "").trim();
+            const needDur = s.cut.durationSec == null;
+            const needTrans = s.cut.transition == null;
+            const needAction = s.cut.action == null;
             const needEmo = (s.cut.bubbles ?? []).some((b) => !b.emotion && b.speakerId !== "__sfx__" && (b.text || "").trim());
-            if (needCam || needEmo) {
+            const needSubY = (s.cut.bubbles ?? []).some((b) => b.subtitleY == null && b.speakerId !== "__sfx__" && (b.text || "").trim());
+            if (needCam || needDur || needTrans || needAction || needEmo || needSubY) {
               try {
                 const lines = (s.cut.bubbles ?? [])
-                  .map((b, bi) => ({ index: bi, speaker: b.speakerId === "__sfx__" ? null : b.speakerId ? "character" : "narration", text: (b.text || "").trim() }))
+                  .map((b, bi) => ({ index: bi, speaker: b.speakerId === "__sfx__" ? null : b.speakerId ? "character" : "narration", text: (b.text || "").trim(), translation: (b.translation || "").trim() }))
                   .filter((l) => l.speaker && l.text);
                 const d = await directCut(png, s.cut, lines);
                 if (d) {
                   if (needCam && d.camera !== "none" && CAMERA_PROMPTS[d.camera]) s.cut.motion = CAMERA_PROMPTS[d.camera];
+                  if (needDur && d.durationSec) s.cut.durationSec = d.durationSec;
+                  if (needTrans && d.transition) s.cut.transition = d.transition;
+                  if (needAction) s.cut.action = d.action; // "" 도 저장 → '동작 없음'으로 확정(재실행 방지)
                   for (const e of d.emotions) {
                     const b = s.cut.bubbles?.[e.index];
-                    if (b && !b.emotion && b.speakerId !== "__sfx__" && e.emotion !== "none") b.emotion = e.emotion;
+                    if (!b || b.speakerId === "__sfx__" || !(b.text || "").trim()) continue;
+                    if (!b.emotion && e.emotion !== "none") b.emotion = e.emotion;
+                    if (b.subtitleY == null && typeof e.subtitleY === "number") b.subtitleY = e.subtitleY;
                   }
                   dirOk++;
                   dirCost += d.costUsd || 0;
@@ -1281,7 +1291,11 @@ function hasSpokenDialogue(cut) {
 }
 function buildVideoPrompt(cut) {
   const motion = String(cut?.motion || "").trim() || DEFAULT_MOTION;
-  const base = `${motion}. ${MOTION_GUIDANCE}`;
+  // 동작(이어가기)이 있으면 카메라 지시 뒤에 짧게 덧붙인다. AI 연출이 '그림에 이미 있는 동작의
+  // 이어가기'만 담도록 제약했으므로 MOTION_GUIDANCE(새 동작 금지)와 충돌하지 않는다.
+  const action = String(cut?.action || "").trim();
+  const cam = action ? `${motion}. Subject action (continue only what is already happening): ${action}` : motion;
+  const base = `${cam}. ${MOTION_GUIDANCE}`;
   return hasSpokenDialogue(cut) ? `${base} ${SPEAKING_GUIDANCE}` : base;
 }
 

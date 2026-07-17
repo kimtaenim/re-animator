@@ -125,7 +125,8 @@ export interface CutOntology {
   sfxAudioUrl?: string; // 효과음 오디오 Blob URL (ElevenLabs Sound Effects 생성)
   description: string; // VLM 자유 서술(인물·배경·구도·분위기) → image-2 로 그대로 전달
   promptDraft: string; // image-2 재생성용 프롬프트 초안(영문)
-  motion: string; // I2V 모션 힌트(후속)
+  motion: string; // I2V 카메라워크 프롬프트(CAMERA_PROMPTS). '무엇·언제'를 시간구조로 지시.
+  action?: string; // 인물/피사체 동작 힌트(I2V) — ★그림에 이미 있는 동작의 '이어가기'만(새 동작 창작 금지). AI 연출이 디폴트로 채움.
   durationSec?: number; // 이 컷 영상/씬 길이(초) 사람 지정. 없으면 대사·타입으로 추정.
   transition?: string; // 이 컷 끝의 전환(합성 시): none/fadeout/fadein/black/dissolve
   subtitlePos?: "auto" | "top" | "middle" | "bottom"; // (레거시) 자막 위치 프리셋
