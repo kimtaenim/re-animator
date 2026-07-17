@@ -143,6 +143,8 @@ export interface Scene {
   regenError?: string; // 재생성 실패 사유(있으면)
   videoUrl?: string; // M4 I2V 영상 Blob URL (Grok image-to-video)
   videoError?: string; // 영상 생성 실패 사유(있으면)
+  fxUrl?: string; // 후처리(줌 커브) 구운 영상 Blob URL — 있으면 미리보기·합성이 이걸 사용
+  fx?: { effect: string; strength: number }; // 적용된 후처리(크래시인/아웃·램프·펀치)와 강도
   status: StepStatus; // M1 에선 경계 확정 여부 관리에만 사용
 }
 

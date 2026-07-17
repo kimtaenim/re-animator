@@ -1351,6 +1351,117 @@ export async function runVideo(projectId, payload) {
 // ── dub(M6): 대사·내레이션을 TTS로 음성화 → bubble.audioUrl / cut.narrationAudioUrl ──
 //    화자=캐릭터면 그 캐릭터 목소리, 화자 없음(내레이션)이면 프로젝트 나레이터 목소리.
 //    payload.sceneIds 있으면 그 컷만. scene 단계로 진행 표시.
+// ── postfx: Grok 원본 클립에 줌 커브(크래시인/아웃·램프·펀치)를 ffmpeg 로 실제 픽셀에 굽기 ──
+//    결과는 scene.fxUrl — 미리보기·합성이 그대로 재사용(미리보기 = 최종 픽셀). 원본 videoUrl 은
+//    보존이라 강도 바꿔 재적용·해제(none) 가능. 저장은 fresh 재읽기 후 해당 필드만 머지(저장 규약).
+export async function runPostfx(projectId, payload) {
+  await resetProgress(projectId);
+  const log = async (m) => {
+    console.error("[postfx]", m);
+    await logProgress(projectId, m);
+  };
+  const effect = String(payload?.effect ?? "");
+  const strength = Math.max(1, Math.min(3, Math.round(Number(payload?.strength) || 2)));
+  const ids = new Set(Array.isArray(payload?.sceneIds) ? payload.sceneIds : []);
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  const targets = (p.scenes ?? []).filter((s) => ids.has(s.id) && s.videoUrl);
+  if (!targets.length) throw new Error("후처리할 영상이 없어요(먼저 동영상 생성)");
+
+  // effect=none → 렌더 없이 해제.
+  if (effect === "none") {
+    const p2 = await getProject(projectId);
+    for (const s of p2.scenes ?? []) {
+      if (ids.has(s.id)) {
+        delete s.fxUrl;
+        delete s.fx;
+      }
+    }
+    await saveProject(p2);
+    await log(`후처리 해제 ${targets.length}컷 — 원본 사용`);
+    return targets.length;
+  }
+
+  const ff = await ffmpegPath();
+  const fp = await (async () => {
+    try {
+      return process.env.FFPROBE_PATH || (await import("ffprobe-static")).default?.path || "ffprobe";
+    } catch {
+      return "ffprobe";
+    }
+  })();
+  const probe = (file, entry) =>
+    new Promise((res) => {
+      const pr = spawn(fp, ["-v", "error", "-select_streams", "v:0", "-show_entries", entry, "-of", "default=nw=1:nk=1", file]);
+      let out = "";
+      pr.stdout.on("data", (d) => (out += d));
+      pr.on("close", () => res(out.trim().split(/\s+/).map(Number)));
+      pr.on("error", () => res([]));
+    });
+  // 강도별 최대 줌(2.0 초과는 픽셀 뭉개짐 — 상한 고정).
+  const ZM = { 1: 1.35, 2: 1.65, 3: 2.0 }[strength];
+
+  let done = 0;
+  for (const s of targets) {
+    let dir;
+    try {
+      dir = await mkdtemp(join(tmpdir(), "refx-"));
+      const inp = join(dir, "in.mp4");
+      const outp = join(dir, "out.mp4");
+      const buf = await download(s.videoUrl);
+      await writeFile(inp, buf);
+      const [W, H] = await probe(inp, "stream=width,height");
+      const [T] = await probe(inp, "format=duration");
+      if (!W || !H || !T) throw new Error("클립 정보를 읽지 못함");
+      // 줌 커브 Z(t) — 프리셋 문법과 동일한 2단 속도 철학. crop 은 짝수 강제(코덱 요구).
+      const T1 = Math.max(0.3, T - 0.4).toFixed(3); // 크래시인: 마지막 0.4s 에 스냅
+      const Z = {
+        "crash-in": `if(lt(t,${T1}), 1+0.06*t/${T1}, 1.06+(${ZM}-1.06)*pow(min(1,(t-${T1})/0.4),2))`,
+        "crash-out": `if(lt(t,0.35), ${ZM}, max(1, ${ZM}-(${ZM}-1)*pow(min(1,(t-0.35)/0.4),2)))`,
+        "ramp-in": `1+(${ZM}-1)*pow(t/${T.toFixed(3)},2.5)`,
+        punch: `if(lt(t,0.1), 1+(${ZM}-1)*t/0.1, if(lt(t,0.55), ${ZM}-(${ZM}-1.12)*(t-0.1)/0.45, 1.12))`,
+      }[effect];
+      if (!Z) throw new Error(`알 수 없는 효과: ${effect}`);
+      // 펀치는 감쇠 흔들림 추가(수평 0.5s).
+      const shake = effect === "punch" ? `+${(0.015 * strength).toFixed(4)}*iw*sin(55*t)*exp(-6*t)` : "";
+      const vf =
+        `crop=w='floor(iw/(${Z})/2)*2':h='floor(ih/(${Z})/2)*2':` +
+        `x='(iw-ow)/2${shake}':y='(ih-oh)/2',scale=${W}:${H},setsar=1`;
+      await new Promise((res, rej) => {
+        const pr = spawn(ff, ["-hide_banner", "-nostats", "-loglevel", "warning", "-y", "-i", inp, "-vf", vf, "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", outp]);
+        let err = "";
+        pr.stderr.on("data", (d) => {
+          err += d;
+          if (err.length > 8000) err = err.slice(-8000);
+        });
+        pr.on("error", rej);
+        pr.on("close", (c) => (c === 0 ? res() : rej(new Error(`ffmpeg ${c}: ${err.slice(-300)}`))));
+      });
+      const { url } = await put(`project/${projectId}/fx-${s.order}-${Date.now()}.mp4`, await readFile(outp), {
+        access: "public",
+        contentType: "video/mp4",
+        addRandomSuffix: false,
+      });
+      // fresh 재읽기 후 해당 씬 필드만 머지(다른 갱신 클로버 방지 — 저장 규약).
+      const p2 = await getProject(projectId);
+      const t2 = (p2?.scenes ?? []).find((x) => x.id === s.id);
+      if (p2 && t2) {
+        t2.fxUrl = url;
+        t2.fx = { effect, strength };
+        await saveProject(p2);
+      }
+      done++;
+      await log(`후처리 ${done}/${targets.length} — 컷 ${s.order + 1} (${effect}·강도${strength})`);
+    } catch (e) {
+      await log(`컷 ${s.order + 1} 후처리 실패: ${String(e?.message ?? e).slice(0, 120)}`);
+    } finally {
+      if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+  await log(`후처리 완료 ${done}/${targets.length}`);
+  return done;
+}
+
 export async function runDub(projectId, payload) {
   // ★비디오 잡과 '병렬'로 돌 수 있으므로 공유 진행로그(resetProgress/logProgress)·단계 상태를
   //   건드리지 않는다(그러면 동영상 진행 표시가 깨짐). 진행은 잡 상태로 앱이 추적, 상세는 콘솔.

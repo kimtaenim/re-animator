@@ -18,7 +18,8 @@ export type JobType =
   | "video"
   | "compose"
   | "portrait"
-  | "dub";
+  | "dub"
+  | "postfx";
 export type JobStatus = "queued" | "running" | "done" | "error";
 
 export interface Job {

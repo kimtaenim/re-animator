@@ -123,6 +123,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
   const [scenePreview, setScenePreview] = useState<string | null>(null); // 씬 미리보기(영상+자막+더빙)
   const [subIdx, setSubIdx] = useState(0); // 미리보기 자막 박스 순차 표시 인덱스(하나씩)
+  // 후처리 줌(postfx) 상태 — 진행 중 씬 id + 카드별 선택값(적용 전 임시).
+  const [fxPending, setFxPending] = useState<Set<string>>(new Set());
+  const [fxSel, setFxSel] = useState<Record<string, { effect: string; strength: number }>>({});
   // 4단계 목소리 캐스팅 패널용 목소리 카탈로그(config/voices.json) — 캐스팅 화면과 같은 원천.
   const [voiceList, setVoiceList] = useState<{ provider?: string; id: string; name: string; note?: string }[]>([]);
   useEffect(() => {
@@ -1198,6 +1201,48 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // ★비디오(scene 단계)와 독립: 잡 상태를 따로 폴링해 동영상 생성 중에도 더빙을 걸 수 있다.
   const [dubbing, setDubbing] = useState(false); // 더빙 잡 진행 중(비디오와 무관)
   const [dubMsg, setDubMsg] = useState<string | null>(null); // 더빙 완료/실패 안내(잠깐 표시)
+  // ── 후처리 줌(postfx) — Grok 원본에 줌 커브를 실픽셀로 굽는 잡. fxUrl 이 미리보기·합성에 쓰임. ──
+  async function runFxJob(sceneIds: string[], effect: string, strength: number) {
+    setError("");
+    setFxPending((prev) => new Set([...prev, ...sceneIds]));
+    const clear = () =>
+      setFxPending((prev) => {
+        const n = new Set(prev);
+        for (const id of sceneIds) n.delete(id);
+        return n;
+      });
+    try {
+      const r = await fetch("/api/postfx", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneIds, effect, strength }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "후처리 실패");
+      const iv = setInterval(async () => {
+        try {
+          const jr = await fetch(`/api/job?id=${d.jobId}`, { cache: "no-store" });
+          const jd = await jr.json();
+          if (jd.ok && (jd.status === "done" || jd.status === "error")) {
+            clearInterval(iv);
+            clear();
+            if (jd.status === "error") setError(`후처리 실패: ${jd.error ?? ""}`);
+            const pr = await fetch(`/api/project/${project.id}`, { cache: "no-store" });
+            const pd = await pr.json();
+            if (pd.ok) setProject(pd.project);
+          }
+        } catch {}
+      }, 4000);
+      setTimeout(() => {
+        clearInterval(iv);
+        clear();
+      }, 10 * 60_000);
+    } catch (e) {
+      clear();
+      setError(e instanceof Error ? e.message : "후처리 실패");
+    }
+  }
+
   async function runDubJob(sceneIds?: string[]) {
     setError("");
     setDubMsg(null);
@@ -2375,7 +2420,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       </div>
                     ) : s.videoUrl ? (
                       <LazyVideo
-                        src={s.videoUrl}
+                        src={s.fxUrl ?? s.videoUrl}
                         onClick={() => setScenePreview(s.id)}
                         className="h-28 w-auto shrink-0 cursor-zoom-in rounded border border-[var(--ok)] object-cover"
                       />
@@ -2485,6 +2530,66 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           </button>
                         ))}
                       </div>
+                      {/* ⚡후처리 줌 — 워커가 실픽셀에 굽고(컷당 20~40초) fxUrl 저장. 미리보기·합성이
+                          그대로 사용(미리보기=최종). 원본 videoUrl 보존이라 재적용·해제 자유. */}
+                      {!isCardScene && s.videoUrl && (
+                        <div
+                          className="flex flex-wrap items-center gap-1 text-[10px]"
+                          title="후처리 줌 — 실제 픽셀에 굽는 확정 카메라워크(크래시 줌·램프·펀치). 오비트류는 Grok 생성 담당"
+                        >
+                          <span className="text-[var(--muted)]">⚡ 후처리 줌</span>
+                          <select
+                            value={(fxSel[s.id]?.effect ?? s.fx?.effect) || "none"}
+                            onChange={(e) =>
+                              setFxSel((p) => ({
+                                ...p,
+                                [s.id]: { effect: e.target.value, strength: p[s.id]?.strength ?? s.fx?.strength ?? 2 },
+                              }))
+                            }
+                            className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
+                          >
+                            <option value="none">없음(원본)</option>
+                            <option value="crash-in">⚡ 크래시 줌인</option>
+                            <option value="crash-out">💥 크래시 줌아웃</option>
+                            <option value="ramp-in">🚀 램프인(연속 가속)</option>
+                            <option value="punch">📳 펀치+흔들</option>
+                          </select>
+                          <select
+                            value={String(fxSel[s.id]?.strength ?? s.fx?.strength ?? 2)}
+                            onChange={(e) =>
+                              setFxSel((p) => ({
+                                ...p,
+                                [s.id]: {
+                                  effect: p[s.id]?.effect ?? s.fx?.effect ?? "none",
+                                  strength: Number(e.target.value),
+                                },
+                              }))
+                            }
+                            className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
+                            title="강도 — 강(2.0배)이 상한(그 이상은 화질 저하)"
+                          >
+                            <option value="1">약</option>
+                            <option value="2">중</option>
+                            <option value="3">강</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const sel = fxSel[s.id] ?? { effect: s.fx?.effect ?? "none", strength: s.fx?.strength ?? 2 };
+                              runFxJob([s.id], sel.effect, sel.strength);
+                            }}
+                            disabled={busy || fxPending.has(s.id)}
+                            className="rounded bg-[var(--accent)] px-2 py-0.5 font-medium text-white disabled:opacity-40"
+                          >
+                            {fxPending.has(s.id) ? "굽는 중…" : "적용"}
+                          </button>
+                          {s.fxUrl && (
+                            <span className="text-[var(--ok)]" title={`적용됨: ${s.fx?.effect} · 강도 ${s.fx?.strength}`}>
+                              FX✓
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {/* 프롬프트(컷 설명) — 4단계에서도 수정+다시 그리기 가능. Grok 이 정책
                           (moderation)으로 거부할 때 그림 수위를 낮춰 재생성 → 재도전하는 용도. */}
                       {!isCardScene && (
@@ -2699,7 +2804,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <div onClick={(e) => e.stopPropagation()} className="flex max-h-[92vh] max-w-[92vw] flex-col items-center gap-3">
                 <div className="relative">
                   {s.videoUrl ? (
-                    <video src={s.videoUrl} autoPlay muted playsInline className="max-h-[70vh] max-w-[86vw] rounded" />
+                    <video src={s.fxUrl ?? s.videoUrl} autoPlay muted playsInline className="max-h-[70vh] max-w-[86vw] rounded" />
                   ) : s.generatedImage ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={s.generatedImage} alt="" className="max-h-[70vh] max-w-[86vw] rounded" />

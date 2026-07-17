@@ -180,7 +180,8 @@ export async function runCompose(projectId) {
       if (!isCard) {
         await log(`씬 ${i + 1}/${scenes.length}: 다운로드…`);
         vPath = join(dir, `v${i}.mp4`);
-        await download(s.videoUrl, vPath);
+        // 후처리본(fxUrl — 줌 커브 구운 클립)이 있으면 그걸 사용: 미리보기 = 최종 픽셀.
+        await download(s.fxUrl || s.videoUrl, vPath);
         vd = (await probeDuration(vPath)) || 3;
       }
 
