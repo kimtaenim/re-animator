@@ -521,16 +521,17 @@ export default function CastReview({
                     value=""
                     onChange={(e) => {
                       const t = e.target.value;
+                      e.target.value = "";
                       if (!t) return;
                       const tgt = cast.find((x) => x.id === t);
-                      if (
-                        tgt &&
-                        window.confirm(
-                          `'${c.label}'을(를) '${tgt.label}'(으)로 합칠까요?\n컷 ${c.sceneIds.length}개와 화자 지정이 모두 옮겨지고 '${c.label}'은 사라집니다.`
-                        )
-                      )
-                        mergeInto(c.id, t);
-                      e.target.value = "";
+                      if (!tgt) return;
+                      const srcId = c.id;
+                      const msg = `'${c.label}'을(를) '${tgt.label}'(으)로 합칠까요?\n컷 ${c.sceneIds.length}개와 화자 지정이 모두 옮겨지고 '${c.label}'은 사라집니다.`;
+                      // ★셀렉트 onChange 안의 동기 confirm 은 드롭다운 닫힘과 겹쳐 브라우저가
+                      //   삼킬 수 있다(클릭해도 무반응) — 다음 틱으로 미뤄 띄운다.
+                      setTimeout(() => {
+                        if (window.confirm(msg)) mergeInto(srcId, t);
+                      }, 0);
                     }}
                     title="이 캐릭터를 다른 캐릭터와 통째로 합치기 — 컷·화자 지정 전부 이동"
                     className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 text-[10px] text-[var(--muted)]"
