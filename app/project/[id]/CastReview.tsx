@@ -251,6 +251,18 @@ export default function CastReview({
   //   비어 있으면 합쳐지는 쪽 값을 물려받는다.
   function mergeInto(sourceId: string, targetId: string) {
     if (!sourceId || !targetId || sourceId === targetId) return;
+    // ★내레이션으로 합치기 — 캐릭터를 지우고 그 캐릭터의 대사 지정을 전부 내레이션("")으로.
+    //   (VLM 이 내레이션을 캐릭터로 잘못 묶었을 때 한 방에 정리)
+    if (targetId === "__narration__") {
+      setCast((prev) => prev.filter((c) => c.id !== sourceId));
+      setSpeakerMap((prev) => {
+        const next = { ...prev };
+        for (const k of Object.keys(next)) if (next[k] === sourceId) next[k] = "";
+        return next;
+      });
+      scheduleSave();
+      return;
+    }
     setCast((prev) => {
       const src = prev.find((c) => c.id === sourceId);
       const tgt = prev.find((c) => c.id === targetId);
@@ -515,28 +527,35 @@ export default function CastReview({
                 <span className="text-xs text-[var(--muted)]">
                   {c.sceneIds.length ? `${c.sceneIds.length}컷` : "화면 밖"}
                 </span>
-                {/* 캐릭터 통합 — 같은 인물이 둘로 쪼개졌을 때 통째로 합치기(컷·화자 지정 전부 이사) */}
-                {cast.length > 1 && (
+                {/* 캐릭터 통합 — 같은 인물이 둘로 쪼개졌을 때 통째로 합치기(컷·화자 지정 전부 이사).
+                    내레이션 병합은 1명뿐이어도 유효해 항상 표시. */}
+                {cast.length > 0 && (
                   <select
                     value=""
                     onChange={(e) => {
                       const t = e.target.value;
                       e.target.value = "";
                       if (!t) return;
-                      const tgt = cast.find((x) => x.id === t);
-                      if (!tgt) return;
                       const srcId = c.id;
-                      const msg = `'${c.label}'을(를) '${tgt.label}'(으)로 합칠까요?\n컷 ${c.sceneIds.length}개와 화자 지정이 모두 옮겨지고 '${c.label}'은 사라집니다.`;
+                      let msg = "";
+                      if (t === "__narration__") {
+                        msg = `'${c.label}'을(를) 내레이션으로 합칠까요?\n이 캐릭터는 삭제되고, 이 캐릭터로 지정됐던 대사가 전부 내레이션이 됩니다.`;
+                      } else {
+                        const tgt = cast.find((x) => x.id === t);
+                        if (!tgt) return;
+                        msg = `'${c.label}'을(를) '${tgt.label}'(으)로 합칠까요?\n컷 ${c.sceneIds.length}개와 화자 지정이 모두 옮겨지고 '${c.label}'은 사라집니다.`;
+                      }
                       // ★셀렉트 onChange 안의 동기 confirm 은 드롭다운 닫힘과 겹쳐 브라우저가
                       //   삼킬 수 있다(클릭해도 무반응) — 다음 틱으로 미뤄 띄운다.
                       setTimeout(() => {
                         if (window.confirm(msg)) mergeInto(srcId, t);
                       }, 0);
                     }}
-                    title="이 캐릭터를 다른 캐릭터와 통째로 합치기 — 컷·화자 지정 전부 이동"
+                    title="이 캐릭터를 다른 캐릭터·내레이션과 통째로 합치기 — 화자 지정 전부 이동"
                     className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 text-[10px] text-[var(--muted)]"
                   >
                     <option value="">🔀 합치기…</option>
+                    <option value="__narration__">→ 📖 내레이션(캐릭터 삭제)</option>
                     {cast
                       .filter((x) => x.id !== c.id)
                       .map((x) => (
