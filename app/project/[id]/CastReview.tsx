@@ -665,7 +665,25 @@ export default function CastReview({
                     style={{ borderColor: isRef ? "var(--accent)" : "var(--border)" }}
                     title="드래그해서 다른 캐릭터로 이동"
                   >
-                    <Thumb sceneId={sid} />
+                    <div className="relative">
+                      <Thumb sceneId={sid} />
+                      {sceneById.get(sid)?.originalImage && (
+                        <button
+                          type="button"
+                          draggable={false}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const u = sceneById.get(sid)?.originalImage;
+                            if (u) onZoom(u);
+                          }}
+                          title="얼굴 크게 보기 (드래그와 무관)"
+                          className="absolute right-0.5 top-0.5 rounded bg-black/60 px-1 text-[11px] leading-none text-white hover:bg-black/85"
+                        >
+                          🔍
+                        </button>
+                      )}
+                    </div>
                     <button
                       onClick={() => setRef(c.id, sid)}
                       className="text-[9px]"
