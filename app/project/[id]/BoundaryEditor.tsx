@@ -245,9 +245,33 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
   // VLM 이 읽은 컷 내용(묘사·대사 등)을 사람이 편집. 자동 저장됨.
   function setCutField(i: number, field: "description" | "dialogue" | "setting", value: string) {
     setRegions((prev) =>
-      prev.map((r, idx) =>
-        idx === i ? { ...r, cut: { ...(r.cut ?? blankCut()), [field]: value } } : r
-      )
+      prev.map((r, idx) => {
+        if (idx !== i) return r;
+        const cur = r.cut ?? blankCut();
+        const cut = { ...cur, [field]: value };
+        // ★대사(폴백 입력) 편집을 말풍선(정답 소스)에도 반영 — 안 그러면 다운스트림이 무시.
+        //   줄→풍선 매핑, 기존 화자/박스/번역은 순번대로 보존.
+        if (field === "dialogue") {
+          const lines = value.split("\n").map((t) => t.trim()).filter(Boolean);
+          const old = cur.bubbles ?? [];
+          cut.bubbles = lines.map((text, k) => ({ ...(old[k] ?? {}), text }));
+        }
+        return { ...r, cut };
+      })
+    );
+    setDirty(true);
+  }
+
+  // 말풍선(정답)별 대사 편집 — 풍선 텍스트만 바꾸고 화자/박스/번역/감정은 보존. dialogue(표시용)도 동기화.
+  function setBubbleText(i: number, bi: number, value: string) {
+    setRegions((prev) =>
+      prev.map((r, idx) => {
+        if (idx !== i) return r;
+        const cur = r.cut ?? blankCut();
+        const bubbles = (cur.bubbles ?? []).map((b, k) => (k === bi ? { ...b, text: value } : b));
+        const dialogue = bubbles.map((b) => (b.text || "").trim()).filter(Boolean).join("\n");
+        return { ...r, cut: { ...cur, bubbles, dialogue } };
+      })
     );
     setDirty(true);
   }
@@ -577,24 +601,34 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                         내레이션도 대사의 일부(화자가 내레이터일 뿐) — 둘로 안 나눈다. */}
                     <div className="flex flex-col gap-0.5 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5">
                       <span className="text-[9px] text-[var(--muted)]">대사</span>
-                      <input
-                        value={cut.dialogue}
-                        onChange={(e) => setCutField(i, "dialogue", e.target.value)}
-                        placeholder="대사 (직접 편집)"
-                        className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 text-[11px] text-[var(--text)]"
-                      />
-                      {(cut.dialogueTranslation || "").trim() && (
-                        <div className="px-0.5 text-[10px] font-medium text-[var(--accent)]">{cut.dialogueTranslation}</div>
-                      )}
-                      {(cut.bubbles ?? []).map((b, bi) =>
-                        (b.text || "").trim() ? (
-                          <div key={bi} className="px-0.5 text-[10px]" title={b.text}>
-                            {b.text}
+                      {/* ★말풍선이 정답(다운스트림 더빙·자막이 bubbles 를 씀). 풍선별로 편집 →
+                          편집이 실제로 반영된다. 풍선 없으면 dialogue 폴백(편집 시 풍선 생성). */}
+                      {(cut.bubbles ?? []).length > 0 ? (
+                        (cut.bubbles ?? []).map((b, bi) => (
+                          <div key={bi} className="flex items-center gap-1">
+                            <input
+                              value={b.text}
+                              onChange={(e) => setBubbleText(i, bi, e.target.value)}
+                              placeholder="대사 (직접 편집)"
+                              className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 text-[11px] text-[var(--text)]"
+                            />
                             {(b.translation || "").trim() && (
-                              <span className="font-medium text-[var(--accent)]"> · {b.translation}</span>
+                              <span className="shrink-0 text-[10px] font-medium text-[var(--accent)]">{b.translation}</span>
                             )}
                           </div>
-                        ) : null
+                        ))
+                      ) : (
+                        <>
+                          <input
+                            value={cut.dialogue}
+                            onChange={(e) => setCutField(i, "dialogue", e.target.value)}
+                            placeholder="대사 (직접 편집)"
+                            className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 text-[11px] text-[var(--text)]"
+                          />
+                          {(cut.dialogueTranslation || "").trim() && (
+                            <div className="px-0.5 text-[10px] font-medium text-[var(--accent)]">{cut.dialogueTranslation}</div>
+                          )}
+                        </>
                       )}
                     </div>
                     <div className="flex items-center gap-1 text-[10px] text-[var(--muted)]">

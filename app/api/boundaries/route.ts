@@ -4,6 +4,7 @@ import { getProject, saveProject, setStep } from "@/lib/projectStore";
 import { enqueueJob, type Job } from "@/lib/jobQueue";
 import { type Scene, type CutOntology } from "@/lib/types";
 import { CUT_TYPES, TEXT_KINDS, blankCut } from "@/lib/ontology";
+import { cleanBubbles } from "@/lib/cutClean";
 
 const TYPE_IDS = new Set(CUT_TYPES.map((t) => t.id));
 const TEXTKIND_IDS = new Set(TEXT_KINDS.map((t) => t.id));
@@ -24,6 +25,9 @@ function cleanCut(raw: unknown): CutOntology {
   if (Array.isArray(r.objects)) c.objects = r.objects.map(String).slice(0, 8);
   if (typeof r.dialogue === "string") c.dialogue = r.dialogue.slice(0, 300);
   if (typeof r.dialogueTranslation === "string") c.dialogueTranslation = r.dialogueTranslation.slice(0, 400); // 번역 보존(G1 미리보기)
+  // ★bubbles(말풍선=대사 정답 소스) 보존 — 예전엔 화이트리스트에서 빠져 G1 대사 편집이
+  //   저장 때 서버 옛값으로 되돌아갔음(다운스트림이 bubbles 를 써서 편집 무시된 버그).
+  if (Array.isArray(r.bubbles)) c.bubbles = cleanBubbles(r.bubbles);
   if (typeof r.speakerId === "string") c.speakerId = r.speakerId;
   if (typeof r.sfx === "string") c.sfx = r.sfx.slice(0, 120);
   if (typeof r.description === "string") c.description = r.description.slice(0, 800);
