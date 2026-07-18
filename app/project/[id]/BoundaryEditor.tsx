@@ -510,17 +510,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                   ref={(el) => {
                     cardRefs.current[i] = el;
                   }}
-                  onMouseEnter={(e) => {
-                    // 호버 확대가 화면 밖으로 안 잘리게 — 카드 위치에 따라 확대 기준점을 안쪽으로.
-                    // 왼쪽 열=오른쪽으로만, 오른쪽 열=왼쪽으로만, 아래쪽=위로만 커진다.
-                    const r = e.currentTarget.getBoundingClientRect();
-                    const cx = r.left + r.width / 2;
-                    const cy = r.top + r.height / 2;
-                    const hx = cx < window.innerWidth * 0.28 ? "left" : cx > window.innerWidth * 0.72 ? "right" : "center";
-                    const vy = cy > window.innerHeight * 0.62 ? "bottom" : "top";
-                    e.currentTarget.style.transformOrigin = `${vy} ${hx}`;
-                  }}
-                  className="group relative flex h-[280px] flex-col overflow-hidden rounded-lg border bg-[var(--panel-2)] origin-top transition-transform duration-150 hover:z-30 hover:scale-[1.4] hover:overflow-visible hover:shadow-2xl"
+                  className="relative flex flex-col rounded-lg border bg-[var(--panel-2)]"
                   style={{
                     borderColor: cut.type ? color : "var(--border)",
                     outline: selected === i ? "2px solid #fff" : undefined,
@@ -610,9 +600,9 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                     {/* 대사 — 내레이션/말풍선 구분 없이 이 컷의 모든 대사 줄을 한 목록으로(원문 + 한국어 번역).
                         내레이션도 대사의 일부(화자가 내레이터일 뿐) — 둘로 안 나눈다. */}
                     {/* ★말풍선이 정답(다운스트림 더빙·자막이 bubbles 를 씀). 풍선별 원문/번역 세로 스택.
-                        긴 대사는 카드 고정높이에서 잘리고, 카드에 마우스 올리면 카드가 통째로 커지며(아래
-                        카드 className 의 hover:scale) 넘친 대사까지 전부 드러난다. 원문 편집은 bubbles 에 반영. */}
-                    <div className="flex flex-col gap-0.5 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 max-h-[3.4rem] overflow-hidden group-hover:max-h-none group-hover:overflow-visible">
+                        평소 2줄로 클램프, ★이 대사 박스에 마우스 올리거나 편집(focus)하면 이 박스만 펼쳐
+                        전체 대사 표시. 카드 전체를 확대/이동하지 않으므로 분할·합병 등 버튼은 항상 그 자리. */}
+                    <div className="flex flex-col gap-0.5 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 max-h-[3.4rem] overflow-hidden hover:max-h-none focus-within:max-h-none hover:overflow-visible focus-within:overflow-visible">
                       <span className="text-[9px] text-[var(--muted)]">대사</span>
                       {(cut.bubbles ?? []).length > 0 ? (
                         (cut.bubbles ?? []).map((b, bi) => (
