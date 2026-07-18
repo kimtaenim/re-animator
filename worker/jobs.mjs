@@ -485,41 +485,53 @@ export async function runSplit(projectId) {
   await log(`[진단] 컷 타입 ${JSON.stringify(typeCounts)}`);
   await log(`[진단] 텍스트 밴드 예약 총 ${totalTR}개(흡수+갭) — 이 수만큼 내레이션이 이웃 컷 OCR에 붙음`);
 
-  // ★내레이션 미리 읽기(사용자 요구: "처음부터 나와야지") — 예약 밴드를 분할 단계에서
-  //   바로 OCR 해 컷 bubbles(내레이션)로 붙인다 → G1 카드에서 즉시 글자로 확인 가능.
-  //   추출(2단계)이 나중에 전체를 다시 읽어 덮어쓰므로 여기서 실패해도 유실은 아니다.
-  if (key && totalTR > 0) {
-    // ★순서 보존: 동시 OCR 은 하되(속도), 부착은 전부 끝난 뒤 '위치(y) 오름차순'으로.
-    //   응답 순서대로 붙이면 위 문장이 아래로 가는 등 읽는 순서가 뒤집힌다(사용자 실측).
-    const units = [];
-    for (const s of scenes) {
-      const trs = (s.cut?.textRegions ?? []).slice().sort((a, b) => a.yStart - b.yStart);
-      for (const tr of trs) units.push({ s, tr, out: null });
-    }
-    await log(`내레이션 미리 읽기 ${units.length}개 밴드…`);
-    const C2 = 3;
-    for (let i = 0; i < units.length; i += C2) {
+  // ★대사 읽기 — 컷마다 '풀해상도 자기 이미지'를 하나씩 OCR 한다. (예전엔 340px 대조표
+  //   썸네일에 대사를 맡겨 지어냈음 — 사용자가 처음부터 "썸네일론 안 읽힌다" 지적한 근본 버그.)
+  //   자기 이미지 + 예약된 내레이션 밴드(위/아래)를 함께 읽어 읽는 순서(y)대로 bubbles/dialogue
+  //   에 채운다 → G1 에서 진짜 대사가 바로 보인다. (추출 2단계가 다시 읽어 덮으므로 실패해도 유실 아님.)
+  if (key) {
+    const ocrTodo = scenes.filter((s) => s.sourceRegion);
+    await log(`대사 읽기(풀해상도) ${ocrTodo.length}컷…`);
+    const C = Number(process.env.SPLIT_OCR_CONCURRENCY || 3); // 업스케일 이미지가 커 동시성 낮게(OOM)
+    let done = 0;
+    for (let i = 0; i < ocrTodo.length; i += C) {
       await Promise.all(
-        units.slice(i, i + C2).map(async (u) => {
+        ocrTodo.slice(i, i + C).map(async (s) => {
           try {
-            const png = await extractRegion(canvas, buffers, u.tr.yStart, u.tr.yEnd, u.tr.xStart, u.tr.xEnd);
-            const t = await readCutText(png, key, VLM_MODEL);
-            // OCR 가 원문과 함께 한국어 번역도 뽑으므로 그대로 실어둔다 → G1 검수 화면에 바로 '역:' 표시.
-            if (t.bubbles?.length) u.out = t.bubbles.map((b) => ({ text: b.text, ...(b.translation ? { translation: b.translation } : {}) }));
+            const png = await extractRegion(canvas, buffers, s.sourceRegion.yStart, s.sourceRegion.yEnd, s.sourceRegion.xStart, s.sourceRegion.xEnd);
+            const own = await readCutText(png, key, VLM_MODEL);
+            if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
+            // 내레이션 밴드(컷 위/아래)도 읽어 순서 보존해 합친다 — 위 밴드는 앞, 아래 밴드는 뒤.
+            const above = [];
+            const below = [];
+            let sfx = own.sfx || "";
+            const trs = (s.cut.textRegions ?? []).slice().sort((a, b) => a.yStart - b.yStart);
+            for (const tr of trs) {
+              try {
+                const tpng = await extractRegion(canvas, buffers, tr.yStart, tr.yEnd, tr.xStart, tr.xEnd);
+                const t = await readCutText(tpng, key, VLM_MODEL);
+                if (t.bubbles?.length) (tr.yStart < s.sourceRegion.yStart ? above : below).push(...t.bubbles);
+                if (t.sfx) sfx = sfx ? `${sfx} ${t.sfx}` : t.sfx;
+              } catch {}
+            }
+            const allBubbles = [...above, ...(own.bubbles || []), ...below].map((b) => ({
+              text: b.text,
+              ...(b.translation ? { translation: b.translation } : {}),
+            }));
+            if (allBubbles.length) {
+              s.cut.bubbles = allBubbles;
+              s.cut.dialogue = allBubbles.map((b) => (b.text || "").trim()).filter(Boolean).join("\n").slice(0, 500);
+            }
+            if (sfx) s.cut.sfx = sfx;
+            s.cut.textBoxes = own.boxes;
           } catch {}
         })
       );
-      const done = Math.min(i + C2, units.length);
-      if (done === units.length || done % 15 < C2) await log(`내레이션 미리 읽기 ${done}/${units.length}…`);
+      done = Math.min(i + C, ocrTodo.length);
+      await log(`대사 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%)`);
     }
-    let got = 0;
-    for (const u of units) {
-      if (!u.out) continue;
-      if (!u.s.cut) u.s.cut = { dialogue: "", sfx: "", type: null };
-      u.s.cut.bubbles = [...(u.s.cut.bubbles ?? []), ...u.out];
-      got++;
-    }
-    await log(`내레이션 미리 읽기 완료 — ${got}개 밴드 글자 확보`);
+    const withText = scenes.filter((s) => (s.cut?.bubbles ?? []).some((b) => (b.text || "").trim())).length;
+    await log(`대사 읽기 완료 — ${withText}/${scenes.length}컷에서 글자 확보`);
   }
 
   // ★번역(Claude) — G1 검수 화면에 대사·내레이션 뜻이 바로 보이게. 컷 대사 + 말풍선 전부 한 번에.
