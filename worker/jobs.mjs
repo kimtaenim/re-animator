@@ -1056,6 +1056,13 @@ export async function runCast(projectId) {
         todo.slice(i, i + CC).map(async (s) => {
           try {
             const idx = scList.findIndex((x) => x.id === s.id);
+            // ★캐스팅 반영 — 화자 후보를 '이 컷 + 앞뒤 컷에 나오는 인물'로 좁힌다(전체 명단 X →
+            //   이 장면에 없는 인물로 오배정되던 것 급감). 좁힌 명단이 비면 전체로 폴백.
+            const near = new Set(charsBySceneId.get(s.id) ?? []);
+            for (const adj of [scList[idx - 1], scList[idx + 1]])
+              for (const cid of (adj && charsBySceneId.get(adj.id)) || []) near.add(cid);
+            const sceneRoster =
+              cast.filter((c) => near.has(c.id)).map((c) => `${c.id}: ${c.label}${c.note ? " — " + c.note : ""}`).join("\n") || roster;
             const ctx = (x) =>
               x
                 ? `컷${x.order + 1}(${x.cut?.type ?? "?"}): ${(x.cut?.description ?? "").slice(0, 80)} / 대사: ${(x.cut?.bubbles ?? [])
@@ -1088,7 +1095,7 @@ export async function runCast(projectId) {
                     {
                       type: "text",
                       text:
-                        `웹툰 컷 이미지와 앞뒤 맥락으로 각 대사 줄의 화자를 정하라.\n등장인물 명단(id: 이름):\n${roster}\n\n` +
+                        `웹툰 컷 이미지와 앞뒤 맥락으로 각 대사 줄의 화자를 정하라.\n★이 장면에 등장하는 인물 명단(id: 이름) — 화자는 원칙적으로 이 안에서 고른다:\n${sceneRoster}\n\n` +
                         `앞 컷: ${ctx(scList[idx - 1])}\n뒤 컷: ${ctx(scList[idx + 1])}\n\n이 컷의 대사 줄:\n` +
                         ask.map((l) => `${l.bi}. ${l.t.slice(0, 60)}${l.tr ? ` (뜻: ${l.tr.slice(0, 60)})` : ""}`).join("\n") +
                         `\n\n규칙: 장면 밖 서술·해설이면 "narration". 명단 인물이 말하는 대사면 그 id(입 모양·시선·말풍선 꼬리·앞뒤 대화 흐름으로 판단). ` +
