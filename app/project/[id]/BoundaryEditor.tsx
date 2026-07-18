@@ -366,7 +366,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
         <span>
           왼쪽: 박스 드래그=경계 · 빈 곳 더블클릭=추가 · 오른쪽 카드에서 중심·내용 편집 (자동 저장) ·{" "}
           <span className="rounded border border-dashed border-cyan-300/80 bg-cyan-400/20 px-1">하늘색 점선</span>
-          =내레이션 OCR 예약(추출 때 이웃 컷 대사로 들어감)
+=컷 밖 대사 OCR 예약(추출 때 이웃 컷 대사로 들어감)
         </span>
         <button
           onClick={save}
@@ -422,7 +422,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                     left: (tr.xStart ?? 0) * scale,
                     width: ((tr.xEnd ?? canvas.refWidth) - (tr.xStart ?? 0)) * scale,
                   }}
-                  title="내레이션 OCR 예약 — 추출(2단계) 때 이 영역 글자를 이웃 컷 대사로 붙입니다"
+                  title="컷 밖 대사 OCR 예약 — 추출(2단계) 때 이 영역 글자를 이웃 컷 대사로 붙입니다"
                 />
               ))
             )}

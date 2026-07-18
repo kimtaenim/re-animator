@@ -114,13 +114,19 @@ export async function readCutText(pngBuf, key, model = "gpt-4o") {
         },
       ],
       response_format: { type: "json_schema", json_schema: OCR_SCHEMA },
-      max_tokens: 1500,
+      // ★원문+번역을 풍선마다 뱉으므로 넉넉히(1500이면 다풍선 컷에서 잘려 JSON 깨짐→OCR 통째 실패).
+      max_tokens: Number(process.env.OCR_MAX_TOKENS || 4000),
     }),
     signal: AbortSignal.timeout(90_000),
   });
   if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text().catch(() => "")).slice(0, 160)}`);
   const d = await r.json();
-  const parsed = JSON.parse(d.choices?.[0]?.message?.content ?? "{}");
+  const raw = d.choices?.[0]?.message?.content ?? "{}";
+  // ★응답이 잘렸으면(finish_reason=length) 조용히 삼키지 말고 명시적으로 알린다.
+  if (d.choices?.[0]?.finish_reason === "length") {
+    throw new Error(`OCR 응답 잘림(max_tokens 초과) — OCR_MAX_TOKENS 상향 필요`);
+  }
+  const parsed = JSON.parse(raw);
   const clamp = (v) => Math.max(0, Math.min(1, Number(v) || 0));
   const validBox = (b) => b.right > b.left && b.bottom > b.top;
   const boxes = (parsed.boxes || [])
