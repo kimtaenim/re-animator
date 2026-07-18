@@ -1227,7 +1227,7 @@ export async function runRegen(projectId, payload) {
             : process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
           if (useFal && !falKey) throw new Error("FAL_KEY 없음(Render 워커 환경변수)");
           if (!useFal && !key) throw new Error("OPENAI_API_KEY 없음");
-          const mode = s.regenMode || p.regenMode || "mask";
+          const mode = s.regenMode || p.regenMode || "full"; // 디폴트=새로 그리기(full) — 사용자 지시
           if (photoreal) {
             const imgBuf = await download(s.originalImage);
             // 이 컷에 등장하는 캐릭터의 실사 초상을 얼굴 고정 레퍼런스로(최대 3장).

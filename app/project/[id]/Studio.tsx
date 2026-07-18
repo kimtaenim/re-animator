@@ -2000,8 +2000,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 <span className="ml-2 text-[var(--muted)]">방식:</span>
                 {(
                   [
-                    { v: "mask", t: "원본 유지", d: "그림은 그대로 두고 빈 공간·글씨만 채움(권장)" },
-                    { v: "full", t: "새로 그리기", d: "컷을 통째로 다시 생성" },
+                    { v: "full", t: "새로 그리기", d: "컷을 통째로 다시 생성 — 빈 공간도 같은 화풍으로 새로 그림(기본)" },
+                    { v: "mask", t: "원본 유지", d: "그림은 그대로 두고 빈 공간·글씨만 채움" },
                   ] as const
                 ).map((o) => (
                   <button
@@ -2009,7 +2009,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     onClick={() => setProjectRegenMode(o.v)}
                     title={o.d}
                     className={`rounded border px-2 py-0.5 ${
-                      (project.regenMode || "mask") === o.v
+                      (project.regenMode || "full") === o.v
                         ? "border-[var(--accent)] text-[var(--accent)]"
                         : "border-[var(--border)] text-[var(--muted)]"
                     }`}
