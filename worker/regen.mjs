@@ -62,14 +62,12 @@ export function exactSize(project) {
   return [1536, 864]; // 16:9
 }
 // 아무 이미지 버퍼든 목표 비율·크기로 크롭(fit cover) → 모든 컷/모든 모델 출력 일관.
-// size 를 주면 그 크기로(컷 원본 비율 유지), 없으면 프로젝트 비율(exactSize)로. 마스크 경로는
-// 컷 네이티브 크기를 넘겨 옆/위아래를 안 자르고 원본 모양 그대로 낸다.
-export async function fitBuffer(buf, project, size) {
-  const [TW, TH] = size ?? exactSize(project);
+export async function fitBuffer(buf, project) {
+  const [TW, TH] = exactSize(project);
   return sharp(buf).resize(TW, TH, { fit: "cover" }).png().toBuffer();
 }
-async function normalizeSize(b64, project, size) {
-  return fitBuffer(Buffer.from(b64, "base64"), project, size);
+async function normalizeSize(b64, project) {
+  return fitBuffer(Buffer.from(b64, "base64"), project);
 }
 
 // 원본 컷 이미지 버퍼 + 씬 → 재생성 이미지 buf (+비용). 실패 시 throw.
@@ -168,16 +166,10 @@ export async function makePortrait(refBuf, key, extraPrompt) {
 //   OpenAI(RGBA alpha): 0=채움, 255=보존.   fal Fill(그레이): 흰(255)=채움, 검정(0)=보존.
 // 채움 영역 = [컷 밖 여백] + [글씨 박스].  보존 영역 = 컷 그림(글씨 제외).
 export async function buildMaskInputs(scene, imgBuf, project, model) {
+  const [TW, TH] = reqSize(project, model);
   const meta = await sharp(imgBuf).metadata();
   const cw = meta.width || 1;
   const ch = meta.height || 1;
-  // ★컷 원본 비율 그대로 — 목표 프레임에 끼워넣고 옆/위아래를 아웃페인팅하던 걸 제거(사용자가
-  //   처음부터 거부: "옆 가리고 세로로 길게"). 최종 영상은 합성이 레터박스로 맞춘다(compose pad).
-  //   16 배수·긴변 1536 클램프로 모델 요건만 충족. 목표=컷비율 → 여백(px·py)≈0 → 마스크는 글씨만.
-  const _mx = 1536;
-  const _sc = Math.max(cw, ch) > _mx ? _mx / Math.max(cw, ch) : 1;
-  const r16 = (v) => Math.max(16, Math.round((v * _sc) / 16) * 16);
-  const [TW, TH] = [r16(cw), r16(ch)];
   const scale = Math.min(TW / cw, TH / ch);
   const pw = Math.max(1, Math.round(cw * scale));
   const ph = Math.max(1, Math.round(ch * scale));
@@ -247,7 +239,7 @@ export async function buildMaskInputs(scene, imgBuf, project, model) {
 export async function regenSceneMasked(scene, imgBuf, project, key, model) {
   const { composed, openaiMask, prompt, TW, TH, hasFill } = await buildMaskInputs(scene, imgBuf, project, model);
   // 채울 곳(여백·글씨)이 하나도 없으면(비율 일치+글자 없음) 모델 호출 불필요.
-  if (!hasFill) return { buf: await fitBuffer(composed, project, [TW, TH]), cost: 0 };
+  if (!hasFill) return { buf: await fitBuffer(composed, project), cost: 0 };
   const form = new FormData();
   form.append("model", model);
   form.append("image", new Blob([composed], { type: "image/png" }), "cut.png");
@@ -266,5 +258,5 @@ export async function regenSceneMasked(scene, imgBuf, project, key, model) {
   const d = await r.json();
   const b64 = d.data?.[0]?.b64_json;
   if (!b64) throw new Error("빈 이미지 응답");
-  return { buf: await normalizeSize(b64, project, [TW, TH]), cost: imageCostUsd() }; // 컷 원본 비율 유지
+  return { buf: await normalizeSize(b64, project), cost: imageCostUsd() };
 }
