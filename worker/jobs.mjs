@@ -359,9 +359,11 @@ function sortedFiles(p) {
 // ── split: 소스 파일들 → 가상 캔버스 + 컷 경계(Scene) ────────────────────────
 export async function runSplit(projectId) {
   await resetProgress(projectId);
+  const t0 = Date.now();
   const log = async (m) => {
-    console.error("[split]", m);
-    await logProgress(projectId, m);
+    const el = ((Date.now() - t0) / 1000).toFixed(0); // 경과초 — 어느 단계서 시간 새는지 증거
+    console.error("[split]", `+${el}s`, m);
+    await logProgress(projectId, `[+${el}s] ${m}`);
   };
 
   const p = await getProject(projectId);
