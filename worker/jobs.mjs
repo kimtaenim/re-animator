@@ -1634,6 +1634,9 @@ export async function runDub(projectId, payload) {
   const speed = Math.max(0.5, Math.min(2, Number(p.dubSpeed) || 1)); // 말 속도 배수
   const only =
     Array.isArray(payload?.sceneIds) && payload.sceneIds.length ? new Set(payload.sceneIds) : null;
+  // ★특정 컷·선택 더빙(only 있음)이면 강제 재생성(사용자가 바꿔서 다시 하려는 것). 전체 더빙은
+  //   이미 더빙된 줄(audioUrl)은 건너뛴다(증분) — 매번 전부 다시 만들어 '반복'되던 것 방지.
+  const force = !!only;
   const scenes = (p.scenes ?? [])
     .slice()
     .sort((a, b) => a.order - b.order)
@@ -1651,6 +1654,7 @@ export async function runDub(projectId, payload) {
 
   // 합성 유닛 수집: 말풍선 + 내레이션.
   const units = [];
+  let alreadyDone = 0; // 이미 더빙돼 스킵한 줄 수(전체 더빙 증분)
   for (const s of scenes) {
     const cut = s.cut;
     if (!cut) continue;
@@ -1666,6 +1670,7 @@ export async function runDub(projectId, payload) {
     for (let i = 0; i < bubs.length; i++) {
       const text = (bubs[i].text || "").trim();
       if (!text) continue;
+      if (!force && (bubs[i].audioUrl || "").trim()) { alreadyDone++; continue; } // 이미 더빙된 줄 스킵(전체 더빙)
       if (bubs[i].speakerId === "__sfx__") {
         units.push({ s, kind: "sfx", idx: i, text, voice: "__sfx__" }); // 효과음 줄 → 소리 생성
       } else {
@@ -1674,7 +1679,13 @@ export async function runDub(projectId, payload) {
       }
     }
   }
-  if (!units.length) throw new Error("더빙할 대사·내레이션이 없어요");
+  if (!units.length) {
+    if (alreadyDone > 0) {
+      await log(`이미 다 더빙됨(${alreadyDone}줄) — 새로 만들 게 없어요. 바꾼 줄은 '이 컷 더빙'으로.`);
+      return 0;
+    }
+    throw new Error("더빙할 대사·내레이션이 없어요");
+  }
 
   await log(`더빙 대상 ${units.length}개 — 목소리 생성 시작`);
   const C = Number(process.env.DUB_CONCURRENCY || 2);

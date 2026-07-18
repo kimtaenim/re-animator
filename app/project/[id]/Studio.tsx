@@ -1768,9 +1768,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       {(() => {
         const REMOTE =
           "fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel)] px-3 py-2 shadow-2xl";
-        const P = "rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-40";
-        const G = "rounded-full border border-[var(--border)] bg-[var(--panel-2)] px-4 py-2 text-sm font-medium disabled:opacity-40";
-        const S = "rounded-full border border-[var(--danger)] px-3 py-2 text-sm font-medium text-[var(--danger)]";
+        const P = "rounded-full bg-[var(--accent)] px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40";
+        const G = "rounded-full border border-[var(--border)] bg-[var(--panel-2)] px-3 py-1.5 text-[13px] font-medium disabled:opacity-40";
+        const S = "rounded-full border border-[var(--danger)] px-3 py-1.5 text-[13px] font-medium text-[var(--danger)]";
         if (activeStep === "source" && canvas && hasCuts && sourceStatus === "review")
           return (
             <div className={REMOTE}>
@@ -1787,9 +1787,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
             </div>
           );
-        if (activeStep === "regen" && approved)
+        if (activeStep === "regen" && approved) {
+          const cands = project.scenes.filter((s) => s.originalImage && s.cut?.type !== "text");
+          const allSel = cands.length > 0 && cands.every((s) => selForRegen.has(s.id));
           return (
             <div className={REMOTE}>
+              <button onClick={toggleSelectAllRegen} className={G}>{allSel ? "선택 해제" : "전체 선택"}</button>
               {selForRegen.size > 0 && (
                 <button onClick={regenSelected} disabled={busy || regenRunning} className={P}>
                   선택 {selForRegen.size} 생성
@@ -1799,28 +1802,39 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 {regenRunning ? "생성 중…" : "전체 생성"}
               </button>
               {regenPolling && (
-                <button onClick={() => cancelJob("regen")} className={S}>
-                  ■ 중지
-                </button>
+                <button onClick={() => cancelJob("regen")} className={S}>■ 중지</button>
               )}
             </div>
           );
-        if (activeStep === "scene" && approved)
+        }
+        if (activeStep === "scene" && approved) {
+          const vids = project.scenes.filter((s) => s.generatedImage).map((s) => s.id);
+          const allSel = vids.length > 0 && vids.every((id) => selForVideo.has(id));
           return (
             <div className={REMOTE}>
+              <button onClick={toggleSelectAllVideo} className={G}>{allSel ? "선택 해제" : "전체 선택"}</button>
+              {selForVideo.size > 0 && (
+                <button onClick={videoSelected} disabled={busy || sceneRunning} className={G}>
+                  선택 {selForVideo.size} 동영상
+                </button>
+              )}
               <button onClick={() => runVideoJob()} disabled={busy || sceneRunning} className={G}>
-                {sceneRunning ? "영상 중…" : "동영상"}
+                {sceneRunning ? "영상 중…" : "전체 동영상"}
               </button>
+              {selForVideo.size > 0 && (
+                <button onClick={() => runDubJob([...selForVideo])} disabled={busy || dubbing} className={P}>
+                  선택 {selForVideo.size} 더빙
+                </button>
+              )}
               <button onClick={() => runDubJob()} disabled={busy || dubbing} className={P}>
-                {dubbing ? "더빙 중…" : "🎙 더빙"}
+                {dubbing ? "더빙 중…" : "🎙 전체 더빙"}
               </button>
               {sceneRunning && (
-                <button onClick={() => cancelJob("scene")} className={S}>
-                  ■ 중지
-                </button>
+                <button onClick={() => cancelJob("scene")} className={S}>■ 중지</button>
               )}
             </div>
           );
+        }
         if (activeStep === "compose" && approved)
           return (
             <div className={REMOTE}>
