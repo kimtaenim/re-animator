@@ -573,7 +573,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                       rows={2}
                       className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[11px] leading-tight text-[var(--text)]"
                     />
-                    {/* 대사 — 내레이션/말풍선 구분 없이 이 컷의 모든 대사 줄을 한 목록으로(원문 + 역:).
+                    {/* 대사 — 내레이션/말풍선 구분 없이 이 컷의 모든 대사 줄을 한 목록으로(원문 + 한국어 번역).
                         내레이션도 대사의 일부(화자가 내레이터일 뿐) — 둘로 안 나눈다. */}
                     <div className="flex flex-col gap-0.5 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5">
                       <span className="text-[9px] text-[var(--muted)]">대사</span>
@@ -584,14 +584,14 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                         className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 text-[11px] text-[var(--text)]"
                       />
                       {(cut.dialogueTranslation || "").trim() && (
-                        <div className="px-0.5 text-[10px] font-medium text-[var(--accent)]">역: {cut.dialogueTranslation}</div>
+                        <div className="px-0.5 text-[10px] font-medium text-[var(--accent)]">{cut.dialogueTranslation}</div>
                       )}
                       {(cut.bubbles ?? []).map((b, bi) =>
                         (b.text || "").trim() ? (
                           <div key={bi} className="px-0.5 text-[10px]" title={b.text}>
                             {b.text}
                             {(b.translation || "").trim() && (
-                              <span className="font-medium text-[var(--accent)]"> · 역: {b.translation}</span>
+                              <span className="font-medium text-[var(--accent)]"> · {b.translation}</span>
                             )}
                           </div>
                         ) : null

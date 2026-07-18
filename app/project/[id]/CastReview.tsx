@@ -827,7 +827,7 @@ export default function CastReview({
                             “{text}”
                             {(translation || "").trim() && (
                               <span className="font-medium text-[var(--accent)]" title="편집·화자 파악용 번역 (더빙은 원문 그대로)">
-                                {" "}역: {translation}
+                                {" · "}{translation}
                               </span>
                             )}
                           </span>

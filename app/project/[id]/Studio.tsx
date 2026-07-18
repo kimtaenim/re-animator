@@ -871,7 +871,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               {/* 번역(편집자용 주석) — 외국어 원문 아래 한국어 뜻. 더빙은 원문으로 나감. */}
               {!isSfx && (b.translation || "").trim() && (
                 <div className="pl-7 text-[11px] font-medium text-[var(--accent)]" title="편집·화자 파악용 번역 (더빙은 원문 그대로)">
-                  역: {b.translation}
+                  {b.translation}
                 </div>
               )}
               {/* ── 세부 컨트롤(접힘 기본) — 감정·자막위치·순서이동·무성씬·강조 ── */}
@@ -988,7 +988,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         </div>
         {(s.cut?.dialogueTranslation || "").trim() && (
           <div className="pl-7 text-[11px] font-medium text-[var(--accent)]" title="편집·화자 파악용 번역">
-            역: {s.cut?.dialogueTranslation}
+            {s.cut?.dialogueTranslation}
           </div>
         )}
         <button
@@ -2431,7 +2431,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                                     <div key={bi} className="flex flex-wrap items-center gap-1">
                                       <span className="text-[var(--text)]" title={b.text}>“{b.text.slice(0, 40)}”</span>
                                       {(b.translation || "").trim() && (
-                                        <span className="font-medium text-[var(--accent)]">역: {b.translation!.slice(0, 40)}</span>
+                                        <span className="font-medium text-[var(--accent)]">· {b.translation!.slice(0, 40)}</span>
                                       )}
                                       {/* 화자 — runCast 가 자동 분류한 기본값. 여기서 인라인 보정. */}
                                       <select
@@ -3089,7 +3089,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       {/* 편집 보조용 번역(최종 자막엔 안 나감) — 원문 아래 작게 */}
                       {u.tr && (
                         <span className="max-w-[86vw] whitespace-pre-wrap rounded bg-black/40 px-2 py-0.5 text-center text-[11px] italic text-white/75">
-                          역: {u.tr}
+                          {u.tr}
                         </span>
                       )}
                     </div>
