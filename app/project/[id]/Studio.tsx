@@ -1771,12 +1771,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         const P = "rounded-full bg-[var(--accent)] px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40";
         const G = "rounded-full border border-[var(--border)] bg-[var(--panel-2)] px-3 py-1.5 text-[13px] font-medium disabled:opacity-40";
         const S = "rounded-full border border-[var(--danger)] px-3 py-1.5 text-[13px] font-medium text-[var(--danger)]";
-        if (activeStep === "source" && canvas && hasCuts && sourceStatus === "review")
+        if (activeStep === "source" && canvas && hasCuts && (sourceStatus === "review" || running))
           return (
             <div className={REMOTE}>
               <button onClick={confirm} disabled={busy || running} className={P}>
-                {running ? "추출 중…" : "경계 확정 · 추출"}
+                {running ? "처리 중…" : "경계 확정 · 추출"}
               </button>
+              {running && (
+                <button onClick={() => cancelJob("source")} className={S}>■ 중지</button>
+              )}
             </div>
           );
         if (activeStep === "cast" && approved)
@@ -1785,6 +1788,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <button onClick={runCastJob} disabled={busy || castRunning} className={P}>
                 {castRunning ? "캐스팅 중…" : "캐스팅"}
               </button>
+              {castRunning && (
+                <button onClick={() => cancelJob("cast")} className={S}>■ 중지</button>
+              )}
             </div>
           );
         if (activeStep === "regen" && approved) {
