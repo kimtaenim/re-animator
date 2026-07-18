@@ -1453,10 +1453,24 @@ export async function runVideo(projectId, payload) {
         try {
           const dur = estimateVideoSeconds(s.cut); // 대사/타입/지정 기반 초(0.5 단위 가능)
           const grokDur = Math.max(1, Math.min(10, Math.round(dur))); // Grok 은 정수만
-          const videoUrl = await grokVideoFromImage(
-            { imageUrl: s.generatedImage, prompt: buildVideoPrompt(s.cut), duration: grokDur },
-            () => log(`컷 ${s.order + 1} 생성 중…(${grokDur}s)`)
-          );
+          // ★콘텐츠 정책 거부 시 순화 프롬프트로 1회 자동 재시도 — 프롬프트가 원인이면 통과.
+          //   이미지 자체가 걸리면 그래도 실패(그건 3단계에서 그 컷을 순화 재생성해야 함).
+          const genVideo = (prompt) =>
+            grokVideoFromImage(
+              { imageUrl: s.generatedImage, prompt, duration: grokDur },
+              () => log(`컷 ${s.order + 1} 생성 중…(${grokDur}s)`)
+            );
+          let videoUrl;
+          try {
+            videoUrl = await genVideo(buildVideoPrompt(s.cut));
+          } catch (e) {
+            if (/콘텐츠 정책|content|policy|moderation|safety|flag/i.test(String(e?.message ?? e))) {
+              await log(`컷 ${s.order + 1} 정책 거부 → 순화 프롬프트로 재시도`);
+              videoUrl = await genVideo(
+                "Subtle, gentle, calm cinematic camera movement only. Do not add, change, or emphasize anything in the scene."
+              );
+            } else throw e;
+          }
           const raw = await download(videoUrl);
           const buf = (await stripAudio(raw)) ?? raw; // 그록 자동 오디오 제거(실패 시 원본)
           const { url } = await put(
