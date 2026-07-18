@@ -34,7 +34,7 @@ import {
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { readCutText } from "./ocr.mjs";
-import { translateBubbles, translateTexts } from "./translate.mjs";
+import { translateTexts } from "./translate.mjs";
 import { synthesize, synthSfx } from "./tts.mjs";
 
 // 만화 효과음(한글 의성어) → ElevenLabs Sound Effects 용 짧은 영어 사운드 묘사. 실패 시 원문.
@@ -261,7 +261,7 @@ function addGapTextRegions(scenes, profile, totalHeight, log) {
 // 재추출/분할/합병 시 풍선별 화자(speakerId)·자막위치(subtitleX/Y) 보존 — 새 OCR 풍선을
 // 옛 풍선과 글자로 매칭해 옮긴다. 옛 풍선이 없고 컷 단위 레거시 화자만 있으면 풍선 1개일 때 물려준다.
 function mergeBubbleSpeakers(newBubbles, oldBubbles, legacySpeakerId) {
-  const bubbles = (newBubbles || []).map((b) => ({ text: b.text, box: b.box }));
+  const bubbles = (newBubbles || []).map((b) => ({ text: b.text, box: b.box, ...(b.translation ? { translation: b.translation } : {}) }));
   const old = oldBubbles || [];
   const norm = (t) => String(t || "").replace(/\s+/g, "").trim();
   for (const nb of bubbles) {
@@ -275,7 +275,7 @@ function mergeBubbleSpeakers(newBubbles, oldBubbles, legacySpeakerId) {
       if (typeof match.subtitleX === "number") nb.subtitleX = match.subtitleX;
       if (typeof match.subtitleY === "number") nb.subtitleY = match.subtitleY;
       if (match.emotion) nb.emotion = match.emotion; // 감정 연기도 화자처럼 보존
-      if (match.translation) nb.translation = match.translation; // 번역도 보존 → 재추출 때 재번역 안 함(원문 같으면)
+      if (!nb.translation && match.translation) nb.translation = match.translation; // OCR 번역 없을 때만 옛 번역 유지
     }
   }
   if (!old.some((o) => o.speakerId) && legacySpeakerId && bubbles.length === 1 && !bubbles[0].speakerId) {
@@ -479,7 +479,8 @@ export async function runSplit(projectId) {
           try {
             const png = await extractRegion(canvas, buffers, u.tr.yStart, u.tr.yEnd, u.tr.xStart, u.tr.xEnd);
             const t = await readCutText(png, key, VLM_MODEL);
-            if (t.bubbles?.length) u.out = t.bubbles.map((b) => ({ text: b.text }));
+            // OCR 가 원문과 함께 한국어 번역도 뽑으므로 그대로 실어둔다 → G1 검수 화면에 바로 '역:' 표시.
+            if (t.bubbles?.length) u.out = t.bubbles.map((b) => ({ text: b.text, ...(b.translation ? { translation: b.translation } : {}) }));
           } catch {}
         })
       );
@@ -493,18 +494,8 @@ export async function runSplit(projectId) {
       u.s.cut.bubbles = [...(u.s.cut.bubbles ?? []), ...u.out];
       got++;
     }
-    await log(`내레이션 미리 읽기 완료 — ${got}개 밴드에서 글자 확보(G1 컷 카드에 표시)`);
-    // ★G1 검수 화면에도 번역이 보이게 — 미리읽은 대사·내레이션을 여기서 바로 한국어로 곁들인다
-    //   (추출 단계가 나중에 다시 채우지만, 검수 때부터 뜻을 보여야 편집·화자 파악이 됨).
-    let trGot = 0;
-    for (const sc of scenes) {
-      if (!(sc.cut?.bubbles?.length)) continue;
-      try {
-        const { translated } = await translateBubbles(sc.cut.bubbles, key);
-        trGot += translated;
-      } catch {}
-    }
-    if (trGot) await log(`대사 번역 미리 달기 ${trGot}줄 — G1 검수 화면에 '역:' 표시`);
+    const trGot = scenes.reduce((n, sc) => n + (sc.cut?.bubbles ?? []).filter((b) => (b.translation || "").trim()).length, 0);
+    await log(`내레이션 미리 읽기 완료 — ${got}개 밴드 글자 확보, 번역 ${trGot}줄(OCR가 함께 뽑음) — G1 검수 화면에 '역:' 표시`);
   }
 
   // 최신 프로젝트를 다시 읽어 결과만 병합(중간에 다른 갱신 있었을 수 있음).
@@ -659,19 +650,15 @@ export async function runExtract(projectId) {
               .slice(0, 500);
             if (sfx) s.cut.sfx = sfx;
             s.cut.textBoxes = own.boxes; // 마스크는 '이 컷 이미지 안' 글자만(흡수 밴드는 이미지에 없음)
-            // ── 대사 번역(편집자용 주석) — 외국어 원문에 한국어 뜻을 곁들인다. 원문 text·더빙은 불변.
-            //   translateBubbles 가 한국어·이미 번역된 줄은 스킵(재실행 보존). 실패해도 대사엔 무해.
-            try {
-              const { translated, cost } = await translateBubbles(s.cut.bubbles, key);
-              trlOk += translated;
-              trlCost += cost;
-              // 레거시 내레이션 문자열(별도 필드)도 번역 — 대부분 bubbles 로 흡수되지만 있으면 채움.
-              if ((s.cut.narration || "").trim() && !(s.cut.narrationTranslation || "").trim()) {
+            trlOk += (s.cut.bubbles ?? []).filter((b) => (b.translation || "").trim()).length;
+            // 레거시 내레이션 문자열(별도 필드)도 번역 — 대부분 bubbles 로 흡수되지만 있으면 채움.
+            if ((s.cut.narration || "").trim() && !(s.cut.narrationTranslation || "").trim()) {
+              try {
                 const { translations, cost: nc } = await translateTexts([s.cut.narration], key);
                 if (translations[0]) s.cut.narrationTranslation = translations[0];
                 trlCost += nc;
-              }
-            } catch {}
+              } catch {}
+            }
             // ── AI 연출: 번역을 읽고 풀 연출안(카메라·길이·전환·동작·줄별 감정·자막위치)을
             //   디폴트로 채운다. ★사용자가 이미 지정한 값은 절대 안 덮는다(미지정 필드만).
             const needCam = !(s.cut.motion || "").trim();
@@ -714,16 +701,7 @@ export async function runExtract(projectId) {
     }
     await log(`[진단] 내레이션 밴드 OCR: ${trHit}/${trTotal} 성공(글자 잡힘) — 0/0이면 밴드가 분할서 안 넘어온 것`);
     if (trlOk > 0) {
-      await log(`[진단] 대사 번역: ${trlOk}줄에 한국어 주석 채움(외국어 원문, $${trlCost.toFixed(3)}) — 원문·더빙은 그대로`);
-      try {
-        await recordCost({
-          projectId,
-          vendor: "openai",
-          model: process.env.OPENAI_TRANSLATE_MODEL || "gpt-4o-mini",
-          costUsd: trlCost,
-          meta: { kind: "translate", lines: trlOk },
-        });
-      } catch {}
+      await log(`[진단] 대사 번역: ${trlOk}줄 (OCR가 원문과 함께 뽑음 — 별도 비용 없음, 원문·더빙은 그대로)`);
     }
     if (dirOk > 0) {
       await log(`[진단] AI 연출: ${dirOk}컷에 카메라·감정 디폴트 채움(Claude, $${dirCost.toFixed(3)})`);

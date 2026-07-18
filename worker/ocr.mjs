@@ -62,12 +62,13 @@ const OCR_SCHEMA = {
           additionalProperties: false,
           properties: {
             text: { type: "string" },
+            translation: { type: "string" }, // 한국어 번역(편집 보조). 원문은 text 그대로, 한국어 원문이면 "".
             left: { type: "number" },
             top: { type: "number" },
             right: { type: "number" },
             bottom: { type: "number" },
           },
-          required: ["text", "left", "top", "right", "bottom"],
+          required: ["text", "translation", "left", "top", "right", "bottom"],
         },
       },
       sfx: { type: "string" },
@@ -83,7 +84,7 @@ const OCR_SCHEMA = {
 
 const PROMPT =
   "이 만화 컷 이미지의 모든 글자를 읽어라. " +
-  "bubbles = 말풍선/대사/자막을 ★말풍선(글상자) 단위로 하나씩★ 배열로. 각 항목: text(그 풍선 글자를 ★원문 언어 그대로, 보이는 그대로 정확히★ — 번역·음역 금지, 빠뜨리거나 지어내지 마라, 확실히 안 읽히면 빈 문자열. 한국어일 때만 띄어쓰기를 표준 맞춤법에 맞게 정리. 세로쓰기·줄바꿈은 한 줄로 이어라)와 그 풍선 영역 박스(left,top,right,bottom, 이미지 대비 0~1). 서로 다른 인물의 말풍선은 반드시 다른 항목으로 나눠라. 글자 없으면 빈 배열. " +
+  "bubbles = 말풍선/대사/자막을 ★말풍선(글상자) 단위로 하나씩★ 배열로. 각 항목: text(그 풍선 글자를 ★원문 언어 그대로, 보이는 그대로 정확히★ — 번역·음역 금지, 빠뜨리거나 지어내지 마라, 확실히 안 읽히면 빈 문자열. 한국어일 때만 띄어쓰기를 표준 맞춤법에 맞게 정리. 세로쓰기·줄바꿈은 한 줄로 이어라), translation(그 풍선의 ★자연스러운 한국어 번역★ — 편집 보조용. 원문 text 는 절대 안 바꾸고 이 필드에만 번역을 담아라. 원문이 이미 한국어이거나 글자가 없으면 빈 문자열), 그리고 그 풍선 영역 박스(left,top,right,bottom, 이미지 대비 0~1). 서로 다른 인물의 말풍선은 반드시 다른 항목으로 나눠라. 글자 없으면 빈 배열. " +
   "sfx = 효과음/의성어 글자(있으면 그대로, 없으면 빈 문자열). " +
   "boxes = 마스크용 — 모든 글자(말풍선·자막·효과음)가 차지한 영역들을 0~1 박스로. 글자 없으면 빈 배열. " +
   "오직 JSON.";
@@ -128,6 +129,7 @@ export async function readCutText(pngBuf, key, model = "gpt-4o") {
   const bubbles = (parsed.bubbles || [])
     .map((b) => ({
       text: typeof b.text === "string" ? b.text.slice(0, 400) : "",
+      translation: typeof b.translation === "string" ? b.translation.trim().slice(0, 400) : "",
       box: { left: clamp(b.left), top: clamp(b.top), right: clamp(b.right), bottom: clamp(b.bottom) },
     }))
     .filter((b) => b.text.trim() !== "") // 글자 없는 풍선은 버림
