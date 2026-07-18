@@ -1361,18 +1361,19 @@ function estimateVideoSeconds(cut) {
 //   '무엇·언제'를 시간 구조로 지시하고, 공통 지침은 '그대로 정밀 실행 + 피사체는 정지'만.
 // 인물 동작 규칙(2026-07-18 사용자 확정): 잔잔한 동작은 살리되 작게 — 고개 들기/내리기/돌리기
 // 같은 3D 움직임 권장, 표정은 원본 그대로, ★없는 인물·사물 생성 절대 금지★.
+// ★사용자 지정(2026-07-18): Grok 은 거의 '정지'로 — 카메라워크는 워커 후처리(postfx 줌 커브)로
+//   따로 굽는다. Grok 이 크게 움직이면 그림이 뭉개져 품질이 무너졌음. 여기선 '살아있는 사진'
+//   수준의 미세한 생동감만 요청하고, 카메라 이동은 절대 시키지 않는다.
 const MOTION_GUIDANCE =
-  "Execute the camera direction above EXACTLY, especially its timing profile (the slow and fast phases) — " +
-  "clean, controlled, professional camera work like a high-end music video. " +
-  "Characters may move subtly and naturally: small 3D head movements (slowly raising, lowering or turning the head), " +
-  "breathing, blinking, hair and cloth motion, a slight shift of weight — keep these movements SMALL and calm. " +
-  "CONTINUE any action already depicted in the still image (someone drawn mid-walk keeps walking, someone running keeps running, at the same pace); " +
-  "but do not START new actions or gestures that are not already happening in the still. " +
-  "Keep each character's facial EXPRESSION exactly as drawn in the still image — do not change the emotion. " +
-  "NEVER add characters, people or objects that are not in the still image. " +
-  "Keep the art style and colors; no text; do not distort faces.";
-// 프리셋이 비어 있을 때의 기본 카메라(공통 지침은 '실행 지침'이라 자체 동작 지시가 없음).
-const DEFAULT_MOTION = "Camera direction: slow, confident cinematic push-in toward the subject.";
+  "Keep the CAMERA completely STATIC — a locked, fixed frame. NO camera movement of any kind: no pan, no tilt, no zoom, " +
+  "no push-in, no dolly, no shake, no rotation. (Camera work is added afterward, so the base clip must stay perfectly stable.) " +
+  "Bring the still subtly to life ONLY with tiny, slow, natural motion: gentle breathing, slow blinking, small hair and cloth " +
+  "sway, a slight weight shift, a very small 3D head movement. Keep ALL motion MINIMAL, slow and calm — like a living photograph. " +
+  "CONTINUE any action already depicted in the still (someone drawn mid-walk keeps walking at the same pace); " +
+  "do not START new actions or gestures not already happening. " +
+  "Keep each character's facial EXPRESSION exactly as drawn — do not change the emotion. " +
+  "NEVER add characters, people or objects not in the still. Keep the art style and colors; no text; " +
+  "do not distort or morph faces or the composition.";
 // 대사 있는 인물 컷: '말하는 것처럼' 입/얼굴 움직임(진짜 립싱크 아님 — Grok I2V 한계).
 const SPEAKING_GUIDANCE =
   "The character is talking: natural, subtle lip and mouth movement as if speaking, with a slight, " +
@@ -1387,12 +1388,12 @@ function hasSpokenDialogue(cut) {
   return (cut.dialogue || "").trim() !== "";
 }
 function buildVideoPrompt(cut) {
-  const motion = String(cut?.motion || "").trim() || DEFAULT_MOTION;
-  // 동작(이어가기)이 있으면 카메라 지시 뒤에 짧게 덧붙인다. AI 연출이 '그림에 이미 있는 동작의
-  // 이어가기'만 담도록 제약했으므로 MOTION_GUIDANCE(새 동작 금지)와 충돌하지 않는다.
+  // ★카메라(cut.motion)는 Grok 에 주지 않는다 — 카메라워크는 워커 후처리(postfx)로. 여기선 정지
+  //   + 미세 생동감(MOTION_GUIDANCE) + 이미 있는 동작 이어가기만.
   const action = String(cut?.action || "").trim();
-  const cam = action ? `${motion}. Subject action (continue only what is already happening): ${action}` : motion;
-  const base = `${cam}. ${MOTION_GUIDANCE}`;
+  const base = action
+    ? `${MOTION_GUIDANCE} Subject action (continue ONLY what is already happening, small and slow): ${action}.`
+    : MOTION_GUIDANCE;
   return hasSpokenDialogue(cut) ? `${base} ${SPEAKING_GUIDANCE}` : base;
 }
 
