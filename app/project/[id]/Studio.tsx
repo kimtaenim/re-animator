@@ -1356,9 +1356,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       try {
         const r = await fetch(`/api/job?id=${jobId}`, { cache: "no-store" });
         const d = await r.json();
+        if (d.ok) {
+          setProgress(d.progress ?? "");
+          setProgressLog(d.progressLog ?? []);
+        }
         if (d.ok && (d.status === "done" || d.status === "error")) {
           clearInterval(iv);
           setDubbing(false);
+          setProgress("");
           if (d.status === "error") {
             setError(`더빙 실패: ${d.error ?? ""}`);
           } else {
@@ -1689,16 +1694,40 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               : "";
 
   // 진행 바 — 로그의 "(N%)" 를 뽑아 표시(없으면 안 그림). 모든 워커 단계 공용.
+  // 진행바 + 예상시간 — 워커 로그의 (N%) 또는 "N/M" 에서 퍼센트 추출, 경과시간으로 남은 시간 추정.
+  const progressAnchor = useRef<{ at: number; pct: number } | null>(null);
   const progressBar = () => {
-    const m = progress.match(/\((\d+)%\)/);
-    const pct = m ? Number(m[1]) : null;
+    let pct: number | null = null;
+    const mp = progress.match(/\((\d+)%\)/);
+    if (mp) pct = Number(mp[1]);
+    else {
+      const mf = progress.match(/(\d+)\s*\/\s*(\d+)/); // "대사 읽기 3/43", "이미지 생성 1~6/12" 등
+      if (mf && Number(mf[2]) > 0) pct = Math.round((Number(mf[1]) / Number(mf[2])) * 100);
+    }
     if (pct === null) return null;
+    pct = Math.max(0, Math.min(100, pct));
+    // ETA(대략) — 처음 본 진행률(anchor) 이후 경과시간을 진행량으로 나눠 남은 시간 선형 추정.
+    const now = Date.now();
+    const a = progressAnchor.current;
+    if (!a || pct < a.pct - 1) progressAnchor.current = { at: now, pct }; // 새 작업/되감김이면 기준 재설정
+    let eta = "";
+    if (pct > 0 && pct < 100 && progressAnchor.current) {
+      const el = (now - progressAnchor.current.at) / 1000;
+      const done = (pct - progressAnchor.current.pct) / 100;
+      if (done > 0.03 && el > 3) {
+        const remain = (el / done) * (1 - done);
+        eta = remain > 90 ? `약 ${Math.round(remain / 60)}분 남음` : `약 ${Math.round(remain)}초 남음`;
+      }
+    }
     return (
-      <div className="mb-3 h-1.5 w-full max-w-md overflow-hidden rounded-full bg-[var(--panel-2)]">
-        <div
-          className="h-full bg-[var(--accent)] transition-all duration-300"
-          style={{ width: `${pct}%` }}
-        />
+      <div className="mb-3 w-full max-w-md">
+        <div className="mb-1 flex justify-between text-[11px] text-[var(--muted)]">
+          <span>{pct}%</span>
+          {eta && <span>{eta}</span>}
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--panel-2)]">
+          <div className="h-full bg-[var(--accent)] transition-all duration-300" style={{ width: `${pct}%` }} />
+        </div>
       </div>
     );
   };
@@ -2030,6 +2059,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
             </p>
           )}
+          {castRunning && progressBar()}
           {castRunning && progressLog.length > 0 && (
             <pre className="mb-3 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
               {progressLog.slice(-14).join("\n")}
@@ -2498,9 +2528,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             {dubbing && (
               <span className="flex items-center gap-1 text-xs text-[var(--accent)]">
                 <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-                더빙 중…
+                더빙 중… {progress && <span className="opacity-70">{progress}</span>}
               </span>
             )}
+            {dubbing && <div className="w-full">{progressBar()}</div>}
             {dubMsg && !dubbing && <span className="text-xs text-[var(--ok)]">{dubMsg}</span>}
             {selForVideo.size > 0 && (
               <button
