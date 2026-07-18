@@ -2846,6 +2846,36 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         )}
                       </div>
                       {advCut.has(s.id) && (<>
+                      {/* ★연기(감정) — '이 컷 더빙' 전에 말풍선별 감정 지정. 예전엔 여기 없어서 컷에서
+                          연기 지정을 못 했음(감정 픽커가 연출 보고서 테이블에만 있었음). 더빙에 반영됨. */}
+                      {(s.cut?.bubbles ?? []).some((b) => (b.text || "").trim() && b.speakerId !== SFX_SPEAKER) && (
+                        <div className="flex flex-col gap-1" title="이 컷 대사의 연기(감정) — 더빙 목소리에 반영">
+                          <span className="text-[10px] text-[var(--muted)]">🎭 연기(감정)</span>
+                          {(s.cut?.bubbles ?? []).map((b, bi) =>
+                            (b.text || "").trim() && b.speakerId !== SFX_SPEAKER ? (
+                              <div key={bi} className="flex flex-wrap items-center gap-1">
+                                <span className="max-w-[160px] truncate text-[10px] text-[var(--text)]" title={b.text}>
+                                  “{b.text.slice(0, 30)}”
+                                </span>
+                                <select
+                                  value={b.emotion ?? ""}
+                                  onChange={(e) => {
+                                    const v = e.target.value || undefined;
+                                    const nb = (s.cut?.bubbles ?? []).map((x, xi) => (xi === bi ? { ...x, emotion: v } : x));
+                                    updateCut(s.id, { bubbles: nb });
+                                  }}
+                                  className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-0.5 py-0.5 text-[10px]"
+                                >
+                                  <option value="">🎭 (없음)</option>
+                                  {EMOTIONS.map((em) => (
+                                    <option key={em.id} value={em.id}>{em.label}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            ) : null
+                          )}
+                        </div>
+                      )}
                       {/* 전환 — 카메라워크처럼 칩으로. 이 컷 → 다음 컷 사이(5단계 합성에서 적용). */}
                       <div
                         className="flex flex-wrap items-center gap-1"
