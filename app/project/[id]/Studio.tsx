@@ -2309,12 +2309,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             </button>
           </div>
 
-          {/* 더빙(음성 생성) — 동영상과 별개(동영상 생성 중에도 가능). 눈에 띄게 전용 줄로. */}
-          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--panel)] p-2">
-            <span className="text-sm font-semibold text-[var(--accent)]">🎙 더빙</span>
-            <span className="text-xs text-[var(--muted)]">
-              대사=화자 목소리 · 내레이션=나레이터 · 효과음=ElevenLabs · 동영상 생성 중에도 가능
-            </span>
+          {/* 더빙(음성 생성) — 동영상과 별개. 얇은 한 줄로(설명은 툴팁). */}
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs" title="대사=화자 목소리 · 내레이션=나레이터 · 효과음=ElevenLabs · 동영상 생성 중에도 가능">
+            <span className="font-semibold text-[var(--accent)]">🎙 더빙</span>
             <span className="flex items-center gap-1 text-xs text-[var(--muted)]" title="더빙 말 속도">
               속도
               {[1, 1.2].map((v) => (
@@ -2586,7 +2583,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 return (
                   <div
                     key={s.id}
-                    className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2"
+                    className="group flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2"
                   >
                     <div className="flex w-6 shrink-0 flex-col items-center gap-1 pt-8">
                       {!isCardScene && (
@@ -2650,7 +2647,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       </div>
                     )}
                     <div className="flex min-w-0 flex-1 flex-col gap-1 text-[11px]">
-                      <div className="flex flex-wrap items-center gap-2">
+                      {/* 조작 버튼 줄 — 평소엔 숨고, 카드에 마우스 올리거나 포커스 시에만 뜸(애플식: 콘텐츠 앞, 크롬 뒤). */}
+                      <div className="flex flex-wrap items-center gap-2 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
                         {isCardScene ? (
                           <span className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)]" title="합성 때 검은 화면+테두리 위에 자막·더빙으로 렌더 — 이미지·영상 생성 불필요">
                             🎞 자막 씬(무성영화) — 영상 생성 불필요
