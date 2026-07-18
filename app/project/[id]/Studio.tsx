@@ -1371,16 +1371,17 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 자막 '유닛' 배열 — 각 말풍선/내레이션 조각이 별개 박스(겹치지 않게). compose 와 동일 규칙.
   // ★효과음(화자=효과음) 줄은 자막에서 제외(소리일 뿐 캡션 아님).
   // 자막 유닛 — { text, sx, sy }. sx/sy = 이 줄(말풍선)에 지정된 자막 위치(없으면 컷 기본).
-  function subtitleUnits(cut?: Project["scenes"][number]["cut"]): { text: string; sx?: number; sy?: number }[] {
-    const units: { text: string; sx?: number; sy?: number }[] = [];
+  function subtitleUnits(cut?: Project["scenes"][number]["cut"]): { text: string; sx?: number; sy?: number; tr?: string }[] {
+    const units: { text: string; sx?: number; sy?: number; tr?: string }[] = [];
     if (cut?.bubbles?.length)
       for (const b of cut.bubbles) {
         if (b.speakerId === SFX_SPEAKER) continue;
         const t = (b.text || "").trim();
-        if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY });
+        if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY, tr: (b.translation || "").trim() || undefined });
       }
     else if (cut?.dialogue?.trim()) units.push({ text: cut.dialogue.trim() });
-    if (cut?.narration?.trim()) for (const seg of cut.narration.split(/\n\s*\n/)) { const t = seg.trim(); if (t) units.push({ text: t }); }
+    const narTr = (cut?.narrationTranslation || "").trim() || undefined;
+    if (cut?.narration?.trim()) for (const seg of cut.narration.split(/\n\s*\n/)) { const t = seg.trim(); if (t) units.push({ text: t, tr: narTr }); }
     return units;
   }
   // 자막 세로 중심 비율(0=위,1=아래) — compose 의 subtitleCenterY 와 동일 규칙(미리보기==결과 싱크).
@@ -3061,7 +3062,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       typeof u.sy === "number" ? Math.max(0.05, Math.min(0.95, u.sy)) : cardDefault ? 0.5 : subFracY(s.cut);
                     return (
                     <div
-                      className="pointer-events-none absolute flex -translate-x-1/2 -translate-y-1/2 justify-center"
+                      className="pointer-events-none absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5"
                       style={{ left: `${fx * 100}%`, top: `${fy * 100}%` }}
                     >
                       {/* 한 번에 한 박스만(순차) — 위치는 그 줄 지정(없으면 컷 기본). [[강조]]는 크게·노랑. */}
@@ -3076,6 +3077,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           )
                         )}
                       </span>
+                      {/* 편집 보조용 번역(최종 자막엔 안 나감) — 원문 아래 작게 */}
+                      {u.tr && (
+                        <span className="max-w-[86vw] whitespace-pre-wrap rounded bg-black/40 px-2 py-0.5 text-center text-[11px] italic text-white/75">
+                          역: {u.tr}
+                        </span>
+                      )}
                     </div>
                     );
                   })()}
