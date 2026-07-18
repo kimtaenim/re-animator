@@ -34,6 +34,7 @@ import {
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { readCutText } from "./ocr.mjs";
+import { translateScenes } from "./translate.mjs";
 import { synthesize, synthSfx } from "./tts.mjs";
 
 // 만화 효과음(한글 의성어) → ElevenLabs Sound Effects 용 짧은 영어 사운드 묘사. 실패 시 원문.
@@ -516,8 +517,16 @@ export async function runSplit(projectId) {
       u.s.cut.bubbles = [...(u.s.cut.bubbles ?? []), ...u.out];
       got++;
     }
-    const trGot = scenes.reduce((n, sc) => n + (sc.cut?.bubbles ?? []).filter((b) => (b.translation || "").trim()).length, 0);
-    await log(`내레이션 미리 읽기 완료 — ${got}개 밴드 글자 확보, 번역 ${trGot}줄(OCR가 함께 뽑음) — G1 검수 화면에 '역:' 표시`);
+    await log(`내레이션 미리 읽기 완료 — ${got}개 밴드 글자 확보`);
+  }
+
+  // ★번역(Claude) — G1 검수 화면에 대사·내레이션 뜻이 바로 보이게. 컷 대사 + 말풍선 전부 한 번에.
+  try {
+    const { translated, cost } = await translateScenes(scenes);
+    await log(`대사 번역(Claude) ${translated}줄 채움(~$${cost.toFixed(4)}) — G1에 '역:' 표시`);
+    if (!translated && !process.env.ANTHROPIC_API_KEY) await log("⚠ ANTHROPIC_API_KEY 없음 — 번역 스킵됨(워커 env 확인)");
+  } catch (e) {
+    await log(`번역 실패(대사는 그대로): ${String(e?.message ?? e).slice(0, 120)}`);
   }
 
   // 최신 프로젝트를 다시 읽어 결과만 병합(중간에 다른 갱신 있었을 수 있음).
@@ -733,6 +742,14 @@ export async function runExtract(projectId) {
   }
 
   for (const s of scenes) normalizeNarration(s.cut); // 레거시 내레이션 문자열 → 내레이터 말풍선으로 통일
+  // ★번역(Claude) — 추출된 말풍선 대사 전부 한국어로. 이후 모든 단계(캐스팅·편집기·미리보기)에 '역:' 표시.
+  try {
+    const { translated, cost } = await translateScenes(scenes);
+    await log(`대사 번역(Claude) ${translated}줄 채움(~$${cost.toFixed(4)})`);
+    if (!translated && !process.env.ANTHROPIC_API_KEY) await log("⚠ ANTHROPIC_API_KEY 없음 — 번역 스킵됨(워커 env 확인)");
+  } catch (e) {
+    await log(`번역 실패(대사는 그대로): ${String(e?.message ?? e).slice(0, 120)}`);
+  }
   const p2 = await getProject(projectId);
   if (!p2) throw new Error("프로젝트가 사라졌어요");
   p2.scenes = scenes;
