@@ -120,6 +120,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [regenPending, setRegenPending] = useState<Map<string, string>>(() => new Map()); // 재생성 중인 컷(값=요청시 옛 이미지 url)
   const regenSawRunning = useRef(false); // 재생성 잡이 실제 running 을 거쳤는지(스피너 조기 해제 방지)
   const [selForVideo, setSelForVideo] = useState<Set<string>>(() => new Set()); // 4단계 다중 선택
+  // 대사 줄별 '세부(⚙)' 펼침 상태 — 감정·자막위치·순서이동 등 잘 안 만지는 컨트롤을 평소엔 접어둠.
+  const [advBub, setAdvBub] = useState<Set<string>>(() => new Set());
+  const toggleAdv = (key: string) =>
+    setAdvBub((prev) => {
+      const n = new Set(prev);
+      n.has(key) ? n.delete(key) : n.add(key);
+      return n;
+    });
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
   const [scenePreview, setScenePreview] = useState<string | null>(null); // 씬 미리보기(영상+자막+더빙)
   const [subIdx, setSubIdx] = useState(0); // 미리보기 자막 박스 순차 표시 인덱스(하나씩)
@@ -770,7 +778,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     if (bubs.length > 0) {
       return (
         <div className="flex flex-col gap-0.5">
-          {bubs.map((b, bi) => (
+          {bubs.map((b, bi) => {
+            const advKey = `${s.id}:${bi}`;
+            const advOpen = advBub.has(advKey);
+            const isSfx = b.speakerId === SFX_SPEAKER;
+            // 접힌 상태에서도 뭔가 설정돼 있으면 ⚙ 를 강조해 "숨겨진 값 있음"을 알린다.
+            const advSet = !!b.emotion || typeof b.subtitleY === "number" || typeof b.subtitleX === "number";
+            return (
             <div key={bi} className="flex flex-col gap-0.5">
               <div className="flex items-start gap-1">
               <div className="pt-0.5">{avatar(b.speakerId)}</div>
@@ -786,95 +800,29 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   updateCut(s.id, { bubbles: nb });
                 }}
                 rows={rows(b.text)}
-                placeholder={b.speakerId === SFX_SPEAKER ? "효과음 (예: 웅성웅성, 쾅)" : `대사 ${bi + 1} (Enter=줄바꿈)`}
+                placeholder={isSfx ? "효과음 (예: 웅성웅성, 쾅)" : `대사 ${bi + 1} (Enter=줄바꿈)`}
                 className={`${inputCls} resize-none`}
               />
-              {/* 한 컷 안 순서 바꾸기(▲▼) — 대사 2개 이상일 때만 */}
-              {bubs.length > 1 && (
-                <div className="flex shrink-0 flex-col" title="이 컷 안에서 순서 바꾸기">
-                  <button type="button" onClick={() => reorderBubble(s.id, bi, -1)} disabled={bi === 0} className={stackCls} title="이 컷 안에서 위로">
-                    ▲
-                  </button>
-                  <button type="button" onClick={() => reorderBubble(s.id, bi, 1)} disabled={bi === bubs.length - 1} className={stackCls} title="이 컷 안에서 아래로">
-                    ▼
-                  </button>
-                </div>
-              )}
-              {/* 앞/뒤 컷으로 보내기(↑↓) */}
-              <div className="flex shrink-0 flex-col" title="앞/뒤 컷으로 보내기">
-                <button type="button" onClick={() => moveBubble(s.id, bi, "prev")} disabled={first} className={stackCls} title="위 컷으로 보내기">
-                  ↑
-                </button>
-                <button type="button" onClick={() => moveBubble(s.id, bi, "next")} disabled={last} className={stackCls} title="아래 컷으로 보내기">
-                  ↓
-                </button>
-              </div>
-              {/* 감정 연기 — ElevenLabs v3 오디오 태그로 과장 연기(자막엔 안 나감). */}
-              {b.speakerId !== SFX_SPEAKER && (
-                <select
-                  value={b.emotion ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value || undefined;
-                    const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, emotion: v } : x));
-                    updateCut(s.id, { bubbles: nb });
-                  }}
-                  className={`shrink-0 max-w-[64px] rounded border bg-[var(--panel-2)] px-0.5 py-1 text-[10px] ${
-                    b.emotion ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)]"
-                  }`}
-                  title="감정 연기 — 일레븐랩스 목소리로 더빙할 때 과장 연기(자막에는 안 나감)"
-                >
-                  <option value="">🎭</option>
-                  {EMOTIONS.map((em) => (
-                    <option key={em.id} value={em.id}>
-                      {em.label}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {/* 이 줄 자막 위치(9곳) — 화자가 번갈아 말할 때 줄마다 지정. 다시 클릭=해제(컷 기본). */}
-              {b.speakerId !== SFX_SPEAKER && (
-                <div
-                  className="grid shrink-0 grid-cols-3 gap-px self-center rounded border border-[var(--border)] p-0.5"
-                  title="이 줄 자막 위치 — 9곳 중 선택, 다시 클릭하면 해제(컷 기본위치 사용)"
-                >
-                  {SUB_Y.map((fy) =>
-                    SUB_X.map((fx) => {
-                      const active =
-                        typeof b.subtitleX === "number" &&
-                        typeof b.subtitleY === "number" &&
-                        Math.abs(b.subtitleX - fx) < 0.03 &&
-                        Math.abs(b.subtitleY - fy) < 0.03;
-                      return (
-                        <button
-                          key={`${fx}-${fy}`}
-                          type="button"
-                          onClick={() => (active ? setBubblePos(s.id, bi, null, null) : setBubblePos(s.id, bi, fx, fy))}
-                          className={`h-2.5 w-2.5 rounded-[1px] ${
-                            active ? "bg-[var(--accent)]" : "bg-[var(--panel-2)] hover:bg-[var(--border)]"
-                          }`}
-                        />
-                      );
-                    })
-                  )}
-                </div>
-              )}
-              {/* 무성영화 자막 씬으로 분리 — 이 줄만 검은 화면+자막+더빙 씬이 됨 */}
-              {b.speakerId !== SFX_SPEAKER && (
+              {/* 세부(⚙) 토글 — 감정·자막위치·순서이동·무성씬을 펼침/접음. */}
+              {!isSfx && (
                 <button
                   type="button"
-                  onClick={() => makeCardScene(s.id, bi)}
-                  disabled={busy}
-                  title="이 대사를 무성영화 자막 씬으로 분리 — 검은 화면+테두리에 자막·더빙만"
-                  className="shrink-0 rounded border border-[var(--border)] px-1.5 py-1 leading-none text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-40"
+                  onClick={() => toggleAdv(advKey)}
+                  title="세부 — 감정·자막위치·순서 이동·무성 자막씬"
+                  className={`shrink-0 rounded border px-1.5 py-1 leading-none ${
+                    advOpen || advSet
+                      ? "border-[var(--accent)] text-[var(--accent)]"
+                      : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                  }`}
                 >
-                  🎬
+                  ⚙
                 </button>
               )}
               {b.audioUrl ? (
                 <button
                   type="button"
                   onClick={() => playAudio(b.audioUrl!)}
-                  title={b.speakerId === SFX_SPEAKER ? "효과음 생성됨 — 듣기" : "더빙됨 — 듣기"}
+                  title={isSfx ? "효과음 생성됨 — 듣기" : "더빙됨 — 듣기"}
                   className="shrink-0 rounded border border-[var(--ok)] px-1.5 py-1 leading-none text-[var(--ok)] hover:bg-[var(--panel-2)]"
                 >
                   🔊
@@ -900,14 +848,86 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
               </div>
               {/* 번역(편집자용 주석) — 외국어 원문 아래 한국어 뜻. 더빙은 원문으로 나감. */}
-              {b.speakerId !== SFX_SPEAKER && (b.translation || "").trim() && (
+              {!isSfx && (b.translation || "").trim() && (
                 <div className="pl-7 text-[11px] italic text-[var(--muted)]" title="편집·화자 파악용 번역 (더빙은 원문 그대로)">
                   역: {b.translation}
                 </div>
               )}
-              {b.speakerId !== SFX_SPEAKER && emphChips(bi, b.text)}
+              {/* ── 세부 컨트롤(접힘 기본) — 감정·자막위치·순서이동·무성씬·강조 ── */}
+              {!isSfx && advOpen && (
+                <div className="ml-7 flex flex-wrap items-center gap-2 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1">
+                  {/* 감정 연기 */}
+                  <label className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
+                    감정
+                    <select
+                      value={b.emotion ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value || undefined;
+                        const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, emotion: v } : x));
+                        updateCut(s.id, { bubbles: nb });
+                      }}
+                      className={`rounded border bg-[var(--panel)] px-0.5 py-0.5 text-[10px] ${
+                        b.emotion ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)]"
+                      }`}
+                      title="감정 연기 — 더빙 시 과장 연기(자막엔 안 나감)"
+                    >
+                      <option value="">🎭 없음</option>
+                      {EMOTIONS.map((em) => (
+                        <option key={em.id} value={em.id}>{em.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {/* 자막 위치 9분할 */}
+                  <label className="flex items-center gap-1 text-[10px] text-[var(--muted)]" title="이 줄 자막 위치 — 다시 클릭하면 해제(컷 기본)">
+                    자막
+                    <div className="grid grid-cols-3 gap-px self-center rounded border border-[var(--border)] p-0.5">
+                      {SUB_Y.map((fy) =>
+                        SUB_X.map((fx) => {
+                          const active =
+                            typeof b.subtitleX === "number" &&
+                            typeof b.subtitleY === "number" &&
+                            Math.abs(b.subtitleX - fx) < 0.03 &&
+                            Math.abs(b.subtitleY - fy) < 0.03;
+                          return (
+                            <button
+                              key={`${fx}-${fy}`}
+                              type="button"
+                              onClick={() => (active ? setBubblePos(s.id, bi, null, null) : setBubblePos(s.id, bi, fx, fy))}
+                              className={`h-2.5 w-2.5 rounded-[1px] ${active ? "bg-[var(--accent)]" : "bg-[var(--panel)] hover:bg-[var(--border)]"}`}
+                            />
+                          );
+                        })
+                      )}
+                    </div>
+                  </label>
+                  {/* 순서 이동(▲▼) — 이 컷 안 */}
+                  {bubs.length > 1 && (
+                    <span className="flex items-center" title="이 컷 안에서 순서 바꾸기">
+                      <button type="button" onClick={() => reorderBubble(s.id, bi, -1)} disabled={bi === 0} className={stackCls} title="위로">▲</button>
+                      <button type="button" onClick={() => reorderBubble(s.id, bi, 1)} disabled={bi === bubs.length - 1} className={stackCls} title="아래로">▼</button>
+                    </span>
+                  )}
+                  {/* 앞/뒤 컷으로(↑↓) */}
+                  <span className="flex items-center" title="앞/뒤 컷으로 보내기">
+                    <button type="button" onClick={() => moveBubble(s.id, bi, "prev")} disabled={first} className={stackCls} title="위 컷으로">↑</button>
+                    <button type="button" onClick={() => moveBubble(s.id, bi, "next")} disabled={last} className={stackCls} title="아래 컷으로">↓</button>
+                  </span>
+                  {/* 무성 자막씬으로 분리 */}
+                  <button
+                    type="button"
+                    onClick={() => makeCardScene(s.id, bi)}
+                    disabled={busy}
+                    title="이 대사를 무성영화 자막 씬으로 분리 — 검은 화면+자막·더빙만"
+                    className="rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] leading-none text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-40"
+                  >
+                    🎬 자막씬
+                  </button>
+                  <div className="basis-full">{emphChips(bi, b.text)}</div>
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
           <div className="flex items-center gap-2">
             <button
               type="button"
