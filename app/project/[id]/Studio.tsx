@@ -1678,8 +1678,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         <span className="text-xs text-[var(--muted)]">{project.aspectRatio}</span>
       </div>
 
-      {/* 단계 네비 — 클릭하면 그 단계만 보임(한 화면 = 한 단계). 잠긴 단계는 이전 단계 완료 후 열림. */}
-      <nav className="mb-6 flex flex-wrap gap-1 text-xs">
+      {/* 단계 네비 — 클릭하면 그 단계만 보임(한 화면 = 한 단계). 상단 고정이라 스크롤해도 항상 보임(위아래 왕복 X). */}
+      <nav className="sticky top-0 z-30 -mx-6 mb-4 flex flex-wrap items-center gap-1 border-b border-[var(--border)] bg-[var(--bg)] px-6 py-2 text-xs">
         {STEP_ORDER.map((k) => {
           const hasImages = project.scenes.some((s) => s.generatedImage);
           const avail =
