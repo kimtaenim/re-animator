@@ -70,12 +70,26 @@ async function normalizeSize(b64, project) {
   return fitBuffer(Buffer.from(b64, "base64"), project);
 }
 
+// ★API 입력 축소 — 새로그리기/실사화는 원본 컷을 그대로 모델에 올린다. 세로로 큰 웹툰 컷이면
+//   그 큰 버퍼가 동시 재생성 개수만큼 겹쳐 워커 OOM 먹통(마스크 모드는 리사이즈해서 무해했음).
+//   모델은 출력 크기(W×H)로 새로 생성하므로 입력 해상도는 긴변 1536 이하로 줄여도 무관.
+async function downscaleForApi(buf, maxSide = 1536) {
+  try {
+    const m = await sharp(buf).metadata();
+    if (Math.max(m.width || 0, m.height || 0) <= maxSide) return buf;
+    return await sharp(buf).resize(maxSide, maxSide, { fit: "inside", withoutEnlargement: true }).png().toBuffer();
+  } catch {
+    return buf;
+  }
+}
+
 // 원본 컷 이미지 버퍼 + 씬 → 재생성 이미지 buf (+비용). 실패 시 throw.
 export async function regenScene(scene, imgBuf, project, key, model) {
   const [W, H] = reqSize(project, model);
+  const img = await downscaleForApi(imgBuf); // ★큰 원본을 그대로 올리면 동시 여러 개서 OOM — 입력만 축소
   const form = new FormData();
   form.append("model", model);
-  form.append("image", new Blob([imgBuf], { type: "image/png" }), "cut.png");
+  form.append("image", new Blob([img], { type: "image/png" }), "cut.png");
   form.append("prompt", buildRegenPrompt(scene, project));
   form.append("size", `${W}x${H}`);
   form.append("n", "1");
@@ -114,11 +128,15 @@ export function buildPhotoPrompt(scene, project, nRefs) {
 
 export async function regenScenePhoto(scene, imgBuf, project, key, refBufs = []) {
   const [W, H] = reqSize(project, "gpt-image-2");
+  const img = await downscaleForApi(imgBuf); // ★입력 축소 — OOM 방지(위 regenScene 과 동일 이유)
   const form = new FormData();
   form.append("model", process.env.OPENAI_IMAGE_MODEL || "gpt-image-2");
   // 멀티 이미지: 첫째=컷, 이후=캐릭터 실사 레퍼런스(얼굴 고정). 필드명 image[] 반복.
-  form.append("image[]", new Blob([imgBuf], { type: "image/png" }), "cut.png");
-  refBufs.forEach((b, i) => form.append("image[]", new Blob([b], { type: "image/png" }), `ref${i}.png`));
+  form.append("image[]", new Blob([img], { type: "image/png" }), "cut.png");
+  for (let i = 0; i < refBufs.length; i++) {
+    const rb = await downscaleForApi(refBufs[i], 1024); // 레퍼런스도 축소(얼굴엔 1024면 충분)
+    form.append("image[]", new Blob([rb], { type: "image/png" }), `ref${i}.png`);
+  }
   form.append("prompt", buildPhotoPrompt(scene, project, refBufs.length));
   form.append("size", `${W}x${H}`);
   form.append("n", "1");
