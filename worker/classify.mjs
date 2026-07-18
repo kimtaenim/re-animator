@@ -114,7 +114,7 @@ function resolve(raw, idSet, koToId, syn) {
   return syn[low] ?? syn[s] ?? null;
 }
 
-function normalizeCut(raw, R) {
+export function normalizeCut(raw, R) {
   const c = blankCut();
   if (!raw || typeof raw !== "object") return c;
   // strict 스키마면 이미 유효 enum. resolve 는 비-strict 모델용 안전망.
