@@ -145,6 +145,17 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         ? "cast"
         : "source"
   );
+  // ★단계 전환 시 화면 리셋 방지 — 단계를 조건부 렌더해 언마운트하므로 스크롤이 초기화됐다.
+  //   떠나는 단계의 스크롤 위치를 기억했다가, 그 단계로 돌아오면 정확히 그 자리로 복원한다.
+  const stepScrollY = useRef<Record<string, number>>({});
+  function goToStep(k: StepKind) {
+    stepScrollY.current[activeStep] = window.scrollY; // 떠나기 전 현재 위치 저장
+    setActiveStep(k);
+  }
+  useEffect(() => {
+    const y = stepScrollY.current[activeStep];
+    if (y != null) requestAnimationFrame(() => window.scrollTo(0, y)); // 방문했던 단계면 그 자리로
+  }, [activeStep]);
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
   const [scenePreview, setScenePreview] = useState<string | null>(null); // 씬 미리보기(영상+자막+더빙)
   const [subIdx, setSubIdx] = useState(0); // 미리보기 자막 박스 순차 표시 인덱스(하나씩)
@@ -1702,7 +1713,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               key={k}
               type="button"
               disabled={!avail}
-              onClick={() => avail && setActiveStep(k)}
+              onClick={() => avail && goToStep(k)}
               className={`rounded px-2.5 py-1 ${
                 cur
                   ? "bg-[var(--accent)] font-medium text-white"
