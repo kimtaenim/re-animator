@@ -136,6 +136,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       n.has(id) ? n.delete(id) : n.add(id);
       return n;
     });
+  // 활성 단계 — 한 화면에 5단계를 다 쌓지 않고, 고른 단계만 보여준다(스크롤·무게 급감).
+  // 초기값은 진행 상황에 맞춰: 이미지 있으면 4단계, 승인됐으면 2단계, 아니면 1단계.
+  const [activeStep, setActiveStep] = useState<StepKind>(() =>
+    project.scenes?.some((s) => s.generatedImage)
+      ? "scene"
+      : project.steps?.source?.status === "approved"
+        ? "cast"
+        : "source"
+  );
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
   const [scenePreview, setScenePreview] = useState<string | null>(null); // 씬 미리보기(영상+자막+더빙)
   const [subIdx, setSubIdx] = useState(0); // 미리보기 자막 박스 순차 표시 인덱스(하나씩)
@@ -1669,22 +1678,32 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         <span className="text-xs text-[var(--muted)]">{project.aspectRatio}</span>
       </div>
 
-      {/* 단계 네비 (M1 은 1단계만 활성) */}
-      <nav className="mb-6 flex gap-1 text-xs">
+      {/* 단계 네비 — 클릭하면 그 단계만 보임(한 화면 = 한 단계). 잠긴 단계는 이전 단계 완료 후 열림. */}
+      <nav className="mb-6 flex flex-wrap gap-1 text-xs">
         {STEP_ORDER.map((k) => {
-          const active = k === "source" || ((k === "cast" || k === "regen") && approved);
+          const hasImages = project.scenes.some((s) => s.generatedImage);
+          const avail =
+            k === "source" ||
+            ((k === "cast" || k === "regen") && approved) ||
+            ((k === "scene" || k === "compose") && approved && hasImages);
+          const cur = activeStep === k;
           return (
-            <span
+            <button
               key={k}
+              type="button"
+              disabled={!avail}
+              onClick={() => avail && setActiveStep(k)}
               className={`rounded px-2.5 py-1 ${
-                active
-                  ? "bg-[var(--panel-2)] text-[var(--text)]"
-                  : "bg-transparent text-[var(--muted)] opacity-50"
+                cur
+                  ? "bg-[var(--accent)] font-medium text-white"
+                  : avail
+                    ? "bg-[var(--panel-2)] text-[var(--text)] hover:brightness-110"
+                    : "cursor-not-allowed bg-transparent text-[var(--muted)] opacity-50"
               }`}
-              title={active ? "" : "다음 마일스톤"}
+              title={avail ? "" : "이전 단계를 먼저 완료하세요"}
             >
               {STEP_LABEL[k]}
-            </span>
+            </button>
           );
         })}
       </nav>
@@ -1695,6 +1714,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         </p>
       )}
 
+      {activeStep === "source" && (<>
       {/* 1) 소스 업로드 */}
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4">
         <button
@@ -1816,9 +1836,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           />
         </section>
       )}
+      </>)}
 
       {/* M2) 캐스팅 — 등장인물 구분 */}
-      {approved && (
+      {activeStep === "cast" && approved && (
         <section className="mb-6">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold">
@@ -1893,7 +1914,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       )}
 
       {/* M3) 재생성 — 좌(원본) / 우(생성) */}
-      {approved && (
+      {activeStep === "regen" && approved && (
         <section className="mb-6">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -2185,7 +2206,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       )}
 
       {/* ── 4단계: 동영상 생성(Grok I2V) + 더빙 정보 ── */}
-      {approved && project.scenes.some((s) => s.generatedImage) && (
+      {activeStep === "scene" && approved && project.scenes.some((s) => s.generatedImage) && (
         <section className="mb-6">
           {/* 🎭 목소리 캐스팅 — 더빙 단계에서도 지정 가능(캐스팅 화면과 같은 저장소 = 싱크). */}
           {(project.cast?.length ?? 0) > 0 && (
@@ -2893,7 +2914,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       )}
 
       {/* ── 5단계: 합성(영상 이어붙이기, 오디오·자막 없이) ── */}
-      {approved && project.scenes.some((s) => s.generatedImage) && (
+      {activeStep === "compose" && approved && project.scenes.some((s) => s.generatedImage) && (
         <section className="mb-6">
           {(() => {
             const nVid = project.scenes.filter((s) => s.videoUrl).length;
