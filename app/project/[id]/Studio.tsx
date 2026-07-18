@@ -1841,8 +1841,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         </div>
       )}
 
-      {/* 2) G1 경계 편집 (검수 대기) */}
-      {canvas && hasCuts && (sourceStatus === "review" || running) && (
+      {/* 2) G1 경계 편집 — ★추출 완료(approved) 후에도 계속 보인다. 예전엔 approved 면 이 섹션이
+             통째로 숨어 "1단계 결과가 사라진다"는 버그였음(사용자 반복 지적). 승인 후에도 컷·대사·경계를
+             언제든 보고 다시 편집·재추출할 수 있어야 한다. */}
+      {canvas && hasCuts && (sourceStatus === "review" || sourceStatus === "approved" || running) && (
         <section className="mb-6">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold">
