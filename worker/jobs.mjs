@@ -68,7 +68,7 @@ async function sfxToEnglish(korean, key) {
 
 // 영상(I2V)은 여러 컷을 병렬로 생성(각자 submit→poll). xAI 초당 1건 제한은 grok.mjs
 // 레이트 게이트가 처리하므로, 여기선 병렬 개수만 정한다(제출은 1초 간격으로 자동 스로틀).
-const VIDEO_CONCURRENCY = Number(process.env.VIDEO_CONCURRENCY || 6);
+const VIDEO_CONCURRENCY = Number(process.env.VIDEO_CONCURRENCY || 3); // 6→3: 재생성 OOM 먹통과 같은 패턴 예방(다운로드+stripAudio 겹침). env 로 상향 가능
 
 // 캐스팅 대상 = 인물이 담긴 컷. person(정지·반응) + action(동작 중 인물) 모두 포함.
 const CHARACTER_TYPES = new Set(["person", "action"]);
