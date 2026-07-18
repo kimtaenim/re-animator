@@ -23,6 +23,7 @@ type Voice = {
   provider: string;
   language: string;
   gender: string;
+  age: string; // ★카테고리 필터용(young/middle_aged/old 등)
   note: string;
   narration: boolean;
 };
@@ -48,7 +49,8 @@ async function fetchElevenVoices(): Promise<Voice[]> {
           provider: "eleven",
           language: labels.language || labels.accent || "",
           gender: labels.gender || "",
-          note: [v.category, labels.age, labels.descriptive || labels.description]
+          age: labels.age || "",
+          note: [v.category, labels.descriptive || labels.description]
             .filter(Boolean)
             .join(" · ")
             .slice(0, 80),
@@ -71,6 +73,7 @@ export async function GET() {
       provider: v.provider === "typecast" ? "typecast" : "eleven",
       language: v.lang || "",
       gender: v.gender || "",
+      age: "",
       note: v.note || "",
       narration: v.narration === true,
     }));

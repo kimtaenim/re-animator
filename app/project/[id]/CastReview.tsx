@@ -20,9 +20,26 @@ type VoiceOpt = {
   language?: string;
   provider?: string;
   gender?: string;
+  age?: string;
   note?: string;
   narration?: boolean;
 };
+
+// ★캐릭터 설명(그림에서 나온 텍스트)에서 성별을 대충 추정 — 목소리를 그 성별 그룹부터 보여주려고.
+//   확실치 않으면 "" (전체 순서 유지). 하드 필터 아님(다른 성별도 아래 그룹에 다 보임).
+function guessGender(desc: string): "female" | "male" | "" {
+  const t = (desc || "").toLowerCase();
+  if (/(여자|여성|소녀|여인|아가씨|할머니|엄마|누나|언니|딸|female|woman|girl)/.test(t)) return "female";
+  if (/(남자|남성|소년|청년|아저씨|할아버지|아빠|형|오빠|아들|male|\bman\b|boy)/.test(t)) return "male";
+  return "";
+}
+// 목소리 라벨(영문) → 표시용 한글 태그.
+function voiceTags(v: VoiceOpt): string {
+  const g = v.gender === "female" ? "여" : v.gender === "male" ? "남" : "";
+  const a = /young/i.test(v.age || "") ? "젊음" : /old/i.test(v.age || "") ? "노년" : /middle/i.test(v.age || "") ? "중년" : "";
+  const lang = (v.language || "").replace(/^en.*/i, "영어").replace(/^zh.*|chinese/i, "중국어").replace(/^ko.*|korean/i, "한국어").replace(/^ja.*|japanese/i, "일본어");
+  return [g, a, lang, v.note].filter(Boolean).join(" · ");
+}
 type NarratorVoice = { provider: string; id: string; name: string };
 
 // 실사 초상 인종/유형 칩 — [프롬프트용 영문, 표시 라벨]. 판타지(엘프·로봇)도 포함.
@@ -485,21 +502,42 @@ export default function CastReview({
                       className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-0.5 text-xs"
                     >
                       <option value="">🎙 목소리 선택…</option>
-                      {["eleven", "typecast"].map((pv) => {
-                        const list = voices.filter((v) => (v.provider ?? "eleven") === pv);
-                        if (!list.length) return null;
+                      {(() => {
+                        // ★캐릭터 성별(그림 설명서 추정)에 맞는 그룹을 맨 위로. 성별 카테고리로 묶고
+                        //   각 목소리에 성별·나이·언어 표시 → "중국어 가능한 젊은 남자" 식으로 바로 찾음.
+                        const cg = guessGender(c.description || "");
+                        const cats: { key: "female" | "male" | "other"; label: string; match: (v: VoiceOpt) => boolean }[] = [
+                          { key: "female", label: "여성", match: (v) => v.gender === "female" },
+                          { key: "male", label: "남성", match: (v) => v.gender === "male" },
+                          { key: "other", label: "중성·기타", match: (v) => v.gender !== "female" && v.gender !== "male" },
+                        ];
+                        const ordered = cg ? [...cats].sort((a, b) => (a.key === cg ? -1 : b.key === cg ? 1 : 0)) : cats;
+                        const eleven = voices.filter((v) => (v.provider ?? "eleven") === "eleven");
+                        const typecast = voices.filter((v) => v.provider === "typecast");
+                        const opt = (v: VoiceOpt) => {
+                          const tags = voiceTags(v);
+                          return (
+                            <option key={v.id} value={v.id}>
+                              {v.name}
+                              {tags ? ` · ${tags}` : ""}
+                            </option>
+                          );
+                        };
                         return (
-                          <optgroup key={pv} label={pv === "eleven" ? "ElevenLabs" : "Typecast"}>
-                            {list.map((v) => (
-                              <option key={v.id} value={v.id}>
-                                {v.name}
-                                {v.gender ? ` · ${v.gender === "female" ? "여" : v.gender === "male" ? "남" : v.gender}` : ""}
-                                {v.note ? ` · ${v.note}` : ""}
-                              </option>
-                            ))}
-                          </optgroup>
+                          <>
+                            {ordered.map((cat) => {
+                              const list = eleven.filter(cat.match);
+                              if (!list.length) return null;
+                              return (
+                                <optgroup key={cat.key} label={`${cat.label}${cg === cat.key ? " ★이 캐릭터" : ""}`}>
+                                  {list.map(opt)}
+                                </optgroup>
+                              );
+                            })}
+                            {typecast.length > 0 && <optgroup label="Typecast">{typecast.map(opt)}</optgroup>}
+                          </>
                         );
-                      })}
+                      })()}
                     </select>
                   ) : (
                     <input
