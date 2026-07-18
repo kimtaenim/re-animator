@@ -128,6 +128,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       n.has(key) ? n.delete(key) : n.add(key);
       return n;
     });
+  // 4단계 컷별 '연출·세부(⚙)' 펼침 상태 — 전환·후처리줌·프롬프트·자막기본위치·카메라·모션을 평소엔 접어둠.
+  const [advCut, setAdvCut] = useState<Set<string>>(() => new Set());
+  const toggleAdvCut = (id: string) =>
+    setAdvCut((prev) => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
   const [scenePreview, setScenePreview] = useState<string | null>(null); // 씬 미리보기(영상+자막+더빙)
   const [subIdx, setSubIdx] = useState(0); // 미리보기 자막 박스 순차 표시 인덱스(하나씩)
@@ -2681,6 +2689,18 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         </button>
                         <button
                           type="button"
+                          onClick={() => toggleAdvCut(s.id)}
+                          title="연출·세부 — 전환·후처리줌·프롬프트·자막위치·카메라·모션"
+                          className={`rounded border px-2 py-0.5 ${
+                            advCut.has(s.id) || s.cut?.motion || s.cut?.transition || s.fx
+                              ? "border-[var(--accent)] text-[var(--accent)]"
+                              : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                          }`}
+                        >
+                          {advCut.has(s.id) ? "⚙ 연출 접기" : "⚙ 연출·세부"}
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => runDubJob([s.id])}
                           disabled={busy || dubbing}
                           title="이 컷만 더빙(대사·내레이션·효과음) 다시 생성 — 하나만 고쳤을 때"
@@ -2699,6 +2719,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           </button>
                         )}
                       </div>
+                      {advCut.has(s.id) && (<>
                       {/* 전환 — 카메라워크처럼 칩으로. 이 컷 → 다음 컷 사이(5단계 합성에서 적용). */}
                       <div
                         className="flex flex-wrap items-center gap-1"
@@ -2803,8 +2824,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           </button>
                         </div>
                       )}
+                      </>)}
                       {/* 대사·내레이션 통합 편집 — 각 줄에 화자(캐릭터/내레이션) 지정. 3단계와 싱크. */}
                       {dialogueEditor(s)}
+                      {advCut.has(s.id) && (<>
                       {/* 자막 기본위치 — 컷 9분할(3×3). 줄별 지정이 없는 대사·내레이션에 적용. */}
                       <div className="flex items-center gap-2 text-[10px]" title="자막 기본위치 — 줄별(대사 옆 미니 그리드) 지정이 없는 자막에 적용. 얼굴을 피해 9곳 중 선택">
                         <span className="text-[var(--muted)]">자막 기본위치</span>
@@ -2860,6 +2883,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         placeholder="비디오 모션 프롬프트(영문) — 예: slow camera push-in, gentle wind"
                         className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-1 font-mono text-[10px]"
                       />
+                      </>)}
                     </div>
                   </div>
                 );
