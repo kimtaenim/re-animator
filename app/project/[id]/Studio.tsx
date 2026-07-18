@@ -1087,7 +1087,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         ...prev,
         steps: { ...prev.steps, regen: { ...prev.steps.regen, status: "running" } },
       }));
-      setSelForRegen(new Set());
+      // ★선택을 비우지 않는다 — 중지 후 다시 돌리려는데 선택이 사라지면 매번 다시 골라야 함(사용자 지적).
     } catch (e) {
       clearRegenPending(ids);
       setError(e instanceof Error ? e.message : "생성 실패");
