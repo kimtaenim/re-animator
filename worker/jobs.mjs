@@ -674,9 +674,13 @@ export async function runExtract(projectId) {
               s.sourceRegion.xStart,
               s.sourceRegion.xEnd
             );
+            if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
+            // ★이중 OCR 제거: 분할이 이미 풀해상도로 읽어 bubbles 를 채웠으면 다시 안 읽는다(추출 시간
+            //   대폭 절약, 검토한 대사=결과 일관성도 ↑). 경계 바뀐 컷은 저장 라우트가 bubbles 를 비워 재OCR.
+            const hasSplitText = (s.cut.bubbles ?? []).some((b) => (b.text || "").trim());
+            if (!hasSplitText) {
             const own = await readCutTextTiled(png, key, OCR_MODEL);
             tileOk += own.tiledAdded || 0;
-            if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
             // ★ OCR(풀해상도)이 이 컷 대사의 유일 정답. 자기 이미지 안 글자 = own.
             // ★읽는 순서 보존: 밴드를 y 오름차순으로 돌고, 컷 '위' 밴드 글은 컷 안 글보다
             //   앞에, '아래' 밴드 글은 뒤에 둔다(위 문장이 아래로 가는 역전 방지).
@@ -714,6 +718,7 @@ export async function runExtract(projectId) {
             if (sfx) s.cut.sfx = sfx;
             s.cut.textBoxes = own.boxes; // 마스크는 '이 컷 이미지 안' 글자만(흡수 밴드는 이미지에 없음)
             trlOk += (s.cut.bubbles ?? []).filter((b) => (b.translation || "").trim()).length;
+            } // end if(!hasSplitText) — 분할 대사 재사용 시 위 OCR 블록 스킵
             // ── AI 연출: 번역을 읽고 풀 연출안(카메라·길이·전환·동작·줄별 감정·자막위치)을
             //   디폴트로 채운다. ★사용자가 이미 지정한 값은 절대 안 덮는다(미지정 필드만).
             const needCam = !(s.cut.motion || "").trim();

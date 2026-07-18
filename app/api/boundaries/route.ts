@@ -128,7 +128,9 @@ export async function PUT(req: NextRequest) {
       //   파싱하지 않는 필드(bubbles·더빙 audioUrl·narration·sfxAudioUrl·subtitleX/Y·
       //   durationSec·transition·textBoxes)가 추출 이후 G1 재저장으로 사라지지 않게.
       //   경계가 바뀐 컷은 내용이 어차피 낡았으므로 새로 시작(추출이 다시 OCR).
-      cut: old?.cut ? { ...old.cut, ...cut } : cut,
+      // 경계 그대로면 서버 cut 위에 편집만 덮음(bubbles 보존 → 추출이 재OCR 스킵, 속도↑).
+      // 경계 바뀐 컷은 내용이 낡았으니 bubbles 를 비워 추출이 그 컷만 새로 OCR 하게 한다.
+      cut: old?.cut ? { ...old.cut, ...cut } : { ...cut, bubbles: [] },
       originalImage: old?.originalImage,
       regenMode: old?.regenMode,
       generatedImage: old?.generatedImage,
