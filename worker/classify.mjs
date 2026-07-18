@@ -196,38 +196,46 @@ export async function classifyScenes(canvas, fileBuffers, regions, key, model, l
   let totalCost = 0;
   let typed = 0;
 
+  // ★대조표는 순차로 만들고(메모리 안전 — 큰 이미지 동시 디코딩 방지), 분류 API 는 동시에 던진다.
+  //   예전엔 배치를 하나씩 기다려 5배치면 API 지연이 5배 누적(실측 ~72s). 병렬이면 한 배치 시간으로.
+  const batches = [];
   for (let start = 0; start < n; start += BATCH) {
-    const batch = regions.slice(start, start + BATCH);
-    const bn = batch.length;
-    await log?.(`컷 분류 ${start + 1}~${start + bn}/${n}…`);
-    let sheet;
+    batches.push({ start, batch: regions.slice(start, start + BATCH), sheet: null });
+  }
+  for (const b of batches) {
     try {
-      sheet = await buildContactSheet(canvas, fileBuffers, batch, null);
+      b.sheet = await buildContactSheet(canvas, fileBuffers, b.batch, null);
     } catch (e) {
       await log?.(`  대조표 실패(이 구간 미분류): ${e?.message ?? e}`);
-      continue;
-    }
-    const prompt = promptBase.replace(/\{n\}/g, String(bn)).replace(/\{types\}/g, typeLines);
-    try {
-      const res = await callClassify(sheet, prompt, schema, key, model);
-      totalCost += res.cost;
-      let hit = 0;
-      for (const raw of res.cuts) {
-        const li = Number(raw?.n) - 1; // 배치 내 1-base → 0-base
-        if (li >= 0 && li < bn) {
-          const c = normalizeCut(raw, R);
-          out[start + li] = c;
-          if (c.type) {
-            typed++;
-            hit++;
-          }
-        }
-      }
-      await log?.(`  → 응답 ${res.cuts.length}개 · 타입 ${hit}/${bn} (finish=${res.finish})`);
-    } catch (e) {
-      await log?.(`  분류 실패(이 구간 미분류): ${e?.message ?? e}`);
     }
   }
+  await log?.(`컷 분류 ${n}컷 (${batches.length}배치 동시 요청)…`);
+  await Promise.all(
+    batches.map(async (b) => {
+      if (!b.sheet) return;
+      const bn = b.batch.length;
+      const prompt = promptBase.replace(/\{n\}/g, String(bn)).replace(/\{types\}/g, typeLines);
+      try {
+        const res = await callClassify(b.sheet, prompt, schema, key, model);
+        totalCost += res.cost; // 단일 스레드 — await 사이 원자적, 동시 += 안전
+        let hit = 0;
+        for (const raw of res.cuts) {
+          const li = Number(raw?.n) - 1; // 배치 내 1-base → 0-base
+          if (li >= 0 && li < bn) {
+            const c = normalizeCut(raw, R);
+            out[b.start + li] = c; // 배치마다 다른 인덱스 → 충돌 없음
+            if (c.type) {
+              typed++;
+              hit++;
+            }
+          }
+        }
+        await log?.(`  배치 ${b.start + 1}~${b.start + bn}: 타입 ${hit}/${bn} (finish=${res.finish})`);
+      } catch (e) {
+        await log?.(`  분류 실패(${b.start + 1}~): ${e?.message ?? e}`);
+      }
+    })
+  );
 
   try {
     await recordCost({
