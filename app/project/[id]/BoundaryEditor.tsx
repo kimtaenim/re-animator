@@ -510,7 +510,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                   ref={(el) => {
                     cardRefs.current[i] = el;
                   }}
-                  className="flex flex-col overflow-hidden rounded-lg border bg-[var(--panel-2)]"
+                  className="group relative flex h-[280px] flex-col overflow-hidden rounded-lg border bg-[var(--panel-2)] origin-top transition-transform duration-150 hover:z-30 hover:scale-[1.4] hover:overflow-visible hover:shadow-2xl"
                   style={{
                     borderColor: cut.type ? color : "var(--border)",
                     outline: selected === i ? "2px solid #fff" : undefined,
@@ -599,11 +599,10 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                     />
                     {/* 대사 — 내레이션/말풍선 구분 없이 이 컷의 모든 대사 줄을 한 목록으로(원문 + 한국어 번역).
                         내레이션도 대사의 일부(화자가 내레이터일 뿐) — 둘로 안 나눈다. */}
-                    {/* ★말풍선이 정답(다운스트림 더빙·자막이 bubbles 를 씀). 풍선별로 편집 → 반영됨.
-                        평소엔 컴팩트로 클램프 → 그리드 깔끔. 마우스 올리거나 편집(포커스)하면 그 셀만
-                        위·아래·옆으로 커지며 다른 셀 위에 떠서(absolute·z-30) 원문·번역 전부 읽힌다. */}
-                    <div className="group relative min-h-[3.4rem]">
-                      <div className="flex flex-col gap-0.5 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 max-h-[3.4rem] overflow-hidden group-hover:absolute group-hover:left-0 group-hover:top-0 group-hover:z-30 group-hover:w-[300px] group-hover:max-h-none group-hover:overflow-visible group-hover:shadow-xl focus-within:absolute focus-within:left-0 focus-within:top-0 focus-within:z-30 focus-within:w-[300px] focus-within:max-h-none focus-within:overflow-visible focus-within:shadow-xl">
+                    {/* ★말풍선이 정답(다운스트림 더빙·자막이 bubbles 를 씀). 풍선별 원문/번역 세로 스택.
+                        긴 대사는 카드 고정높이에서 잘리고, 카드에 마우스 올리면 카드가 통째로 커지며(아래
+                        카드 className 의 hover:scale) 넘친 대사까지 전부 드러난다. 원문 편집은 bubbles 에 반영. */}
+                    <div className="flex flex-col gap-0.5 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 max-h-[3.4rem] overflow-hidden group-hover:max-h-none group-hover:overflow-visible">
                       <span className="text-[9px] text-[var(--muted)]">대사</span>
                       {(cut.bubbles ?? []).length > 0 ? (
                         (cut.bubbles ?? []).map((b, bi) => (
@@ -635,7 +634,6 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                           )}
                         </>
                       )}
-                      </div>
                     </div>
                     <div className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
                       <span>합병</span>
