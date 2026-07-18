@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProject, saveProject } from "@/lib/projectStore";
 import { CUT_TYPES, TEXT_KINDS, blankCut } from "@/lib/ontology";
-import { EMOTIONS, type CutOntology } from "@/lib/types";
+import { type CutOntology } from "@/lib/types";
+import { cleanBubbles } from "@/lib/cutClean";
 
 export const runtime = "nodejs";
 
 const TYPE_IDS = new Set(CUT_TYPES.map((t) => t.id));
 const TK_IDS = new Set(TEXT_KINDS.map((t) => t.id));
-const EMOTION_IDS = new Set(EMOTIONS.map((e) => e.id));
 
 function cleanCut(raw: unknown): CutOntology {
   const c = blankCut();
@@ -28,37 +28,7 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.narrationAudioUrl === "string") c.narrationAudioUrl = r.narrationAudioUrl; // 더빙 오디오 보존
   if (typeof r.speakerId === "string") c.speakerId = r.speakerId;
   if (Array.isArray(r.bubbles)) {
-    c.bubbles = r.bubbles
-      .filter((b): b is Record<string, unknown> => !!b && typeof b === "object")
-      .map((b) => {
-        const box = b.box && typeof b.box === "object" ? (b.box as Record<string, unknown>) : null;
-        return {
-          text: typeof b.text === "string" ? b.text.slice(0, 400) : "",
-          translation: typeof b.translation === "string" ? b.translation.slice(0, 400) : undefined, // 번역 보존 — 편집 저장 때 안 날아가게
-          speakerId: typeof b.speakerId === "string" ? b.speakerId : b.speakerId === null ? null : undefined,
-          box: box
-            ? {
-                left: Number(box.left) || 0,
-                top: Number(box.top) || 0,
-                right: Number(box.right) || 0,
-                bottom: Number(box.bottom) || 0,
-              }
-            : undefined,
-          audioUrl: typeof b.audioUrl === "string" ? b.audioUrl : undefined, // 더빙 오디오 보존
-          // 이 줄 자막 위치(0~1 중심) — 화자가 번갈아 말할 때 줄마다 지정. 없으면 컷 기본.
-          subtitleX:
-            typeof b.subtitleX === "number" && isFinite(b.subtitleX)
-              ? Math.max(0.05, Math.min(0.95, b.subtitleX))
-              : undefined,
-          subtitleY:
-            typeof b.subtitleY === "number" && isFinite(b.subtitleY)
-              ? Math.max(0.05, Math.min(0.95, b.subtitleY))
-              : undefined,
-          // 감정 연기 id — EMOTIONS 화이트리스트만(ElevenLabs v3 오디오 태그로 변환).
-          emotion: EMOTION_IDS.has(String(b.emotion)) ? String(b.emotion) : undefined,
-        };
-      })
-      .slice(0, 12);
+    c.bubbles = cleanBubbles(r.bubbles); // 번역 포함 화이트리스트(lib/cutClean, 단일 원천·테스트됨)
   }
   if (Array.isArray(r.textBoxes)) {
     c.textBoxes = r.textBoxes
