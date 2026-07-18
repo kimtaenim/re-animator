@@ -113,6 +113,7 @@ export interface CutOntology {
   setting: string; // 장소/배경 한 줄
   objects: string[]; // 핵심 사물
   dialogue: string; // 이 컷 대사 합침(하위호환·표시용). 풍선별은 bubbles 가 정답.
+  dialogueTranslation?: string; // dialogue 의 한국어 번역(G1 미리보기용 — 분류 단계가 채움). 추출 후엔 bubbles.translation 이 정답.
   bubbles?: DialogueBubble[]; // 말풍선 단위 대사+화자. OCR 이 풍선별로 채움.
   narration?: string; // 흡수된 위·아래 나레이션/자막(별도 — OCR 이 안 건드림)
   narrationTranslation?: string; // narration 의 한국어 번역(편집자용 주석). 한국어 원문이면 비움.

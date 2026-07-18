@@ -62,13 +62,14 @@ function buildSchema(typeEnum, textKindEnum) {
               setting: { type: "string" },
               objects: { type: "array", items: { type: "string" } },
               dialogue: { type: "string" },
+              dialogueTranslation: { type: "string" },
               sfx: { type: "string" },
               description: { type: "string" },
               promptDraft: { type: "string" },
             },
             required: [
               "n", "type", "textKind", "characters", "setting",
-              "objects", "dialogue", "sfx", "description", "promptDraft",
+              "objects", "dialogue", "dialogueTranslation", "sfx", "description", "promptDraft",
             ],
           },
         },
@@ -125,6 +126,7 @@ function normalizeCut(raw, R) {
   if (typeof raw.setting === "string") c.setting = raw.setting.slice(0, 200);
   if (Array.isArray(raw.objects)) c.objects = raw.objects.map(String).slice(0, 8);
   if (typeof raw.dialogue === "string") c.dialogue = raw.dialogue.slice(0, 300);
+  if (typeof raw.dialogueTranslation === "string") c.dialogueTranslation = raw.dialogueTranslation.slice(0, 400);
   if (typeof raw.sfx === "string") c.sfx = raw.sfx.slice(0, 120);
   if (typeof raw.description === "string") c.description = raw.description.slice(0, 800);
   if (typeof raw.promptDraft === "string") c.promptDraft = raw.promptDraft.slice(0, 800);

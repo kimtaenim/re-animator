@@ -23,6 +23,7 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.setting === "string") c.setting = r.setting.slice(0, 200);
   if (Array.isArray(r.objects)) c.objects = r.objects.map(String).slice(0, 8);
   if (typeof r.dialogue === "string") c.dialogue = r.dialogue.slice(0, 500);
+  if (typeof r.dialogueTranslation === "string") c.dialogueTranslation = r.dialogueTranslation.slice(0, 400); // 번역 보존
   if (typeof r.narration === "string") c.narration = r.narration.slice(0, 800);
   if (typeof r.narrationSpeakerId === "string") c.narrationSpeakerId = r.narrationSpeakerId;
   if (typeof r.narrationAudioUrl === "string") c.narrationAudioUrl = r.narrationAudioUrl; // 더빙 오디오 보존

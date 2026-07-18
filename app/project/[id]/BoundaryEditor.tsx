@@ -599,6 +599,11 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                       placeholder="대사"
                       className="w-full rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[11px] text-[var(--text)]"
                     />
+                    {(cut.dialogueTranslation || "").trim() && (
+                      <div className="px-1 text-[10px] italic text-cyan-200/80" title="대사 번역(편집 보조) — 추출 후 정확한 번역으로 갱신됨">
+                        역: {cut.dialogueTranslation}
+                      </div>
+                    )}
                     <div className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
                       <span>합병</span>
                       <button
