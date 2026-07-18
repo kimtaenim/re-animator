@@ -33,7 +33,7 @@ import {
 } from "./regen.mjs";
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
-import { readCutText } from "./ocr.mjs";
+import { readCutText, readCutTextTiled } from "./ocr.mjs";
 import { translateScenes } from "./translate.mjs";
 import { synthesize, synthSfx } from "./tts.mjs";
 
@@ -629,6 +629,7 @@ export async function runExtract(projectId) {
     let dirOk = 0; // [진단] AI 연출 성공 컷 수
     let dirCost = 0; // AI 연출 비용 합계(USD)
     let trlOk = 0; // [진단] 번역 채운 줄 수(OCR가 원문과 함께 뽑음)
+    let tileOk = 0; // [진단] 타일 OCR 이 풀이미지가 놓친 컷 안 캡션을 회수한 줄 수
     for (let i = 0; i < ocrTodo.length; i += C) {
       const chunk = ocrTodo.slice(i, i + C);
       await Promise.all(
@@ -642,7 +643,8 @@ export async function runExtract(projectId) {
               s.sourceRegion.xStart,
               s.sourceRegion.xEnd
             );
-            const own = await readCutText(png, key, OCR_MODEL);
+            const own = await readCutTextTiled(png, key, OCR_MODEL);
+            tileOk += own.tiledAdded || 0;
             if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
             // ★ OCR(풀해상도)이 이 컷 대사의 유일 정답. 자기 이미지 안 글자 = own.
             // ★읽는 순서 보존: 밴드를 y 오름차순으로 돌고, 컷 '위' 밴드 글은 컷 안 글보다
@@ -724,6 +726,9 @@ export async function runExtract(projectId) {
     await log(`[진단] 내레이션 밴드 OCR: ${trHit}/${trTotal} 성공(글자 잡힘) — 0/0이면 밴드가 분할서 안 넘어온 것`);
     if (trlOk > 0) {
       await log(`[진단] 대사 번역: ${trlOk}줄 (OCR가 원문과 함께 뽑음 — 별도 비용 없음, 원문·더빙은 그대로)`);
+    }
+    if (tileOk > 0) {
+      await log(`[진단] 타일 OCR 회수: ${tileOk}줄 — 풀이미지가 놓친 컷 안 캡션(테두리 없는 내레이션 등)`);
     }
     if (dirOk > 0) {
       await log(`[진단] AI 연출: ${dirOk}컷에 카메라·감정 디폴트 채움(Claude, $${dirCost.toFixed(3)})`);
@@ -1762,7 +1767,7 @@ export async function runSplitCut(projectId, payload) {
     const cut = cuts[k] ?? { type: null, dialogue: "", sfx: "" };
     if (key) {
       try {
-        const ocr = await readCutText(png, key, VLM_MODEL);
+        const ocr = await readCutTextTiled(png, key, VLM_MODEL);
         cut.bubbles = mergeBubbleSpeakers(ocr.bubbles, cut.bubbles, cut.speakerId);
         cut.dialogue = ocr.dialogue;
         if (ocr.sfx) cut.sfx = ocr.sfx;
@@ -1845,7 +1850,7 @@ export async function runMergeCut(projectId, payload) {
   let ocr = null;
   if (key) {
     try {
-      ocr = await readCutText(png, key, VLM_MODEL);
+      ocr = await readCutTextTiled(png, key, VLM_MODEL);
     } catch (e) {
       await log(`글씨읽기 실패: ${String(e?.message ?? e).slice(0, 100)}`);
     }

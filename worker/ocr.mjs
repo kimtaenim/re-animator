@@ -151,3 +151,70 @@ export async function readCutText(pngBuf, key, model = "gpt-4o") {
     cost: costUsd(model, d.usage),
   };
 }
+
+// ★타일 OCR — 풀이미지 한 장으로 읽으면 gpt-4o 가 컷 '안'의 테두리 없는 내레이션 캡션
+//   (그림 위에 얹힌 흰 글씨 등)을 자주 건너뛴다(VLM 리콜 한계 — 검증된 실측 누락). 컷을 가로 띠로
+//   겹치게 잘라 각 조각을 따로 OCR 하면, 캡션이 조각의 큰 비중을 차지해 크게 확대되어 안 놓친다.
+//   풀이미지 결과에 '빠진 줄만' 더한다(기존 대사·순서·마스크 안 흔드는 순수 안전망). 회수분은
+//   마스크 박스에도 넣어 재생성 때 지워지게 한다. 반환은 readCutText 와 동형 + tiledAdded(회수 줄 수).
+//   비용: 컷당 OCR 콜이 (1 + STRIPS)배. 기본 STRIPS=2 → 대략 3배(짧은 컷은 스킵). env 로 조절.
+export async function readCutTextTiled(pngBuf, key, model = "gpt-4o") {
+  const base = await readCutText(pngBuf, key, model);
+  const STRIPS = Math.max(1, Number(process.env.OCR_TILE_STRIPS || 2));
+  const MIN_H = Number(process.env.OCR_TILE_MIN_H || 500); // 이보다 낮은 컷은 이미 캡션이 커서 스킵(콜 절약)
+  let H = 0;
+  let W = 0;
+  try {
+    const m = await sharp(pngBuf).metadata();
+    H = m.height || 0;
+    W = m.width || 0;
+  } catch {
+    /* 메타 실패 시 타일 스킵 */
+  }
+  if (STRIPS < 2 || !W || H < MIN_H) return { ...base, tiledAdded: 0 };
+
+  const norm = (t) => String(t || "").replace(/\s+/g, "").trim();
+  const seen = new Set(base.bubbles.map((b) => norm(b.text)).filter(Boolean));
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+  const stripH = Math.ceil(H / STRIPS);
+  const OV = Math.round(stripH * Number(process.env.OCR_TILE_OVERLAP || 0.22)); // 겹침 — 경계에 걸친 캡션 보호
+  const added = []; // 회수된 bubble(풀좌표 box)
+  const addedBoxes = []; // 회수 캡션의 마스크 박스(풀좌표)
+  let cost = base.cost;
+
+  for (let i = 0; i < STRIPS; i++) {
+    const top = Math.max(0, i * stripH - OV);
+    const bottom = Math.min(H, (i + 1) * stripH + OV);
+    if (bottom - top < 40) continue;
+    let strip;
+    try {
+      strip = await sharp(pngBuf).extract({ left: 0, top, width: W, height: bottom - top }).png().toBuffer();
+    } catch {
+      continue;
+    }
+    let r;
+    try {
+      r = await readCutText(strip, key, model); // 내부서 업스케일 → 이 띠가 크게 확대돼 캡션 또렷
+    } catch {
+      continue; // 한 조각 실패해도 base 는 지킨다
+    }
+    cost += r.cost;
+    const span = bottom - top;
+    const toFull = (v) => clamp01((top + v * span) / H); // 조각 로컬 y(0~1) → 풀이미지 y(0~1)
+    for (const b of r.bubbles) {
+      const kk = norm(b.text);
+      if (!kk || seen.has(kk)) continue; // 풀이미지·다른 조각이 이미 읽은 줄은 스킵(중복 제거)
+      seen.add(kk);
+      const box = { left: b.box.left, right: b.box.right, top: toFull(b.box.top), bottom: toFull(b.box.bottom) };
+      added.push({ text: b.text, ...(b.translation ? { translation: b.translation } : {}), box });
+      if (box.right > box.left && box.bottom > box.top) addedBoxes.push(box);
+    }
+  }
+
+  if (!added.length) return { ...base, tiledAdded: 0, cost };
+  // 회수분 합쳐 y(top) 오름차순 정렬 → 읽기순서(위→아래) 보존. dialogue 재구성.
+  const bubbles = [...base.bubbles, ...added].sort((a, b) => (a.box?.top ?? 0) - (b.box?.top ?? 0));
+  const dialogue = bubbles.map((b) => (b.text || "").trim()).filter(Boolean).join("\n").slice(0, 500);
+  const boxes = [...base.boxes, ...addedBoxes].slice(0, 24); // 회수 캡션도 마스크되게(재생성 때 지움)
+  return { bubbles, dialogue, sfx: base.sfx, boxes, cost, tiledAdded: added.length };
+}
