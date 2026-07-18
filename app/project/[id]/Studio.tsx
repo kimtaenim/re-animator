@@ -654,6 +654,18 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }, 700);
   }
 
+  // ★대사(말풍선)를 다른 씬으로 이동 — 4단계 연출 보고서에서 드래그앤드롭(앞/뒤 씬으로).
+  //   OCR 이 대사를 옆 컷에 붙였을 때 사람이 옮겨 바로잡음. 출발·도착 두 컷 모두 저장.
+  function moveBubbleToScene(srcId: string, srcIdx: number, targetId: string) {
+    if (!srcId || srcId === targetId || srcIdx < 0) return;
+    const src = project.scenes.find((s) => s.id === srcId);
+    const bub = src?.cut?.bubbles?.[srcIdx];
+    if (!bub) return;
+    const target = project.scenes.find((s) => s.id === targetId);
+    updateCut(srcId, { bubbles: (src?.cut?.bubbles ?? []).filter((_, i) => i !== srcIdx) });
+    updateCut(targetId, { bubbles: [...(target?.cut?.bubbles ?? []), bub] });
+  }
+
   // 읽기순(order) 이웃 컷. dir=prev(위)/next(아래). 양끝이면 null.
   function adjacentScene(sceneId: string, dir: "prev" | "next") {
     const sorted = [...project.scenes].sort((a, b) => a.order - b.order);
@@ -2518,7 +2530,19 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         const dubChars = dubText.replace(/\s+/g, "").length;
                         const estSec = dubChars > 0 ? Math.max(2, Math.min(8, Math.round(dubChars / 5))) : s.cut?.type === "transition" ? 1.5 : 1;
                         return (
-                          <tr key={s.id} className="border-t border-[var(--border)] align-top">
+                          <tr
+                            key={s.id}
+                            className="border-t border-[var(--border)] align-top"
+                            onDragOver={(e) => {
+                              if (e.dataTransfer.types.includes("application/x-bubble")) e.preventDefault(); // 대사 드롭 허용
+                            }}
+                            onDrop={(e) => {
+                              try {
+                                const d = JSON.parse(e.dataTransfer.getData("application/x-bubble") || "{}");
+                                if (d.srcId) moveBubbleToScene(d.srcId, Number(d.srcIdx), s.id);
+                              } catch {}
+                            }}
+                          >
                             <td className="p-1">
                               {s.generatedImage && (
                                 <input type="checkbox" checked={selForVideo.has(s.id)} onChange={() => toggleVideoSel(s.id)} title="확정 — 이 컷을 영상 생성 대상에 포함" />
@@ -2537,7 +2561,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                               ) : (
                                 <div className="flex flex-col gap-1">
                                   {bubs.map((b, bi) => (
-                                    <div key={bi} className="flex flex-wrap items-center gap-1">
+                                    <div
+                                      key={bi}
+                                      draggable
+                                      onDragStart={(e) => {
+                                        e.dataTransfer.setData(
+                                          "application/x-bubble",
+                                          JSON.stringify({ srcId: s.id, srcIdx: (s.cut?.bubbles ?? []).indexOf(b) })
+                                        );
+                                        e.dataTransfer.effectAllowed = "move";
+                                      }}
+                                      title="드래그해서 앞/뒤 씬으로 옮김"
+                                      className="flex cursor-grab flex-wrap items-center gap-1 active:cursor-grabbing"
+                                    >
+                                      <span className="text-[var(--muted)]">⠿</span>
                                       <span className="text-[var(--text)]" title={b.text}>“{b.text.slice(0, 40)}”</span>
                                       {(b.translation || "").trim() && (
                                         <span className="font-medium text-[var(--accent)]">· {b.translation!.slice(0, 40)}</span>
