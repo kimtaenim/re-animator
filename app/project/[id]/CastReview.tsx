@@ -62,10 +62,9 @@ function bubblesOf(s: Scene): { idx: number; text: string; translation?: string 
   const legacy = s.cut?.dialogue?.trim();
   return legacy ? [{ idx: -1, text: legacy }] : [];
 }
-const narrationOf = (s: Scene) => (s.cut?.narration ?? "").trim();
-// 이 컷에 화자를 붙일 게 하나라도 있나(대사 or 나레이션).
-const hasSpeakable = (s: Scene) => bubblesOf(s).length > 0 || narrationOf(s) !== "";
-// 화자 맵 키: `${sceneId}#${idx}`(idx=-1 레거시), `${sceneId}#nar`(나레이션). 초기값=기존 화자.
+// 이 컷에 화자를 붙일 게 하나라도 있나 — 내레이션도 화자 null 말풍선이라 bubblesOf 에 포함됨.
+const hasSpeakable = (s: Scene) => bubblesOf(s).length > 0;
+// 화자 맵 키: `${sceneId}#${idx}`(idx=-1 레거시). 내레이션은 별도 키 없음 — 그냥 화자=내레이터인 줄.
 function initSpeakerMap(scenes: Scene[]): Record<string, string> {
   const m: Record<string, string> = {};
   for (const s of scenes) {
@@ -77,7 +76,6 @@ function initSpeakerMap(scenes: Scene[]): Record<string, string> {
     } else if (s.cut?.dialogue?.trim()) {
       m[`${s.id}#-1`] = s.cut.speakerId ?? "";
     }
-    if (narrationOf(s) !== "") m[`${s.id}#nar`] = s.cut?.narrationSpeakerId ?? "";
   }
   return m;
 }
@@ -787,7 +785,7 @@ export default function CastReview({
           <h3 className="mb-2 text-sm font-semibold">
             대사 · 화자{" "}
             <span className="font-normal text-[var(--muted)]">
-              — 말풍선·나레이션마다 누가 읽는지 (더빙용)
+              — 대사 줄마다 누가 읽는지 (화자를 '내레이터'로 두면 내레이션, 더빙용)
             </span>
           </h3>
           <div className="max-h-[45vh] space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2">
@@ -818,7 +816,7 @@ export default function CastReview({
                             onChange={(e) => setSpeaker(key, e.target.value)}
                             className="shrink-0 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5"
                           >
-                            <option value="">나레이션/미상</option>
+                            <option value="">🎙 내레이터</option>
                             {cast.map((c) => (
                               <option key={c.id} value={c.id}>
                                 {optLabel(c)}
@@ -837,41 +835,6 @@ export default function CastReview({
                         </div>
                       );
                     })}
-                    {narrationOf(s) !== "" &&
-                      (() => {
-                        const key = `${s.id}#nar`;
-                        const sc = cast.find((c) => c.id === speakerMap[key]);
-                        return (
-                          <div className="flex items-center gap-2 text-xs">
-                            {sc ? (
-                              <Thumb sceneId={repScene(sc)} cls="h-6 w-6 shrink-0" />
-                            ) : (
-                              <span className="h-6 w-6 shrink-0" />
-                            )}
-                            <span className="shrink-0 rounded bg-[var(--panel)] px-1 text-[10px] text-[var(--muted)]">
-                              나레이션
-                            </span>
-                            <select
-                              value={speakerMap[key] ?? ""}
-                              onChange={(e) => setSpeaker(key, e.target.value)}
-                              className="shrink-0 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5"
-                            >
-                              <option value="">나레이터/미상</option>
-                              {cast.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {optLabel(c)}
-                                </option>
-                              ))}
-                            </select>
-                            <span className="min-w-0 flex-1 truncate italic text-[var(--muted)]" title={narrationOf(s)}>
-                              ({narrationOf(s)})
-                              {(s.cut?.narrationTranslation || "").trim() && (
-                                <span title="편집·화자 파악용 번역 (더빙은 원문 그대로)"> · 역: {s.cut?.narrationTranslation}</span>
-                              )}
-                            </span>
-                          </div>
-                        );
-                      })()}
                   </div>
                 </div>
               );

@@ -742,7 +742,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     };
     const speakerSelect = (value: string | null | undefined, onPick: (v: string | null) => void) => (
       <select value={value ?? ""} onChange={(e) => onPick(e.target.value || null)} className={selCls} title="이 줄의 화자 — 캐릭터(입 움직임)/내레이션(입 안 움직임)/효과음(소리 생성)">
-        <option value="">내레이션</option>
+        <option value="">🎙 내레이터</option>
         <option value={SFX_SPEAKER}>효과음</option>
         {cast.map((c) => (
           <option key={c.id} value={c.id}>
@@ -1380,8 +1380,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY, tr: (b.translation || "").trim() || undefined });
       }
     else if (cut?.dialogue?.trim()) units.push({ text: cut.dialogue.trim() });
-    const narTr = (cut?.narrationTranslation || "").trim() || undefined;
-    if (cut?.narration?.trim()) for (const seg of cut.narration.split(/\n\s*\n/)) { const t = seg.trim(); if (t) units.push({ text: t, tr: narTr }); }
+    // 내레이션은 별개가 아니라 화자=내레이터인 말풍선 → 위 bubbles 루프가 이미 포함.
     return units;
   }
   // 자막 세로 중심 비율(0=위,1=아래) — compose 의 subtitleCenterY 와 동일 규칙(미리보기==결과 싱크).
@@ -2215,8 +2214,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <span className="font-medium text-[var(--muted)]">🎭 목소리</span>
               {/* 나레이터(내레이션 목소리) — 캐릭터와 같은 자리에서 지정(캐스팅 화면과 싱크) */}
               <span className="flex items-center gap-1">
-                <span className="max-w-[90px] truncate font-medium" title="내레이션(화자 없는 줄)을 읽는 목소리">
-                  📖 나레이션
+                <span className="max-w-[90px] truncate font-medium" title="내레이터(화자를 '내레이터'로 둔 줄)를 읽는 목소리">
+                  📖 내레이터
                 </span>
                 <select
                   value={project.narratorVoice?.id ?? ""}
@@ -2428,7 +2427,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                                       <select
                                         value={b.speakerId ?? ""}
                                         onChange={(e) => {
-                                          const v = e.target.value || null; // "" = 나레이션/미상
+                                          const v = e.target.value || null; // "" = 내레이터
                                           const nb = (s.cut?.bubbles ?? []).map((x) => (x === b ? { ...x, speakerId: v } : x));
                                           updateCut(s.id, { bubbles: nb });
                                         }}
@@ -2437,7 +2436,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                                         }`}
                                         title="화자 — 자네가 만화·대사 보고 자동 분류. 틀리면 여기서 고침"
                                       >
-                                        <option value="">🎙 나레이션/미상</option>
+                                        <option value="">🎙 내레이터</option>
                                         {(project.cast ?? []).map((c) => (
                                           <option key={c.id} value={c.id}>{c.label}</option>
                                         ))}
@@ -2562,7 +2561,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   .filter((c): c is NonNullable<typeof c> => !!c);
                 const speakerLabel = spkChars.length
                   ? spkChars.map((c) => c.label).join(", ")
-                  : "나레이션/미상";
+                  : "내레이터";
                 const voiceLabel = spkChars.map((c) => c.voiceName || c.voice).filter(Boolean).join(", ");
                 // 예상 영상 길이(초). 우선순위: 지정(durationSec) → 대사 글자수 → 무대사
                 // 장면전환 4s → 그 외 2s. (worker estimateVideoSeconds 와 동일 규칙)

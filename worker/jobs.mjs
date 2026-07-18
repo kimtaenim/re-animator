@@ -34,7 +34,6 @@ import {
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { readCutText } from "./ocr.mjs";
-import { translateTexts } from "./translate.mjs";
 import { synthesize, synthSfx } from "./tts.mjs";
 
 // 만화 효과음(한글 의성어) → ElevenLabs Sound Effects 용 짧은 영어 사운드 묘사. 실패 시 원문.
@@ -282,6 +281,29 @@ function mergeBubbleSpeakers(newBubbles, oldBubbles, legacySpeakerId) {
     bubbles[0].speakerId = legacySpeakerId;
   }
   return bubbles;
+}
+// ★내레이션은 '별개'가 아니라 화자=내레이터인 대사 줄일 뿐(사용자 지시). 레거시 cut.narration
+//   문자열을 말풍선(speakerId=narrationSpeakerId ?? null = 내레이터)으로 흡수하고 분리 필드는 비운다.
+//   → 이후 더빙·합성·자막이 전부 bubbles 한 경로로만 흐른다(이중 처리·UI 분리 제거).
+function normalizeNarration(cut) {
+  if (!cut) return;
+  const nar = (cut.narration || "").trim();
+  if (!nar) return;
+  cut.bubbles = cut.bubbles ?? [];
+  const norm = (t) => String(t || "").replace(/\s+/g, "").trim();
+  const already = cut.bubbles.some((b) => b.speakerId == null && norm(b.text) === norm(nar));
+  if (!already) {
+    cut.bubbles.push({
+      text: nar,
+      speakerId: cut.narrationSpeakerId ?? null, // null = 기본 내레이터
+      ...(cut.narrationTranslation ? { translation: cut.narrationTranslation } : {}),
+      ...(cut.narrationAudioUrl ? { audioUrl: cut.narrationAudioUrl } : {}),
+    });
+  }
+  cut.narration = "";
+  delete cut.narrationTranslation;
+  delete cut.narrationSpeakerId;
+  delete cut.narrationAudioUrl;
 }
 import { loadSplitConfig } from "./config.mjs";
 import { directCut, CAMERA_PROMPTS } from "./director.mjs";
@@ -597,8 +619,7 @@ export async function runExtract(projectId) {
     let trHit = 0;
     let dirOk = 0; // [진단] AI 연출 성공 컷 수
     let dirCost = 0; // AI 연출 비용 합계(USD)
-    let trlOk = 0; // [진단] 번역 채운 줄 수(외국어 원문 → 한국어 주석)
-    let trlCost = 0; // 번역 비용 합계(USD)
+    let trlOk = 0; // [진단] 번역 채운 줄 수(OCR가 원문과 함께 뽑음)
     for (let i = 0; i < ocrTodo.length; i += C) {
       const chunk = ocrTodo.slice(i, i + C);
       await Promise.all(
@@ -651,14 +672,6 @@ export async function runExtract(projectId) {
             if (sfx) s.cut.sfx = sfx;
             s.cut.textBoxes = own.boxes; // 마스크는 '이 컷 이미지 안' 글자만(흡수 밴드는 이미지에 없음)
             trlOk += (s.cut.bubbles ?? []).filter((b) => (b.translation || "").trim()).length;
-            // 레거시 내레이션 문자열(별도 필드)도 번역 — 대부분 bubbles 로 흡수되지만 있으면 채움.
-            if ((s.cut.narration || "").trim() && !(s.cut.narrationTranslation || "").trim()) {
-              try {
-                const { translations, cost: nc } = await translateTexts([s.cut.narration], key);
-                if (translations[0]) s.cut.narrationTranslation = translations[0];
-                trlCost += nc;
-              } catch {}
-            }
             // ── AI 연출: 번역을 읽고 풀 연출안(카메라·길이·전환·동작·줄별 감정·자막위치)을
             //   디폴트로 채운다. ★사용자가 이미 지정한 값은 절대 안 덮는다(미지정 필드만).
             const needCam = !(s.cut.motion || "").trim();
@@ -719,6 +732,7 @@ export async function runExtract(projectId) {
     }
   }
 
+  for (const s of scenes) normalizeNarration(s.cut); // 레거시 내레이션 문자열 → 내레이터 말풍선으로 통일
   const p2 = await getProject(projectId);
   if (!p2) throw new Error("프로젝트가 사라졌어요");
   p2.scenes = scenes;
@@ -1533,6 +1547,7 @@ export async function runDub(projectId, payload) {
   for (const s of scenes) {
     const cut = s.cut;
     if (!cut) continue;
+    normalizeNarration(cut); // 레거시 내레이션 문자열 → 내레이터 말풍선(분리 경로 제거)
     let bubs = cut.bubbles ?? [];
     // ★말풍선이 없고 dialogue(한 줄 대사)만 있으면 그걸 단일 말풍선으로 승격 — 예전엔 dialogue 를
     //   무시해서 "대사 없음"으로 실패했음. 승격해두면 더빙·미리보기가 말풍선으로 일관된다.
@@ -1547,11 +1562,10 @@ export async function runDub(projectId, payload) {
       if (bubs[i].speakerId === "__sfx__") {
         units.push({ s, kind: "sfx", idx: i, text, voice: "__sfx__" }); // 효과음 줄 → 소리 생성
       } else {
+        // 화자 null = 내레이터. 캐릭터 대사·내레이션 모두 이 한 경로로만 더빙된다.
         units.push({ s, kind: "bubble", idx: i, text, voice: resolve(bubs[i].speakerId), emotion: bubs[i].emotion });
       }
     }
-    const nar = (cut.narration || "").trim();
-    if (nar) units.push({ s, kind: "nar", idx: -1, text: nar, voice: resolve(cut.narrationSpeakerId ?? null) });
   }
   if (!units.length) throw new Error("더빙할 대사·내레이션이 없어요");
 
@@ -1582,10 +1596,8 @@ export async function runDub(projectId, payload) {
             buf,
             { access: "public", contentType, addRandomSuffix: false }
           );
-          if (u.kind === "nar") {
-            u.s.cut.narrationAudioUrl = url;
-          } else if (u.s.cut?.bubbles?.[u.idx]) {
-            u.s.cut.bubbles[u.idx].audioUrl = url; // 대사·효과음 줄 모두 말풍선 audioUrl 에
+          if (u.s.cut?.bubbles?.[u.idx]) {
+            u.s.cut.bubbles[u.idx].audioUrl = url; // 대사·내레이션·효과음 줄 모두 말풍선 audioUrl 에
           }
           ok++;
         } catch (e) {

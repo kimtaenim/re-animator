@@ -89,9 +89,24 @@ function targetDims(project) {
 const FADES_OUT = new Set(["fadeout", "black", "dissolve"]);
 const FADES_IN = new Set(["fadein", "black", "dissolve"]);
 
+// ★내레이션은 화자=내레이터인 말풍선일 뿐. 레거시 cut.narration 문자열을 말풍선으로 흡수해
+//   합성이 bubbles 한 경로로만 자막·오디오를 만들게 한다(별도 내레이션 분기 제거).
+function normalizeNarration(cut) {
+  if (!cut) return;
+  const nar = (cut.narration || "").trim();
+  if (!nar) return;
+  cut.bubbles = cut.bubbles ?? [];
+  const norm = (t) => String(t || "").replace(/\s+/g, "").trim();
+  if (!cut.bubbles.some((b) => b.speakerId == null && norm(b.text) === norm(nar))) {
+    cut.bubbles.push({ text: nar, speakerId: cut.narrationSpeakerId ?? null, ...(cut.narrationAudioUrl ? { audioUrl: cut.narrationAudioUrl } : {}) });
+  }
+  cut.narration = "";
+}
+
 // 이 컷의 '오디오 유닛'(재생 순서) — 말풍선(대사·내레이션·효과음) audioUrl + 그 자막 텍스트.
 // sx/sy = 이 줄의 자막 위치(0~1 중심). 화자가 번갈아 말하면 줄마다 다르게 지정됨.
 function audioUnits(cut) {
+  normalizeNarration(cut);
   const units = [];
   for (const b of cut?.bubbles ?? []) {
     if (b.audioUrl)
@@ -102,14 +117,12 @@ function audioUnits(cut) {
         sy: b.subtitleY,
       });
   }
-  if (cut?.narrationAudioUrl && (cut?.narration || "").trim()) {
-    units.push({ audioUrl: cut.narrationAudioUrl, subText: cut.narration.trim() });
-  }
   return units;
 }
 
 // 더빙 없는 컷의 자막 유닛(영상 길이에 비례 배치용) — { text, sx, sy }.
 function subtitleUnits(cut) {
+  normalizeNarration(cut);
   const units = [];
   if (cut?.bubbles?.length) {
     for (const b of cut.bubbles) {
@@ -119,12 +132,6 @@ function subtitleUnits(cut) {
     }
   } else if (cut?.dialogue?.trim()) {
     units.push({ text: cut.dialogue.trim() });
-  }
-  if (cut?.narration?.trim()) {
-    for (const seg of cut.narration.split(/\n\s*\n/)) {
-      const t = seg.trim();
-      if (t) units.push({ text: t });
-    }
   }
   return units;
 }
