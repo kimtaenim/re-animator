@@ -573,37 +573,30 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                       rows={2}
                       className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[11px] leading-tight text-[var(--text)]"
                     />
-                    {/* 분할이 미리 읽은 대사(내레이션 포함 — 내레이션도 대사다) — '처음부터' 보이게. */}
-                    {(cut.bubbles?.length ?? 0) > 0 && (
-                      <div
-                        className="flex flex-col gap-0.5 rounded border border-cyan-300/40 bg-cyan-400/10 px-1 py-0.5"
-                        title="이 컷의 대사(내레이션 포함) — 추출(2단계) 후 대사 편집기에서 화자 지정·수정"
-                      >
-                        <span className="text-[9px] text-cyan-300/90">대사 {cut.bubbles!.length}줄</span>
-                        {cut.bubbles!.slice(0, 3).map((b, bi) => (
-                          <span key={bi} className="truncate text-[10px]" title={b.text}>
+                    {/* 대사 — 내레이션/말풍선 구분 없이 이 컷의 모든 대사 줄을 한 목록으로(원문 + 역:).
+                        내레이션도 대사의 일부(화자가 내레이터일 뿐) — 둘로 안 나눈다. */}
+                    <div className="flex flex-col gap-0.5 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5">
+                      <span className="text-[9px] text-[var(--muted)]">대사</span>
+                      <input
+                        value={cut.dialogue}
+                        onChange={(e) => setCutField(i, "dialogue", e.target.value)}
+                        placeholder="대사 (직접 편집)"
+                        className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 text-[11px] text-[var(--text)]"
+                      />
+                      {(cut.dialogueTranslation || "").trim() && (
+                        <div className="px-0.5 text-[10px] italic text-cyan-200/80">역: {cut.dialogueTranslation}</div>
+                      )}
+                      {(cut.bubbles ?? []).map((b, bi) =>
+                        (b.text || "").trim() ? (
+                          <div key={bi} className="px-0.5 text-[10px]" title={b.text}>
                             {b.text}
                             {(b.translation || "").trim() && (
                               <span className="italic text-cyan-200/70"> · 역: {b.translation}</span>
                             )}
-                          </span>
-                        ))}
-                        {cut.bubbles!.length > 3 && (
-                          <span className="text-[9px] text-[var(--muted)]">+{cut.bubbles!.length - 3}줄</span>
-                        )}
-                      </div>
-                    )}
-                    <input
-                      value={cut.dialogue}
-                      onChange={(e) => setCutField(i, "dialogue", e.target.value)}
-                      placeholder="대사"
-                      className="w-full rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 text-[11px] text-[var(--text)]"
-                    />
-                    {(cut.dialogueTranslation || "").trim() && (
-                      <div className="px-1 text-[10px] italic text-cyan-200/80" title="대사 번역(편집 보조) — 추출 후 정확한 번역으로 갱신됨">
-                        역: {cut.dialogueTranslation}
-                      </div>
-                    )}
+                          </div>
+                        ) : null
+                      )}
+                    </div>
                     <div className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
                       <span>합병</span>
                       <button
