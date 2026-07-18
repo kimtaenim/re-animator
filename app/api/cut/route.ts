@@ -77,6 +77,7 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.subtitleX === "number" && isFinite(r.subtitleX)) {
     c.subtitleX = Math.max(0.05, Math.min(0.95, r.subtitleX)); // 가로 중심 비율
   }
+  if (r.noCastRef === true) c.noCastRef = true; // 재생성 시 캐스팅 정본 참고 끄기(피·변신 등 특수 상태 컷)
   c.confirmed = r.confirmed === true;
   return c;
 }

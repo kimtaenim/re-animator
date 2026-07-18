@@ -38,7 +38,7 @@ function frameDesc(project) {
 
 // ★ 목적: 원화에 최대한 가깝게. 묘사 기반 재해석이 아니라 '충실 재현 + 글씨 제거 +
 // 크기 맞춤'. 화풍 지정(stylePrompt)이 있을 때만 덧붙인다.
-export function buildRegenPrompt(scene, project) {
+export function buildRegenPrompt(scene, project, nRefs = 0) {
   const cut = scene.cut ?? {};
   let p =
     "Reproduce this comic panel image faithfully. Keep the exact same artwork, characters, faces, poses, composition, colors and line style as the input — do not redraw, restyle, or reinterpret. " +
@@ -50,9 +50,16 @@ export function buildRegenPrompt(scene, project) {
   // ★ 목표 프레임을 꽉 채워라 — 컷 모양이 달라도 배경을 자연스럽게 확장해 채우되
   // 주요 인물·피사체는 왜곡 없이 충실히. 모든 출력이 같은 프레임 크기.
   p += ` Compose the result to completely fill ${frameDesc(project)}, edge to edge. If the source panel has a different shape (e.g. a tall vertical webtoon panel), naturally extend the background and setting to fill the whole frame — do NOT stretch, squash, or distort the subject; keep characters and drawing faithful, placed sensibly within the frame. There must be NO black bars, white space, empty margins, borders, vignette, or gradient fade at any edge — the entire frame is finished illustration. Every output must share this exact same frame size.`;
+  // ★캐스팅 정본 레퍼런스 — 인물 '정체성/디자인'만 일관되게, 이 컷의 '상태'(피·상처·표정 등)는 그대로.
+  if (nRefs > 0)
+    p +=
+      " The additional reference image(s) show the CANONICAL look of the character(s) in this panel (the project's character ontology). " +
+      "Keep each character's face structure, hairstyle, outfit design and colors CONSISTENT with those references. " +
+      "BUT reproduce THIS panel's own state exactly as drawn — blood, wounds, dirt, sweat, tears, bruises, expression, damage, lighting and pose stay as in this panel. " +
+      "Do NOT clean up, neutralize, or override this panel's state with the reference; the references are ONLY for base identity and design.";
   const style = String(project.stylePrompt || "").trim();
   if (style) p += ` Style note: ${style}.`;
-  return p.slice(0, 1400);
+  return p.slice(0, 1600);
 }
 
 // 프로젝트 비율의 '정확한' 최종 크기(gpt-image-1 3종 크기와 별개 — 진짜 16:9 등).
@@ -85,13 +92,22 @@ async function downscaleForApi(buf, maxSide = 1536) {
 }
 
 // 원본 컷 이미지 버퍼 + 씬 → 재생성 이미지 buf (+비용). 실패 시 throw.
-export async function regenScene(scene, imgBuf, project, key, model) {
+export async function regenScene(scene, imgBuf, project, key, model, refBufs = []) {
   const [W, H] = reqSize(project, model);
   const img = await downscaleForApi(imgBuf); // ★큰 원본을 그대로 올리면 동시 여러 개서 OOM — 입력만 축소
   const form = new FormData();
   form.append("model", model);
-  form.append("image", new Blob([img], { type: "image/png" }), "cut.png");
-  form.append("prompt", buildRegenPrompt(scene, project));
+  // ★캐스팅 정본 레퍼런스가 있으면 멀티이미지(image[]) — 첫째=이 컷, 이후=인물 정본(정체성 고정).
+  if (refBufs.length) {
+    form.append("image[]", new Blob([img], { type: "image/png" }), "cut.png");
+    for (let i = 0; i < refBufs.length; i++) {
+      const rb = await downscaleForApi(refBufs[i], 1024);
+      form.append("image[]", new Blob([rb], { type: "image/png" }), `ref${i}.png`);
+    }
+  } else {
+    form.append("image", new Blob([img], { type: "image/png" }), "cut.png");
+  }
+  form.append("prompt", buildRegenPrompt(scene, project, refBufs.length));
   form.append("size", `${W}x${H}`);
   form.append("n", "1");
   form.append("quality", REGEN_QUALITY);

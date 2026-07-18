@@ -133,6 +133,7 @@ export interface CutOntology {
   subtitlePos?: "auto" | "top" | "middle" | "bottom"; // (레거시) 자막 위치 프리셋
   subtitleY?: number; // 자막 세로 중심(0=위,1=아래). 있으면 subtitlePos보다 우선. 컷별 9분할 수동
   subtitleX?: number; // 자막 가로 중심(0=왼쪽,1=오른쪽). 컷별 9분할 수동. 기본 0.5(중앙)
+  noCastRef?: boolean; // 재생성 시 캐스팅 정본 참고 끄기(피·변신 등 특수 상태 컷 — 정본이 상태를 덮지 않게)
   confirmed: boolean; // 사람이 G1 에서 타입 확정했는지
 }
 

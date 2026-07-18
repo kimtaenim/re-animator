@@ -1250,8 +1250,31 @@ export async function runRegen(projectId, payload) {
             }
           } else {
             const imgBuf = await download(s.originalImage);
-            const gen = mode === "mask" ? regenSceneMasked : regenScene;
-            ({ buf, cost } = await gen(s, imgBuf, p, key, openaiModel));
+            if (mode === "mask") {
+              ({ buf, cost } = await regenSceneMasked(s, imgBuf, p, key, openaiModel));
+            } else {
+              // ★캐스팅 정본 레퍼런스(온톨로지) — 이 컷에 나오는 캐릭터(casting sceneIds)의 대표
+              //   이미지(실사 초상 우선, 없으면 대표 컷의 재생성/원본, 자기 컷 제외)를 넣어 정체성·
+              //   디자인을 일관되게. 상태(피·상처·표정)는 프롬프트로 컷 우선. 컷 '인물 참고 끄기'면 스킵.
+              const refBufs = [];
+              if (!s.cut?.noCastRef) {
+                for (const c of p.cast ?? []) {
+                  if (refBufs.length >= 3) break;
+                  if (!(c.sceneIds ?? []).includes(s.id)) continue; // 이 컷에 나오는 인물만
+                  let refUrl = c.realImage;
+                  if (!refUrl) {
+                    const rs = (p.scenes ?? []).find((x) => x.id === c.refSceneId && x.id !== s.id);
+                    refUrl = rs?.generatedImage || rs?.originalImage;
+                  }
+                  if (refUrl) {
+                    try {
+                      refBufs.push(await download(refUrl));
+                    } catch {}
+                  }
+                }
+              }
+              ({ buf, cost } = await regenScene(s, imgBuf, p, key, openaiModel, refBufs));
+            }
           }
           costTotal += cost;
           const { url } = await put(

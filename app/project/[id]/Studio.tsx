@@ -2331,6 +2331,21 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                               <option value="fal">Flux</option>
                               <option value="photoreal">실사화</option>
                             </select>
+                            {modelFor(s.id) === "gpt-image-2" && (
+                              <button
+                                type="button"
+                                onClick={() => updateCut(s.id, { noCastRef: !s.cut?.noCastRef })}
+                                disabled={busy || regenRunning}
+                                title="캐스팅 정본(인물 얼굴·복장)을 참고해 일관 생성. 피·변신 등 특수 상태 컷은 꺼서 정본이 그 상태를 덮지 않게."
+                                className={`rounded border px-1.5 py-0.5 disabled:opacity-40 ${
+                                  s.cut?.noCastRef
+                                    ? "border-[var(--border)] text-[var(--muted)]"
+                                    : "border-[var(--accent)] text-[var(--accent)]"
+                                }`}
+                              >
+                                {s.cut?.noCastRef ? "인물참고 끔" : "인물참고 켬"}
+                              </button>
+                            )}
                             <button
                               onClick={() => regenOne(s.id)}
                               disabled={busy || regenRunning}
