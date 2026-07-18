@@ -599,21 +599,26 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                     />
                     {/* 대사 — 내레이션/말풍선 구분 없이 이 컷의 모든 대사 줄을 한 목록으로(원문 + 한국어 번역).
                         내레이션도 대사의 일부(화자가 내레이터일 뿐) — 둘로 안 나눈다. */}
-                    <div className="flex flex-col gap-0.5 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5">
+                    {/* ★말풍선이 정답(다운스트림 더빙·자막이 bubbles 를 씀). 풍선별로 편집 → 반영됨.
+                        평소엔 컴팩트로 클램프 → 그리드 깔끔. 마우스 올리거나 편집(포커스)하면 그 셀만
+                        위·아래·옆으로 커지며 다른 셀 위에 떠서(absolute·z-30) 원문·번역 전부 읽힌다. */}
+                    <div className="group relative min-h-[3.4rem]">
+                      <div className="flex flex-col gap-0.5 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5 max-h-[3.4rem] overflow-hidden group-hover:absolute group-hover:left-0 group-hover:top-0 group-hover:z-30 group-hover:w-[300px] group-hover:max-h-none group-hover:overflow-visible group-hover:shadow-xl focus-within:absolute focus-within:left-0 focus-within:top-0 focus-within:z-30 focus-within:w-[300px] focus-within:max-h-none focus-within:overflow-visible focus-within:shadow-xl">
                       <span className="text-[9px] text-[var(--muted)]">대사</span>
-                      {/* ★말풍선이 정답(다운스트림 더빙·자막이 bubbles 를 씀). 풍선별로 편집 →
-                          편집이 실제로 반영된다. 풍선 없으면 dialogue 폴백(편집 시 풍선 생성). */}
                       {(cut.bubbles ?? []).length > 0 ? (
                         (cut.bubbles ?? []).map((b, bi) => (
-                          <div key={bi} className="flex items-center gap-1">
-                            <input
+                          // ★세로 스택 — 원문·번역 둘 다 전폭으로 줄바꿈해 안 잘리게(예전 가로배치는
+                          //   원문 박스 좁고 번역이 카드 밖으로 잘려 못 읽었음). 원문은 편집 가능(더빙 소스).
+                          <div key={bi} className="flex flex-col rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5">
+                            <textarea
                               value={b.text}
                               onChange={(e) => setBubbleText(i, bi, e.target.value)}
+                              rows={Math.min(8, Math.max(1, Math.ceil((b.text?.length || 1) / 12)))}
                               placeholder="대사 (직접 편집)"
-                              className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 text-[11px] text-[var(--text)]"
+                              className="w-full resize-none bg-transparent text-[11px] leading-snug text-[var(--text)] outline-none"
                             />
                             {(b.translation || "").trim() && (
-                              <span className="shrink-0 text-[10px] font-medium text-[var(--accent)]">{b.translation}</span>
+                              <div className="text-[11px] leading-snug text-[var(--accent)]">{b.translation}</div>
                             )}
                           </div>
                         ))
@@ -630,6 +635,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                           )}
                         </>
                       )}
+                      </div>
                     </div>
                     <div className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
                       <span>합병</span>
