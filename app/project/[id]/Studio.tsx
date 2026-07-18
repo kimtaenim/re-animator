@@ -90,20 +90,32 @@ const SFX_SPEAKER = "__sfx__";
 //   수십 개 <video autoPlay> 동시 디코딩이 크롬 버벅임의 원인이었음.
 function LazyVideo({ src, onClick, className }: { src: string; onClick?: () => void; className?: string }) {
   const ref = useRef<HTMLVideoElement | null>(null);
+  // ★마우스 올린 것만 <video> 를 mount(로드·디코딩). 떼면 아예 언마운트해 메모리·디코딩 0.
+  //   수십 컷이 동시에 preload=metadata 로 디코딩되어 크롬이 먹통 되던 것 해결(사용자 지정).
+  const [on, setOn] = useState(false);
   return (
-    <video
-      ref={ref}
-      src={src}
-      muted
-      loop
-      playsInline
-      preload="metadata"
-      onMouseEnter={() => ref.current?.play().catch(() => {})}
-      onMouseLeave={() => ref.current?.pause()}
+    <div
+      onMouseEnter={() => setOn(true)}
+      onMouseLeave={() => setOn(false)}
       onClick={onClick}
       title="마우스를 올리면 재생 · 클릭하면 미리보기"
-      className={className}
-    />
+      className={`grid place-items-center overflow-hidden bg-black/40 ${className ?? ""}`}
+    >
+      {on ? (
+        <video
+          ref={ref}
+          src={src}
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          onLoadedData={() => ref.current?.play().catch(() => {})}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <span className="text-[11px] text-white/60">▶</span>
+      )}
+    </div>
   );
 }
 
@@ -2746,7 +2758,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       <LazyVideo
                         src={s.fxUrl ?? s.videoUrl}
                         onClick={() => setScenePreview(s.id)}
-                        className="h-28 w-auto shrink-0 cursor-zoom-in rounded border border-[var(--ok)] object-cover"
+                        className="h-28 w-24 shrink-0 cursor-zoom-in rounded border border-[var(--ok)]"
                       />
                     ) : isCardScene ? null : (
                       <div className="grid h-28 w-24 shrink-0 place-items-center rounded border border-dashed border-[var(--border)] px-1 text-center text-[10px] text-[var(--muted)]">
