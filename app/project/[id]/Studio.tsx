@@ -870,7 +870,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </div>
               {/* 번역(편집자용 주석) — 외국어 원문 아래 한국어 뜻. 더빙은 원문으로 나감. */}
               {!isSfx && (b.translation || "").trim() && (
-                <div className="pl-7 text-[11px] italic text-[var(--muted)]" title="편집·화자 파악용 번역 (더빙은 원문 그대로)">
+                <div className="pl-7 text-[11px] font-medium text-[var(--accent)]" title="편집·화자 파악용 번역 (더빙은 원문 그대로)">
                   역: {b.translation}
                 </div>
               )}
@@ -987,7 +987,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           </button>
         </div>
         {(s.cut?.dialogueTranslation || "").trim() && (
-          <div className="pl-7 text-[11px] italic text-[var(--muted)]" title="편집·화자 파악용 번역">
+          <div className="pl-7 text-[11px] font-medium text-[var(--accent)]" title="편집·화자 파악용 번역">
             역: {s.cut?.dialogueTranslation}
           </div>
         )}
@@ -2431,7 +2431,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                                     <div key={bi} className="flex flex-wrap items-center gap-1">
                                       <span className="text-[var(--text)]" title={b.text}>“{b.text.slice(0, 40)}”</span>
                                       {(b.translation || "").trim() && (
-                                        <span className="italic text-[var(--muted)]">역: {b.translation!.slice(0, 40)}</span>
+                                        <span className="font-medium text-[var(--accent)]">역: {b.translation!.slice(0, 40)}</span>
                                       )}
                                       {/* 화자 — runCast 가 자동 분류한 기본값. 여기서 인라인 보정. */}
                                       <select

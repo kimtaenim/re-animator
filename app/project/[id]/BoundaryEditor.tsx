@@ -584,14 +584,14 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                         className="w-full rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 text-[11px] text-[var(--text)]"
                       />
                       {(cut.dialogueTranslation || "").trim() && (
-                        <div className="px-0.5 text-[10px] italic text-cyan-200/80">역: {cut.dialogueTranslation}</div>
+                        <div className="px-0.5 text-[10px] font-medium text-[var(--accent)]">역: {cut.dialogueTranslation}</div>
                       )}
                       {(cut.bubbles ?? []).map((b, bi) =>
                         (b.text || "").trim() ? (
                           <div key={bi} className="px-0.5 text-[10px]" title={b.text}>
                             {b.text}
                             {(b.translation || "").trim() && (
-                              <span className="italic text-cyan-200/70"> · 역: {b.translation}</span>
+                              <span className="font-medium text-[var(--accent)]"> · 역: {b.translation}</span>
                             )}
                           </div>
                         ) : null
