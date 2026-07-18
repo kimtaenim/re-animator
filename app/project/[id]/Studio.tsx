@@ -1740,6 +1740,79 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         })}
       </nav>
 
+      {/* ★플로팅 리모컨 — 각 단계 주요 액션을 화면 하단 고정으로. 위로 스크롤 안 하고 바로 누른다. */}
+      {(() => {
+        const REMOTE =
+          "fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel)] px-3 py-2 shadow-2xl";
+        const P = "rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-40";
+        const G = "rounded-full border border-[var(--border)] bg-[var(--panel-2)] px-4 py-2 text-sm font-medium disabled:opacity-40";
+        const S = "rounded-full border border-[var(--danger)] px-3 py-2 text-sm font-medium text-[var(--danger)]";
+        if (activeStep === "source" && canvas && hasCuts && sourceStatus === "review")
+          return (
+            <div className={REMOTE}>
+              <button onClick={confirm} disabled={busy || running} className={P}>
+                {running ? "추출 중…" : "경계 확정 · 추출"}
+              </button>
+            </div>
+          );
+        if (activeStep === "cast" && approved)
+          return (
+            <div className={REMOTE}>
+              <button onClick={runCastJob} disabled={busy || castRunning} className={P}>
+                {castRunning ? "캐스팅 중…" : "캐스팅"}
+              </button>
+            </div>
+          );
+        if (activeStep === "regen" && approved)
+          return (
+            <div className={REMOTE}>
+              {selForRegen.size > 0 && (
+                <button onClick={regenSelected} disabled={busy || regenRunning} className={P}>
+                  선택 {selForRegen.size} 생성
+                </button>
+              )}
+              <button onClick={runRegenJob} disabled={busy || regenRunning} className={selForRegen.size > 0 ? G : P}>
+                {regenRunning ? "생성 중…" : "전체 생성"}
+              </button>
+              {regenPolling && (
+                <button onClick={() => cancelJob("regen")} className={S}>
+                  ■ 중지
+                </button>
+              )}
+            </div>
+          );
+        if (activeStep === "scene" && approved)
+          return (
+            <div className={REMOTE}>
+              <button onClick={() => runVideoJob()} disabled={busy || sceneRunning} className={G}>
+                {sceneRunning ? "영상 중…" : "동영상"}
+              </button>
+              <button onClick={() => runDubJob()} disabled={busy || dubbing} className={P}>
+                {dubbing ? "더빙 중…" : "🎙 더빙"}
+              </button>
+              {sceneRunning && (
+                <button onClick={() => cancelJob("scene")} className={S}>
+                  ■ 중지
+                </button>
+              )}
+            </div>
+          );
+        if (activeStep === "compose" && approved)
+          return (
+            <div className={REMOTE}>
+              <button onClick={runComposeJob} disabled={busy || composeRunning} className={P}>
+                {composeRunning ? "합성 중…" : "영상 묶기"}
+              </button>
+              {composeRunning && (
+                <button onClick={() => cancelJob("compose")} className={S}>
+                  ■ 중지
+                </button>
+              )}
+            </div>
+          );
+        return null;
+      })()}
+
       {error && (
         <p className="mb-4 rounded-md border border-[var(--danger)] bg-[var(--panel)] p-3 text-sm text-[var(--danger)]">
           {error}
