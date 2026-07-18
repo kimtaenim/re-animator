@@ -583,6 +583,9 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                         {cut.bubbles!.slice(0, 3).map((b, bi) => (
                           <span key={bi} className="truncate text-[10px]" title={b.text}>
                             {b.text}
+                            {(b.translation || "").trim() && (
+                              <span className="italic text-cyan-200/70"> · 역: {b.translation}</span>
+                            )}
                           </span>
                         ))}
                         {cut.bubbles!.length > 3 && (

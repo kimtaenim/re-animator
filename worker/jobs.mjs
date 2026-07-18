@@ -494,6 +494,17 @@ export async function runSplit(projectId) {
       got++;
     }
     await log(`내레이션 미리 읽기 완료 — ${got}개 밴드에서 글자 확보(G1 컷 카드에 표시)`);
+    // ★G1 검수 화면에도 번역이 보이게 — 미리읽은 대사·내레이션을 여기서 바로 한국어로 곁들인다
+    //   (추출 단계가 나중에 다시 채우지만, 검수 때부터 뜻을 보여야 편집·화자 파악이 됨).
+    let trGot = 0;
+    for (const sc of scenes) {
+      if (!(sc.cut?.bubbles?.length)) continue;
+      try {
+        const { translated } = await translateBubbles(sc.cut.bubbles, key);
+        trGot += translated;
+      } catch {}
+    }
+    if (trGot) await log(`대사 번역 미리 달기 ${trGot}줄 — G1 검수 화면에 '역:' 표시`);
   }
 
   // 최신 프로젝트를 다시 읽어 결과만 병합(중간에 다른 갱신 있었을 수 있음).
