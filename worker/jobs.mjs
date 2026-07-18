@@ -34,7 +34,7 @@ import {
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { readCutText, readCutTextTiled } from "./ocr.mjs";
-import { translateScenes } from "./translate.mjs";
+import { translateScenes, proofreadScenes } from "./translate.mjs";
 import { synthesize, synthSfx } from "./tts.mjs";
 
 // 만화 효과음(한글 의성어) → ElevenLabs Sound Effects 용 짧은 영어 사운드 묘사. 실패 시 원문.
@@ -549,6 +549,20 @@ export async function runSplit(projectId) {
     }
     const withText = scenes.filter((s) => (s.cut?.bubbles ?? []).some((b) => (b.text || "").trim())).length;
     await log(`대사 읽기 완료 — ${withText}/${scenes.length}컷에서 글자 확보`);
+  }
+
+  // ★OCR 교정(보수적) — 컷마다 따로 읽어 생긴 고유명사 불일치(诺德/诸德/浩德)·오독을 전체 문맥으로
+  //   바로잡는다. 번역 전에 원문을 고쳐야 번역도 일관됨. bubble.text 가 바뀌므로 cut.dialogue 재구성.
+  try {
+    const { fixed, cost } = await proofreadScenes(scenes);
+    if (fixed > 0) {
+      for (const s of scenes)
+        if (s.cut?.bubbles?.length)
+          s.cut.dialogue = s.cut.bubbles.map((b) => (b.text || "").trim()).filter(Boolean).join("\n").slice(0, 500);
+      await log(`OCR 교정(Claude) ${fixed}줄 — 고유명사 통일·오독 정정(~$${cost.toFixed(4)})`);
+    }
+  } catch (e) {
+    await log(`OCR 교정 건너뜀: ${String(e?.message ?? e).slice(0, 100)}`);
   }
 
   // ★번역(Claude) — G1 검수 화면에 대사·내레이션 뜻이 바로 보이게. 컷 대사 + 말풍선 전부 한 번에.

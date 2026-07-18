@@ -91,6 +91,59 @@ export async function translateBubbles(bubbles) {
   return { translated, cost };
 }
 
+// ★OCR 교정(보수적) — 컷마다 따로 OCR 해서 같은 고유명사를 다르게 읽거나(诺德/诸德/浩德) 비슷한
+//   글자를 오독하는 걸, 전체 대사를 Claude 에 '한 번에' 줘서 문맥으로 바로잡는다. per-cut OCR엔 없는
+//   문맥이 여기 있다. ★번역·의역 아님 — 원문 언어 그대로, 확실한 것만 고치고 멀쩡한 건 안 건드림.
+//   bubbles.text 를 제자리(in-place) 교정. 반환 { fixed, cost }. 실패/키없음이면 무변경.
+export async function proofreadScenes(scenes) {
+  const client = await getClient();
+  if (!client) return { fixed: 0, cost: 0 };
+  const items = []; // { b, text }
+  for (const s of scenes ?? []) {
+    for (const b of s?.cut?.bubbles ?? []) {
+      if (b.speakerId === "__sfx__") continue;
+      const t = (b.text || "").trim();
+      if (t && needsTranslation(t)) items.push({ b, text: t }); // 외국어 원문만(한국어는 이미 정상)
+    }
+  }
+  if (items.length < 2) return { fixed: 0, cost: 0 }; // 통일·대조하려면 여러 줄 필요
+
+  const numbered = items.map((it, k) => `${k}. ${it.text.replace(/\s+/g, " ").slice(0, 200)}`).join("\n");
+  const prompt =
+    "다음은 웹툰을 컷별로 따로 OCR 한 대사 줄들이라 오독이 섞여 있을 수 있다. ★아주 보수적으로★ 교정하라:\n" +
+    "(1) 명백히 같은 고유명사(인물·지명 등)를 컷마다 다르게 읽은 변형은 가장 그럴듯한 하나로 통일하라. 예: 诺德/诸德/浩德 → 诺德.\n" +
+    "(2) 문맥상 명백한 OCR 오독(모양 비슷한 글자 오인)만 고쳐라.\n" +
+    "★그 외 멀쩡한 글자는 절대 바꾸지 마라. 확신 없으면 원문 그대로 둬라. 번역·의역·문장 다듬기·부호 정리 전부 금지. 원문 언어 그대로.★\n" +
+    '오직 JSON 으로만 답하라. 고친 줄만 넣어라(안 고친 줄은 빼라): {"c":[{"i":줄번호,"t":"교정된 원문"}]}\n\n' +
+    numbered;
+
+  try {
+    const res = await client.messages.create({ model: MODEL, max_tokens: 4000, messages: [{ role: "user", content: prompt }] });
+    if (res.stop_reason === "refusal") return { fixed: 0, cost: 0 };
+    let raw = res.content?.find((x) => x.type === "text")?.text ?? "{}";
+    const s = raw.indexOf("{");
+    const e = raw.lastIndexOf("}");
+    if (s >= 0 && e > s) raw = raw.slice(s, e + 1);
+    const parsed = JSON.parse(raw);
+    let fixed = 0;
+    for (const c of parsed.c ?? []) {
+      const k = Number(c?.i);
+      const nt = typeof c?.t === "string" ? c.t.trim() : "";
+      if (!Number.isInteger(k) || k < 0 || k >= items.length || !nt) continue;
+      const old = items[k].text;
+      if (nt === old) continue;
+      // ★안전장치: 통째로 바꿔치기(길이 급변) 방지 — 보수적 교정만 반영.
+      if (Math.abs(nt.length - old.length) > Math.max(4, Math.ceil(old.length * 0.4))) continue;
+      items[k].b.text = nt.slice(0, 400);
+      fixed++;
+    }
+    const cost = (res.usage?.input_tokens ?? 0) * IN_USD + (res.usage?.output_tokens ?? 0) * OUT_USD;
+    return { fixed, cost };
+  } catch {
+    return { fixed: 0, cost: 0 };
+  }
+}
+
 // ★프로젝트 전체를 한 번의 Claude 호출로 번역(비용·지연 최소). 컷 대사(dialogue→dialogueTranslation)
 //   + 모든 말풍선(text→translation, 효과음 제외)을 다 모아 1콜. Claude 가 준 번역만 덮어쓴다
 //   (실패해 null 이면 기존값 유지 = gpt-4o 폴백 보존). 반환 { translated, cost }.
