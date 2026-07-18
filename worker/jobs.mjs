@@ -258,6 +258,23 @@ function addGapTextRegions(scenes, profile, totalHeight, log) {
   return added;
 }
 
+// 컷 대사 병합 — 자기이미지 말풍선 + 위/아래 내레이션 밴드를 읽는 순서(위→컷→아래)로 합치되,
+// ★밴드가 자기이미지와 '같은 글줄'을 읽은 중복은 버린다(밴드는 경계서 90px 연장돼 컷과 겹침 →
+//   같은 대사 두 번 잡히던 버그). 자기이미지 풍선은 전부 보존(모델이 일부러 나눈 별개 대사),
+//   밴드 쪽에서 이미 나온 텍스트만 스킵(밴드끼리 중복도 제거). 정규화(공백 제거) 텍스트로 비교.
+function mergeCutBubbles(above, ownBubbles, below) {
+  const norm = (t) => String(t || "").replace(/\s+/g, "").trim();
+  const seen = new Set((ownBubbles || []).map((b) => norm(b.text)).filter(Boolean));
+  const keepBand = (arr) =>
+    (arr || []).filter((b) => {
+      const k = norm(b.text);
+      if (!k || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  return [...keepBand(above), ...(ownBubbles || []), ...keepBand(below)];
+}
+
 // 재추출/분할/합병 시 풍선별 화자(speakerId)·자막위치(subtitleX/Y) 보존 — 새 OCR 풍선을
 // 옛 풍선과 글자로 매칭해 옮긴다. 옛 풍선이 없고 컷 단위 레거시 화자만 있으면 풍선 1개일 때 물려준다.
 function mergeBubbleSpeakers(newBubbles, oldBubbles, legacySpeakerId) {
@@ -514,7 +531,7 @@ export async function runSplit(projectId) {
                 if (t.sfx) sfx = sfx ? `${sfx} ${t.sfx}` : t.sfx;
               } catch {}
             }
-            const allBubbles = [...above, ...(own.bubbles || []), ...below].map((b) => ({
+            const allBubbles = mergeCutBubbles(above, own.bubbles, below).map((b) => ({
               text: b.text,
               ...(b.translation ? { translation: b.translation } : {}),
             }));
@@ -686,7 +703,7 @@ export async function runExtract(projectId) {
                 if (t.sfx) sfx = sfx ? `${sfx} ${t.sfx}` : t.sfx;
               } catch {}
             }
-            let allBubbles = [...above, ...(own.bubbles || []), ...below];
+            let allBubbles = mergeCutBubbles(above, own.bubbles, below); // ★자기이미지↔밴드 중복 대사 제거
             // 풍선별 speakerId 는 기존 값(텍스트 매칭)으로 보존해 화자 귀속이 안 날아가게.
             s.cut.bubbles = mergeBubbleSpeakers(allBubbles, s.cut.bubbles, s.cut.speakerId);
             s.cut.dialogue = allBubbles
