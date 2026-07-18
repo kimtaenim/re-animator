@@ -695,8 +695,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 대사(말풍선) 칸 추가 — 빈 말풍선 하나 더. 단일 dialogue 만 있으면 그걸 첫 말풍선으로.
   function addBubble(sceneId: string) {
     const s = project.scenes.find((x) => x.id === sceneId);
-    const cur = s?.cut?.bubbles ?? (s?.cut?.dialogue?.trim() ? [{ text: s.cut.dialogue.trim() }] : []);
-    updateCut(sceneId, { bubbles: [...cur, { text: "" }], dialogue: "" });
+    const cur =
+      s?.cut?.bubbles ??
+      (s?.cut?.dialogue?.trim()
+        ? [{ text: s.cut.dialogue.trim(), ...(s.cut.dialogueTranslation?.trim() ? { translation: s.cut.dialogueTranslation.trim() } : {}) }]
+        : []);
+    updateCut(sceneId, { bubbles: [...cur, { text: "" }], dialogue: "", dialogueTranslation: undefined });
   }
 
   // 캐릭터 썸네일(화자 아바타용) — realImage 우선, 없으면 대표 컷 이미지. 없으면 null.
@@ -982,6 +986,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             ×
           </button>
         </div>
+        {(s.cut?.dialogueTranslation || "").trim() && (
+          <div className="pl-7 text-[11px] italic text-[var(--muted)]" title="편집·화자 파악용 번역">
+            역: {s.cut?.dialogueTranslation}
+          </div>
+        )}
         <button
           type="button"
           onClick={() => addBubble(s.id)}
@@ -1379,7 +1388,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         const t = (b.text || "").trim();
         if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY, tr: (b.translation || "").trim() || undefined });
       }
-    else if (cut?.dialogue?.trim()) units.push({ text: cut.dialogue.trim() });
+    else if (cut?.dialogue?.trim())
+      units.push({ text: cut.dialogue.trim(), tr: (cut.dialogueTranslation || "").trim() || undefined });
     // 내레이션은 별개가 아니라 화자=내레이터인 말풍선 → 위 bubbles 루프가 이미 포함.
     return units;
   }

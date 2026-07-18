@@ -60,7 +60,7 @@ function bubblesOf(s: Scene): { idx: number; text: string; translation?: string 
       .filter((b) => b.text.trim() !== "");
   }
   const legacy = s.cut?.dialogue?.trim();
-  return legacy ? [{ idx: -1, text: legacy }] : [];
+  return legacy ? [{ idx: -1, text: legacy, translation: s.cut?.dialogueTranslation }] : [];
 }
 // 이 컷에 화자를 붙일 게 하나라도 있나 — 내레이션도 화자 null 말풍선이라 bubblesOf 에 포함됨.
 const hasSpeakable = (s: Scene) => bubblesOf(s).length > 0;
