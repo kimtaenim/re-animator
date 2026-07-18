@@ -510,6 +510,16 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                   ref={(el) => {
                     cardRefs.current[i] = el;
                   }}
+                  onMouseEnter={(e) => {
+                    // 호버 확대가 화면 밖으로 안 잘리게 — 카드 위치에 따라 확대 기준점을 안쪽으로.
+                    // 왼쪽 열=오른쪽으로만, 오른쪽 열=왼쪽으로만, 아래쪽=위로만 커진다.
+                    const r = e.currentTarget.getBoundingClientRect();
+                    const cx = r.left + r.width / 2;
+                    const cy = r.top + r.height / 2;
+                    const hx = cx < window.innerWidth * 0.28 ? "left" : cx > window.innerWidth * 0.72 ? "right" : "center";
+                    const vy = cy > window.innerHeight * 0.62 ? "bottom" : "top";
+                    e.currentTarget.style.transformOrigin = `${vy} ${hx}`;
+                  }}
                   className="group relative flex h-[280px] flex-col overflow-hidden rounded-lg border bg-[var(--panel-2)] origin-top transition-transform duration-150 hover:z-30 hover:scale-[1.4] hover:overflow-visible hover:shadow-2xl"
                   style={{
                     borderColor: cut.type ? color : "var(--border)",
