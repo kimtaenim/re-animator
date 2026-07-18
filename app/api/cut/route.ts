@@ -34,6 +34,7 @@ function cleanCut(raw: unknown): CutOntology {
         const box = b.box && typeof b.box === "object" ? (b.box as Record<string, unknown>) : null;
         return {
           text: typeof b.text === "string" ? b.text.slice(0, 400) : "",
+          translation: typeof b.translation === "string" ? b.translation.slice(0, 400) : undefined, // 번역 보존 — 편집 저장 때 안 날아가게
           speakerId: typeof b.speakerId === "string" ? b.speakerId : b.speakerId === null ? null : undefined,
           box: box
             ? {
