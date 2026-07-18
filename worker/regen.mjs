@@ -10,9 +10,10 @@ import sharp from "sharp";
 // gpt-image 대략 단가(품질별, 장당 USD 근사). 예측 가능하게 flat.
 const IMAGE_COST = { low: 0.016, medium: 0.042, high: 0.167 };
 export const REGEN_QUALITY = process.env.OPENAI_IMAGE_QUALITY || "medium";
-// ★기본 6 → 2: 메모리 빡빡한 Render 워커에서 동시 재생성 이미지 버퍼가 겹쳐 OOM 먹통(3에서도
-//   재발, 실측). 마스크·새로그리기 공용. 피크 메모리 = 이 수 × 컷당 버퍼. env 로 상향 가능.
-export const REGEN_CONCURRENCY = Number(process.env.REGEN_CONCURRENCY || 2);
+// 동시 재생성 개수. 예전엔 새로그리기가 원본 컷을 안 줄여 보내 OOM → 2까지 낮췄지만, 이제
+// 입력을 축소(downscaleForApi)해 컷당 버퍼가 가벼워졌고 워커도 승급 → 6으로 복귀(속도). OOM
+// 재발 시 env REGEN_CONCURRENCY 로 낮춤. 피크 메모리 = 이 수 × 컷당(축소된) 버퍼.
+export const REGEN_CONCURRENCY = Number(process.env.REGEN_CONCURRENCY || 6);
 export const imageCostUsd = () => IMAGE_COST[REGEN_QUALITY] ?? 0.042;
 
 // ★ 요청 크기(px) — 모델 인식형. gpt-image-2 는 임의 해상도(가로·세로 16 배수)를 받으므로
