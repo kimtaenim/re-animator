@@ -39,10 +39,10 @@ async function callFal(model, input, key) {
   return url;
 }
 
-async function downloadFit(url, project) {
+async function downloadFit(url, project, size) {
   const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
   if (!r.ok) throw new Error(`fal 결과 다운로드 실패 ${r.status}`);
-  return fitBuffer(Buffer.from(await r.arrayBuffer()), project);
+  return fitBuffer(Buffer.from(await r.arrayBuffer()), project, size);
 }
 
 // 전체(새로 그리기) — 원본 컷(Blob URL) + 프롬프트로 Flux Kontext 편집.
@@ -63,9 +63,9 @@ export async function regenSceneFal(scene, project, key) {
 // 마스크(원본 유지) — 컷은 그대로(옆은 블러 배경), 글씨 자리만 Flux Fill 인페인트.
 export async function regenSceneMaskedFal(scene, imgBuf, project, key) {
   if (!key) throw new Error("FAL_KEY 없음");
-  const { composed, falMask, prompt, hasFill } = await buildMaskInputs(scene, imgBuf, project, "fal");
-  // 지울 글씨가 없으면 Fill 호출 불필요 — 합성본(컷+블러밴드) 그대로.
-  if (!hasFill) return { buf: await fitBuffer(composed, project), cost: 0 };
+  const { composed, falMask, prompt, TW, TH, hasFill } = await buildMaskInputs(scene, imgBuf, project, "fal");
+  // 지울 글씨가 없으면 Fill 호출 불필요 — 컷 원본(원본 비율) 그대로.
+  if (!hasFill) return { buf: await fitBuffer(composed, project, [TW, TH]), cost: 0 };
   const url = await callFal(
     FAL_FILL,
     {
@@ -75,5 +75,5 @@ export async function regenSceneMaskedFal(scene, imgBuf, project, key) {
     },
     key
   );
-  return { buf: await downloadFit(url, project), cost: FAL_COST };
+  return { buf: await downloadFit(url, project, [TW, TH]), cost: FAL_COST }; // 컷 원본 비율 유지
 }
