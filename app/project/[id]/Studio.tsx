@@ -1547,6 +1547,17 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
+  // ★캐스팅 자동 실행 — 2단계에 들어오면 버튼 안 눌러도 알아서 캐스팅(사용자 요구). 아직 안 한
+  //   경우(pending)에만 1회. 에러·완료·진행중이면 자동 안 함(무한 재시도 방지). '다시 캐스팅'은 수동.
+  const castAutoRef = useRef(false);
+  useEffect(() => {
+    const isApproved = project.steps?.source?.status === "approved"; // approved 는 아래서 선언(TDZ) → 인라인
+    if (activeStep === "cast" && isApproved && castStatus === "pending" && !castRunning && !busy && !castAutoRef.current) {
+      castAutoRef.current = true;
+      runCastJob();
+    }
+  }, [activeStep, castStatus, castRunning, busy, project.steps?.source?.status]);
+
   async function saveCast(
     cast: Character[],
     speakers: Record<string, string>,

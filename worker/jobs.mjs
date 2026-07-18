@@ -797,6 +797,19 @@ export async function runExtract(projectId) {
   }
 
   for (const s of scenes) normalizeNarration(s.cut); // 레거시 내레이션 문자열 → 내레이터 말풍선으로 통일
+  // ★OCR 교정(보수적) — 추출 단계에서도 오독·고유명사 불일치를 전체 문맥으로 잡는다(단계마다 검출).
+  //   기존 프로젝트도 추출 재실행 때 교정됨. bubble.text 교정 → cut.dialogue 재구성 후 번역.
+  try {
+    const { fixed, cost } = await proofreadScenes(scenes);
+    if (fixed > 0) {
+      for (const s of scenes)
+        if (s.cut?.bubbles?.length)
+          s.cut.dialogue = s.cut.bubbles.map((b) => (b.text || "").trim()).filter(Boolean).join("\n").slice(0, 500);
+      await log(`OCR 교정(Claude) ${fixed}줄 — 고유명사 통일·오독 정정(~$${cost.toFixed(4)})`);
+    }
+  } catch (e) {
+    await log(`OCR 교정 건너뜀: ${String(e?.message ?? e).slice(0, 100)}`);
+  }
   // ★번역(Claude) — 추출된 말풍선 대사 전부 한국어로. 이후 모든 단계(캐스팅·편집기·미리보기)에 '역:' 표시.
   try {
     const { translated, cost } = await translateScenes(scenes);
