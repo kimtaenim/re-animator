@@ -144,10 +144,64 @@ export interface CutOntology {
   confirmed: boolean; // 사람이 G1 에서 타입 확정했는지
 }
 
+// ── 카메라워크(스펙 §2) — 타입만. 수식은 lib/cameraKeyframes.mjs 단일 소스. ──────
+export type CameraPreset =
+  | "push_in" | "pull_out" | "pan" | "static" | "shake" | "crash_zoom" | "whip" // 계층 A
+  | "parallax_push" | "vertigo" // 계층 B(2레이어)
+  | "orbit"; // 계층 C(I2V 위임)
+
+export type CameraEasing = "linear" | "easeIn" | "easeOut" | "easeInOut";
+
+// camera_work 스키마(스펙 §2). buildKeyframeTable 의 입력.
+export interface CameraWork {
+  preset: CameraPreset;
+  duration_s: number;
+  zoom_rate_pct_per_s?: number; // 양수=push, 음수=pull
+  drift_px_per_s?: { x: number; y: number };
+  bg_scale_delta_pct_per_s?: number; // 계층 B: 배경 추가/역방향 스케일 속도(%p/s)
+  easing?: CameraEasing;
+  shake_seed?: number; // 시드 PRNG(양쪽 동일 궤적)
+  shake_amp_px?: number;
+  shake_damp?: number;
+  start_zoom?: number; // pull_out 은 >1 로 시작
+}
+
+// 한 시점 crop 창 상태(정규화). scale>=1, cx/cy 중심 0~1.
+export interface CameraState {
+  scale: number;
+  cx: number;
+  cy: number;
+}
+
+export interface CameraKeyframe extends CameraState {
+  t: number; // 초
+  off: number; // 정규화 진행 0~1(Web Animations offset)
+}
+
+export interface CameraKeyframeTrack {
+  keys: CameraKeyframe[];
+}
+
+// buildKeyframeTable 의 출력. 워커·웹앱이 이것만 소비. A:{main} B:{character,background} C:{}
+export interface CameraKeyframeTable {
+  version: number;
+  preset: CameraPreset;
+  duration_s: number;
+  fps: number;
+  frames: number;
+  layer: "A" | "B" | "C";
+  refWidth: number;
+  refHeight: number;
+  tracks: Record<string, CameraKeyframeTrack>;
+  maxScale: number;
+}
+
 export interface Scene {
   id: string;
   order: number;
   sourceRegion: SourceRegion; // 가상 캔버스 전역 좌표
+  cameraWork?: CameraWork; // ★연출 레이어(스펙 §2). 저장은 이 JSON 만; 픽셀은 워커/프리뷰가 테이블로 굽는다.
+  cameraTable?: CameraKeyframeTable; // 캐시된 키프레임 테이블(cameraWork 로부터 파생, 순수 연산). 없으면 즉석 생성.
   cut?: CutOntology; // 컷 온톨로지(타입+내용). 미분류면 type=null.
   originalImage?: string; // 추출된 원본 컷 Blob URL (확정 후 워커가 채움)
   regenMode?: "mask" | "full"; // 재생성 방식: mask=원본보존+빈공간/글씨만, full=통째 재생성
