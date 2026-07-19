@@ -33,6 +33,7 @@ import {
 } from "./regen.mjs";
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
+import { renderCameraFx } from "./cameraRender.mjs";
 import { readCutText, readCutTextTiled } from "./ocr.mjs";
 import { translateScenes, proofreadScenes } from "./translate.mjs";
 import { synthesize, synthSfx } from "./tts.mjs";
@@ -356,6 +357,18 @@ async function ffmpegPath() {
     _ffPath = process.env.FFMPEG_PATH || "ffmpeg";
   }
   return _ffPath;
+}
+
+// ffprobe 경로(지연 확정) — ffprobe-static 있으면 그걸, 없으면 PATH. env override 우선.
+let _fpPath = null;
+async function ffprobePath() {
+  if (_fpPath !== null) return _fpPath;
+  try {
+    _fpPath = process.env.FFPROBE_PATH || (await import("ffprobe-static")).default?.path || "ffprobe";
+  } catch {
+    _fpPath = process.env.FFPROBE_PATH || "ffprobe";
+  }
+  return _fpPath;
 }
 
 // mp4 버퍼에서 오디오 트랙 제거(그록 I2V가 자동으로 넣는 소리 삭제). 실패하면 null → 원본 사용.
@@ -1769,6 +1782,75 @@ export async function runPostfx(projectId, payload) {
     }
   }
   await log(`후처리 완료 ${done}/${targets.length}`);
+  return done;
+}
+
+// ── 카메라워크(스펙 §2 계층 A) — scene.cameraWork 를 I2V 클립 위에 구워 fxUrl 로 저장 ──
+//   수식은 lib/cameraKeyframes.mjs 단일 소스, 렌더는 worker/cameraRender.mjs(sendcmd).
+//   기존 runPostfx(effect/strength 프리셋)는 그대로 유지 — 이 잡은 새 cameraWork 경로.
+//   skip(정지/orbit/계층B/무cameraWork) → fxUrl 해제(원본 클립 사용). 저장은 fresh 머지.
+export async function runCameraFx(projectId, payload) {
+  await resetProgress(projectId);
+  const log = async (m) => {
+    console.error("[camerafx]", m);
+    await logProgress(projectId, m);
+  };
+  const ids = new Set(Array.isArray(payload?.sceneIds) ? payload.sceneIds : []);
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  const targets = (p.scenes ?? []).filter((s) => ids.has(s.id) && s.videoUrl);
+  if (!targets.length) throw new Error("카메라워크 적용할 영상이 없어요(먼저 동영상 생성)");
+
+  const ff = await ffmpegPath();
+  const fp = await ffprobePath();
+
+  let done = 0;
+  for (const s of targets) {
+    const cw = s.cameraWork;
+    let dir;
+    try {
+      dir = await mkdtemp(join(tmpdir(), "recam-"));
+      const inp = join(dir, "in.mp4");
+      const outp = join(dir, "out.mp4");
+      const buf = await download(s.videoUrl);
+      await writeFile(inp, buf);
+
+      let result = { skipped: true, layer: "-" };
+      if (cw && cw.preset) {
+        result = await renderCameraFx({
+          ff, fp, dir, inPath: inp, outPath: outp, cameraWork: cw,
+          onLog: (m) => console.error("[camerafx]", m),
+        });
+      }
+
+      // fresh 재읽기 후 해당 씬 필드만 머지(저장 규약).
+      const p2 = await getProject(projectId);
+      const t2 = (p2?.scenes ?? []).find((x) => x.id === s.id);
+      if (p2 && t2) {
+        if (result.skipped) {
+          // 후처리 없음 → 원본 클립 사용. 낡은 fxUrl 무효화(안 지우면 미리보기가 옛 fx 를 보여줌).
+          delete t2.fxUrl;
+          delete t2.fx;
+        } else {
+          const { url } = await put(`project/${projectId}/cam-${s.order}-${Date.now()}.mp4`, await readFile(outp), {
+            access: "public",
+            contentType: "video/mp4",
+            addRandomSuffix: false,
+          });
+          t2.fxUrl = url;
+          t2.fx = { effect: `cam:${cw.preset}`, strength: 0 };
+        }
+        await saveProject(p2);
+      }
+      done++;
+      await log(`카메라워크 ${done}/${targets.length} — 컷 ${s.order + 1} (${cw?.preset ?? "없음"}${result.skipped ? "·원본" : result.upscale ? "·업스케일" : ""})`);
+    } catch (e) {
+      await log(`컷 ${s.order + 1} 카메라워크 실패: ${String(e?.message ?? e).slice(0, 120)}`);
+    } finally {
+      if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+  await log(`카메라워크 완료 ${done}/${targets.length}`);
   return done;
 }
 

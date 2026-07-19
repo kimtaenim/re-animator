@@ -19,7 +19,8 @@ export type JobType =
   | "compose"
   | "portrait"
   | "dub"
-  | "postfx";
+  | "postfx"
+  | "camerafx";
 export type JobStatus = "queued" | "running" | "done" | "error";
 
 export interface Job {
