@@ -93,6 +93,21 @@ const BODY_MOTIONS: [string, string][] = [
   ["gesture", "👋 손짓"],
 ];
 
+// 영상/효과 URL 파일명 끝의 타임스탬프(Date.now()) 추출 — 재생성 때 이 값이 바뀌면 진짜 새 영상이 만들어진 것.
+function urlTimestamp(url?: string): number | null {
+  if (!url) return null;
+  const m = url.match(/-(\d{12,})\.(?:mp4|mov|webm)(?:$|\?)/);
+  return m ? Number(m[1]) : null;
+}
+function fmtClock(ts: number | null): string {
+  if (!ts) return "";
+  try {
+    return new Date(ts).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
 // 대사 줄의 화자 특수값 — 효과음(소리 생성). 캐릭터 id 와 안 겹치는 센티넬.
 const SFX_SPEAKER = "__sfx__";
 
@@ -3257,6 +3272,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       </div>
                     )}
                     <div className="flex min-w-0 flex-1 flex-col gap-1 text-[11px]">
+                      {/* 🕐 생성 시각 — 다시 생성 후 이 시각이 바뀌면 진짜 새 영상, 안 바뀌면 생성/갱신이 안 된 것. */}
+                      {!isCardScene && (s.videoUrl || s.videoError) && (
+                        <span className="text-[10px] text-[var(--muted)]" title="이 영상이 생성된 시각 — 다시 생성 후 바뀌면 새 영상이 만들어진 것, 안 바뀌면 생성/갱신 안 됨">
+                          {s.videoUrl ? (
+                            <>🕐 영상 {fmtClock(urlTimestamp(s.videoUrl))}{s.fxUrl ? ` · 효과 ${fmtClock(urlTimestamp(s.fxUrl))}` : ""}</>
+                          ) : (
+                            <span className="text-[var(--danger)]">생성 실패</span>
+                          )}
+                        </span>
+                      )}
                       {/* 조작 버튼 줄 — 평소엔 숨고, 카드에 마우스 올리거나 포커스 시에만 뜸(애플식: 콘텐츠 앞, 크롬 뒤). */}
                       <div className="flex flex-wrap items-center gap-2 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
                         {isCardScene ? (
