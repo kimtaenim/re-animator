@@ -35,7 +35,7 @@ import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { renderCameraFx } from "./cameraRender.mjs";
 import { readCutText, readCutTextTiled } from "./ocr.mjs";
-import { translateScenes, proofreadScenes } from "./translate.mjs";
+import { translateScenes, proofreadScenes, translateScenesMultilang } from "./translate.mjs";
 import { synthesize, synthSfx } from "./tts.mjs";
 
 // 만화 효과음(한글 의성어) → ElevenLabs Sound Effects 용 짧은 영어 사운드 묘사. 실패 시 원문.
@@ -880,6 +880,17 @@ export async function runExtract(projectId) {
     if (!translated && !process.env.ANTHROPIC_API_KEY) await log("⚠ ANTHROPIC_API_KEY 없음 — 번역 스킵됨(워커 env 확인)");
   } catch (e) {
     await log(`번역 실패(대사는 그대로): ${String(e?.message ?? e).slice(0, 120)}`);
+  }
+  // ── 다국어 번역(§10) — 프로젝트에 targetLanguages 설정 시 원어→각 언어 tracks 채움. 미설정이면 스킵(기존 무영향). ──
+  try {
+    const proj = await getProject(projectId);
+    const langs = Array.isArray(proj?.targetLanguages) ? proj.targetLanguages : [];
+    if (langs.length) {
+      const { translated: mt, cost: mc } = await translateScenesMultilang(scenes, langs);
+      await log(`다국어 번역(${langs.join("·")}) ${mt}줄 tracks 채움(~$${mc.toFixed(4)})`);
+    }
+  } catch (e) {
+    await log(`다국어 번역 스킵: ${String(e?.message ?? e).slice(0, 100)}`);
   }
   const p2 = await getProject(projectId);
   if (!p2) throw new Error("프로젝트가 사라졌어요");

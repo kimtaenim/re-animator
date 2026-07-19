@@ -1,9 +1,27 @@
 // 말풍선(대사) 저장 정리 — /api/cut 저장 시 신뢰 못 할 입력을 화이트리스트로 정리한다.
 // ★한 곳에서만 정의(단일 원천) — 필드 추가 시 여기만 고치면 저장 경로 전체에 반영·테스트 가능.
 //   translation(번역)이 여기서 빠지면 편집 저장 때 번역이 통째로 날아간다(과거 버그).
-import { EMOTIONS, type DialogueBubble, type CameraWork, type CameraPreset, type CameraEasing, type AudioSuggestion } from "./types";
+import { EMOTIONS, type DialogueBubble, type BubbleTrack, type CameraWork, type CameraPreset, type CameraEasing, type AudioSuggestion } from "./types";
 
 const EMOTION_IDS = new Set(EMOTIONS.map((e) => e.id));
+
+// 언어별 대사 트랙(스펙 §10) 저장 정리 — 화이트리스트 빠지면 저장 때 tracks 증발(text/translation 은 아래 별도 보존).
+const TRACK_STATUS = new Set(["pending", "translated", "tts", "done"]);
+function cleanTracks(raw: unknown): Record<string, BubbleTrack> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<string, BubbleTrack> = {};
+  for (const [lang, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^[a-z]{2,5}$/.test(lang) || !v || typeof v !== "object") continue;
+    const t = v as Record<string, unknown>;
+    const tr: BubbleTrack = {};
+    if (typeof t.text === "string") tr.text = t.text.slice(0, 400);
+    if (typeof t.audioUrl === "string") tr.audioUrl = t.audioUrl; // TTS 오디오 보존
+    if (typeof t.durationFinal === "number" && isFinite(t.durationFinal)) tr.durationFinal = Math.max(0, Math.min(60, t.durationFinal));
+    if (typeof t.status === "string" && TRACK_STATUS.has(t.status)) tr.status = t.status as BubbleTrack["status"];
+    if (Object.keys(tr).length) out[lang] = tr;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
 // 카메라워크(스펙 §2) 저장 정리 — 저장 경로가 화이트리스트라 여기 없으면 통째로 날아간다.
 const CAM_PRESETS = new Set<CameraPreset>([
@@ -72,6 +90,7 @@ export function cleanBubble(raw: unknown): DialogueBubble {
         : undefined, // 목소리 크기 배수(합성 적용)
     distant: b.distant === true ? true : undefined, // 거리감(멀리서)
     noSubtitle: b.noSubtitle === true ? true : undefined, // 자막 제외(소리는 유지)
+    tracks: cleanTracks(b.tracks), // 언어별 번역·TTS(§10) 보존
   } as DialogueBubble;
 }
 

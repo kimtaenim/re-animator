@@ -19,6 +19,7 @@ export async function PATCH(
         narratorVoice?: { provider?: string; id?: string; name?: string } | null;
         dubSpeed?: number;
         storyContext?: string;
+        targetLanguages?: unknown;
       }
   );
   const project = await getProject(id);
@@ -56,6 +57,13 @@ export async function PATCH(
   }
   if (typeof body.storyContext === "string") {
     project.storyContext = body.storyContext.slice(0, 2000); // 빈 문자열도 저장(해제)
+    changed = true;
+  }
+  if (Array.isArray(body.targetLanguages)) {
+    // 번역·출력 대상 언어(§10). 빈 배열도 저장(해제 → 레거시 단일).
+    project.targetLanguages = (body.targetLanguages as unknown[])
+      .filter((l): l is string => typeof l === "string" && /^[a-z]{2,5}$/.test(l))
+      .slice(0, 6);
     changed = true;
   }
   if (changed) await saveProject(project);

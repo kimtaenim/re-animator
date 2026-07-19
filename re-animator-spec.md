@@ -148,7 +148,7 @@ UI
 2) 워커 렌더러(프레임별 crop·2레이어 합성, 업스케일 트리거 포함)  ← **[계층 A 완료]** (sendcmd crop, 통합 11 pass; 계층 B/ESRGAN 후속)
 3) 웹앱 클라이언트 프리뷰 + 파라미터 편집 + 씬 목록 재정의(9절)  ← **[프리뷰·편집 완료 / §9 재정의 연기(Phase 4·5 의존)]**
 4) VLM 스키마 확장(모션 티어 + 오디오 제안 + 다국어 동시 번역 + vertigo/보간 후보 태그)  ← **[분류 산출 완료]** (classify.mjs strict 스키마+prompts.json: motion_tier·audio_suggestions·보간후보; 다국어 동시번역은 Phase 5)
-5) 다국어 데이터 모델 + 작업 언어 토글 + 언어별 duration/타임라인
+5) 다국어 데이터 모델 + 작업 언어 토글 + 언어별 duration/타임라인  ← **[데이터모델·번역생성 완료 / UI토글·언어별 TTS·compose 후속]** (DialogueBubble.tracks 하위호환, Project.targetLanguages, translateScenesMultilang 한 콜 동시번역, extract 조건부 배선)
 6) 티어별 I2V 요청 규칙 + duration 2단계 + 트림/홀드/슬로우
 7) crash_zoom 3프레이밍 잡 + 병합 확장 동작 보간 + orbit I2V 예외 경로
 8) 언어별 TTS·자막 ASS + 오디오 3트랙 합성 + 덕킹 + whip·이펙트 오버레이 + 프록시 렌더 + 언어별 출력 잡

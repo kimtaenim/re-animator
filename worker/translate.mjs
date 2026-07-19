@@ -144,6 +144,93 @@ export async function proofreadScenes(scenes) {
   }
 }
 
+// ── 다국어 번역(스펙 §10) — 원어 → 선택된 각 언어(ja/en…)를 한 콜에 동시 번역. ──────────
+//   결과는 말풍선 tracks[lang].text 로. 원어(text)·한국어(translation)는 건드리지 않는다(가산).
+const LANG_NAMES = { ja: "일본어(Japanese)", en: "영어(English)", ko: "한국어(Korean)", zh: "중국어(Chinese)", es: "스페인어(Spanish)" };
+
+// texts → { result: { [lang]: (string|null)[] }, cost }. 인덱스 대응 유지. 빈 줄은 null.
+export async function translateToLanguages(texts, langs) {
+  const result = {};
+  (langs || []).forEach((l) => (result[l] = new Array(texts.length).fill(null)));
+  const client = await getClient();
+  if (!client || !langs?.length) return { result, cost: 0 };
+  const todo = [];
+  texts.forEach((t, i) => {
+    if ((t || "").trim()) todo.push({ i, text: String(t) });
+  });
+  if (!todo.length) return { result, cost: 0 };
+
+  const langList = langs.map((l) => `"${l}"(${LANG_NAMES[l] || l})`).join(", ");
+  const keyList = langs.map((l) => `"${l}":"${l} 번역"`).join(", ");
+  const numbered = todo.map((u, k) => `${k}. ${u.text.replace(/\s+/g, " ").slice(0, 300)}`).join("\n");
+  const prompt =
+    `다음은 만화(웹툰) 대사·자막이다. 각 줄을 아래 언어들로 각각 자연스럽게 번역하라: ${langList}. ` +
+    "누가 하는 말인지(인물 대사/내레이터) 감안해 화자 말투를 살려라(반말/존댓말·거칠/부드러움·놀람 등). " +
+    "밋밋한 직역·설명·따옴표 금지. 고유명사는 무리하게 바꾸지 마라.\n" +
+    `오직 JSON 으로만 답하라: {"t":[{"i":줄번호, ${keyList}}]}\n\n` +
+    numbered;
+
+  try {
+    const res = await client.messages.create({ model: MODEL, max_tokens: 4000, messages: [{ role: "user", content: prompt }] });
+    if (res.stop_reason === "refusal") return { result, cost: 0 };
+    let raw = res.content?.find((b) => b.type === "text")?.text ?? "{}";
+    const s = raw.indexOf("{");
+    const e = raw.lastIndexOf("}");
+    if (s >= 0 && e > s) raw = raw.slice(s, e + 1);
+    const parsed = JSON.parse(raw);
+    for (const item of parsed.t ?? []) {
+      const k = Number(item?.i);
+      if (!Number.isInteger(k) || k < 0 || k >= todo.length) continue;
+      for (const l of langs) {
+        const v = typeof item?.[l] === "string" ? item[l].trim() : "";
+        if (v) result[l][todo[k].i] = v.slice(0, 400);
+      }
+    }
+    const cost = (res.usage?.input_tokens ?? 0) * IN_USD + (res.usage?.output_tokens ?? 0) * OUT_USD;
+    return { result, cost };
+  } catch {
+    return { result, cost: 0 };
+  }
+}
+
+// scenes 의 말풍선(text, 효과음 제외) → 각 언어 tracks[lang].text 채움(in-place). 이미 있으면 스킵.
+// 원어가 한국어여도 ja/en 은 필요하므로 번역한다(§10). 반환 { translated, cost }.
+export async function translateScenesMultilang(scenes, langs) {
+  if (!langs?.length) return { translated: 0, cost: 0 };
+  const items = []; // { b, text }
+  for (const s of scenes ?? []) {
+    for (const b of s?.cut?.bubbles ?? []) {
+      if (!b || b.speakerId === "__sfx__") continue;
+      const t = (b.text || "").trim();
+      if (!t) continue;
+      const need = langs.some((l) => !(b.tracks?.[l]?.text)); // 하나라도 빠진 언어 있으면 대상
+      if (need) items.push({ b, text: t });
+    }
+  }
+  if (!items.length) return { translated: 0, cost: 0 };
+  let translated = 0;
+  let cost = 0;
+  const CHUNK = 50;
+  for (let i = 0; i < items.length; i += CHUNK) {
+    const slice = items.slice(i, i + CHUNK);
+    const { result, cost: c } = await translateToLanguages(slice.map((it) => it.text), langs);
+    cost += c;
+    slice.forEach((it, k) => {
+      let any = false;
+      it.b.tracks = it.b.tracks || {};
+      for (const l of langs) {
+        const v = result[l]?.[k];
+        if (v) {
+          it.b.tracks[l] = { ...(it.b.tracks[l] || {}), text: v, status: "translated" };
+          any = true;
+        }
+      }
+      if (any) translated++;
+    });
+  }
+  return { translated, cost };
+}
+
 // ★프로젝트 전체를 한 번의 Claude 호출로 번역(비용·지연 최소). 컷 대사(dialogue→dialogueTranslation)
 //   + 모든 말풍선(text→translation, 효과음 제외)을 다 모아 1콜. Claude 가 준 번역만 덮어쓴다
 //   (실패해 null 이면 기존값 유지 = gpt-4o 폴백 보존). 반환 { translated, cost }.

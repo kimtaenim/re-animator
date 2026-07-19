@@ -95,7 +95,23 @@ export interface DialogueBubble {
   volume?: number; // 이 줄 목소리 크기 배수(합성 시 적용). 1=보통, <1 작게, >1 크게. 없으면 1.
   distant?: boolean; // 멀리서 들리는 느낌(거리감) — 합성 시 로우패스+약한 반향+감쇠.
   noSubtitle?: boolean; // ★자막에서 제외(소리는 나되 캡션 안 뜸) — 비명·효과음성 대사 등. 화자 목소리 더빙은 유지.
+  tracks?: Record<string, BubbleTrack>; // ★언어별(ja/en) 번역·TTS(스펙 §10). 없으면 레거시(text=원어·translation=한국어). 가산적.
 }
+
+// ── 언어별 대사 트랙(스펙 §10) — 하위호환 가산 필드. text(원어)·translation(한국어)은 불변. ──
+export interface BubbleTrack {
+  text?: string; // 번역 텍스트(해당 언어)
+  audioUrl?: string; // TTS 오디오 Blob URL(언어별)
+  durationFinal?: number; // TTS 도착 후 확정 길이(초, 언어별)
+  status?: "pending" | "translated" | "tts" | "done";
+}
+
+// 지원 언어(스펙 §10) — 확장 가능. speedCps=초당 글자/모라(길이 어림값). 실측으로 보정.
+export const LANGUAGES: { id: string; label: string; speedCps: number }[] = [
+  { id: "ja", label: "일본어", speedCps: 6.5 },
+  { id: "en", label: "영어", speedCps: 15 },
+];
+export const LANG_SPEED_CPS: Record<string, number> = { ko: 4.5, ja: 6.5, en: 15 };
 
 // 감정 연기 프리셋 — id 는 bubble.emotion 에 저장, tag 는 ElevenLabs v3 오디오 태그(워커 tts.mjs 와 동기).
 export const EMOTIONS: { id: string; label: string; tag: string }[] = [
@@ -265,6 +281,7 @@ export interface Project {
   narratorVoice?: { provider: string; id: string; name: string }; // 나레이션 더빙 목소리(카탈로그에서 선택)
   dubSpeed?: number; // 더빙 말 속도 배수(1=기본, 1.2=조금 빠르게). Typecast tempo / ElevenLabs speed.
   storyContext?: string; // ★스토리 맥락/톤(사용자 작성) — 모든 영상 생성 프롬프트에 주입해 맥락 어긋난 동작(예: 죽어가는데 벌떡 일어남) 방지.
+  targetLanguages?: string[]; // ★번역·출력 대상 언어(스펙 §10, 예 ["ja","en"]). 없으면 레거시(단일 — 기존 동작). LANGUAGES 참조.
 
   steps: Record<StepKind, StepState>;
 
