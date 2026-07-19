@@ -1472,18 +1472,12 @@ const BODY_MOTION_PROMPTS = {
 const SPEAKING_GUIDANCE =
   "The character is talking: natural, subtle lip and mouth movement as if speaking, with a slight, " +
   "lively facial expression. Keep the same identity and pose; do not add text or captions.";
-// ★이 컷에 보이는 인물은 지금 말하는 사람이 아님(다른/화면 밖 인물이 말함) → 입 다물기 명시.
+// ★이 컷의 보이는 인물이 지금 말하는 게 아니면(대사 없음 or 다른/화면 밖 화자) → 입 다물기 강제.
 const MOUTH_CLOSED_GUIDANCE =
-  "The visible character(s) are NOT the ones speaking right now — someone off-screen or a different person is talking. " +
-  "Keep every visible character's mouth firmly CLOSED and still, with a calm, neutral expression. " +
-  "Do NOT add any lip movement, mouth opening, or talking motion to anyone on screen.";
+  "None of the visible characters are speaking in this shot. " +
+  "Keep every visible character's mouth firmly CLOSED and still, with a calm, natural expression. " +
+  "Do NOT add any lip movement, mouth opening, jaw motion, or talking/mouthing motion to anyone on screen.";
 
-// 이 컷에 효과음 아닌 '대사'가 하나라도 있나(화자 상관없이).
-function hasAnyDialogue(cut) {
-  const bubs = cut?.bubbles ?? [];
-  if (bubs.length) return bubs.some((b) => b.speakerId !== "__sfx__" && (b.text || "").trim() !== "");
-  return (cut?.dialogue || "").trim() !== "";
-}
 // 이 컷에 '보이는 인물이 직접 하는 대사'가 있나 — 인물/액션 컷 + 화자(charId)가 ★이 컷에 등장하는 인물★일 때만.
 // 내레이션(speakerId=null)·효과음·★다른/화면 밖 인물★이 말하면 false = 이 컷 인물은 입이 안 움직인다.
 //   shownCharIds = 캐스팅상 이 컷에 나오는 캐릭터 id 들. 없으면(폴백) 예전처럼 화자만 있으면 말하는 것으로.
@@ -1518,10 +1512,10 @@ function buildVideoPrompt(cut, shownCharIds, storyContext) {
   if (story)
     base += `STORY CONTEXT (obey the mood and situation; the motion must NOT contradict it — e.g. do not make a dying, injured, sad or unconscious character suddenly cheer up, smile, or jump up): ${story}. `;
   base += explicit.length ? explicit.join(" ") : CONTINUE_ONLY;
+  // ★보이는 인물이 직접 말하는 대사가 있을 때만 입 움직임. 그 외(대사 없음·내레이션·다른/화면밖 화자)는
+  //   전부 입 다물기 강제 — 대사 없는 인물이 입 놀리는 것 방지.
   if (hasSpokenDialogue(cut, shownCharIds)) return `${base} ${SPEAKING_GUIDANCE}`;
-  // 대사는 있는데 화자가 이 컷 인물이 아니면 → 이 컷 인물은 입 다물기(다른/화면 밖 사람이 말하는 컷).
-  if (hasAnyDialogue(cut)) return `${base} ${MOUTH_CLOSED_GUIDANCE}`;
-  return base;
+  return `${base} ${MOUTH_CLOSED_GUIDANCE}`;
 }
 
 // ── video(M4): 재생성 컷(generatedImage)을 Grok I2V 로 영상화 → Scene.videoUrl ─
