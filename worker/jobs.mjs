@@ -1449,6 +1449,11 @@ const SUBTLE_LIFE =
   "a very small 3D head movement. Keep each character's facial EXPRESSION exactly as drawn — do not change the emotion. " +
   "NEVER add characters, people or objects not in the still. Keep the art style and colors; no text; " +
   "do not distort or morph faces or the composition. ";
+// ★'그림 속 그림'의 인물은 정지 — 사진·초상·포스터·표지·그림·간판·화면 안에 그려진 사람은 움직이지 않는다.
+const PICTURE_STATIC =
+  "Anyone or any face shown INSIDE a photograph, portrait, poster, painting, drawing, magazine or book cover, framed picture, " +
+  "sign, billboard, or screen is a STATIC image — keep them completely still and unchanged. Do NOT animate, move, blink, or bring to life " +
+  "any person depicted inside such a picture-within-the-picture; only the real, live subject(s) of the scene may move subtly. ";
 // 명시적 동작(버튼·프롬프트)이 없을 때만 — 이미 있는 동작만 이어가고 새 동작 창작 금지.
 const CONTINUE_ONLY =
   "CONTINUE only the action already depicted in the still (someone drawn mid-walk keeps walking at the same pace); " +
@@ -1507,7 +1512,7 @@ function buildVideoPrompt(cut, shownCharIds, storyContext) {
   if (bodyPhrase) explicit.push(`Subject motion: ${bodyPhrase}`);
   else if (action) explicit.push(`Subject action (keep it small and slow): ${action}`);
   if (desc) explicit.push(`What happens in this shot: ${desc}`);
-  let base = `${CAMERA_STATIC}${SUBTLE_LIFE}`;
+  let base = `${CAMERA_STATIC}${SUBTLE_LIFE}${PICTURE_STATIC}`;
   // ★스토리 맥락 — 모델이 상황·감정에 어긋나는 동작을 만들지 않게(죽어가는 인물이 웃으며 벌떡 일어나는 등 금지).
   if (story)
     base += `STORY CONTEXT (obey the mood and situation; the motion must NOT contradict it — e.g. do not make a dying, injured, sad or unconscious character suddenly cheer up, smile, or jump up): ${story}. `;

@@ -1275,7 +1275,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   function composeVideoPromptDraft(s: Project["scenes"][number]): string {
     const cut = s.cut;
     const parts = [
-      "Camera is completely STATIC (locked, fixed frame) — no pan, tilt, zoom, dolly or shake. Bring the still subtly to life with only small, slow, restrained motion; avoid any large, fast or exaggerated movement. Keep each character's facial expression exactly as drawn; do not change the emotion. Do not add characters or objects not in the still; keep the art style; no text.",
+      "Camera is completely STATIC (locked, fixed frame) — no pan, tilt, zoom, dolly or shake. Bring the still subtly to life with only small, slow, restrained motion; avoid any large, fast or exaggerated movement. Keep each character's facial expression exactly as drawn; do not change the emotion. Anyone shown inside a photo, portrait, poster, cover, painting or screen is a static image — keep them completely still. Do not add characters or objects not in the still; keep the art style; no text.",
     ];
     const story = (project.storyContext ?? "").trim();
     if (story) parts.push(`Story context (the motion must NOT contradict this): ${story}.`);
