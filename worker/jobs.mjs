@@ -1430,21 +1430,34 @@ export async function runPortrait(projectId, payload) {
 // 영상 길이(초) 추정. 우선순위: ①사람 지정(cut.durationSec) → ②대사 글자 수(한국어 ~5자/초)
 // → ③무대사 장면전환(transition)은 길게 → ④그 외 최소 비트. 나중에 TTS 오디오 길이가 마스터.
 const half = (x) => Math.max(0.5, Math.min(15, Math.round(x * 2) / 2)); // 0.5초 단위로 스냅
+// 모션 티어별 길이 범위(초, 스펙 §3): talk 3-4·idle 2-3·emote 2·action 1-2 강제.
+const TIER_SEC = { talk: [2.5, 4], idle: [2, 3], emote: [1.5, 2.5], action: [1, 2] };
 function estimateVideoSeconds(cut) {
   const MIN = Number(process.env.VIDEO_MIN_SEC || 2);
   const MAX = Number(process.env.VIDEO_MAX_SEC || 8);
-  if (cut?.durationSec) return half(cut.durationSec);
+  if (cut?.durationSec) return half(cut.durationSec); // 사람 지정이 최우선(티어보다 우선)
   const parts = [];
   if (cut?.bubbles?.length) for (const b of cut.bubbles) parts.push(b.text || "");
   else if (cut?.dialogue) parts.push(cut.dialogue);
   if (cut?.narration) parts.push(cut.narration);
   const chars = parts.join(" ").replace(/\s+/g, "").length;
+  let sec;
   if (chars > 0) {
     const CPS = Number(process.env.VIDEO_CHARS_PER_SEC || 5);
-    return Math.max(MIN, Math.min(MAX, Math.round(chars / CPS)));
+    sec = Math.max(MIN, Math.min(MAX, Math.round(chars / CPS)));
+  } else if (cut?.type === "transition") {
+    sec = Number(process.env.VIDEO_TRANSITION_SEC || 1.5);
+  } else {
+    sec = Number(process.env.VIDEO_SILENT_SEC || 1); // 대사 없는 정지컷 기본 1초
   }
-  if (cut?.type === "transition") return Number(process.env.VIDEO_TRANSITION_SEC || 1.5);
-  return Number(process.env.VIDEO_SILENT_SEC || 1); // 대사 없는 정지컷 기본 1초
+  // ★모션 티어(§3) 있으면 그 범위로 — 대사 있으면 대사길이를 티어 범위로 클램프, 무대사면 티어 중앙값.
+  const tr = TIER_SEC[cut?.motionTier];
+  if (tr) {
+    const [lo, hi] = tr;
+    sec = chars > 0 ? Math.max(lo, Math.min(hi, sec)) : (lo + hi) / 2;
+    return half(sec);
+  }
+  return sec;
 }
 
 // 영상 모션 프롬프트 = 컷 모션(카메라 워크) + 가이드(스톱모션 느낌). aninews video_motion 계승.
@@ -1473,6 +1486,11 @@ const SUBTLE_LIFE =
   "a very small 3D head movement. Keep each character's facial EXPRESSION exactly as drawn — do not change the emotion. " +
   "NEVER add characters, people or objects not in the still. Keep the art style and colors; no text; " +
   "do not distort or morph faces or the composition. ";
+// ★action 티어(스펙 §3·§4) — 절제 완화: 담긴 강한 한 박자는 허용하되 얼굴·화풍·구도는 보존(모프·왜곡·신규요소 금지).
+const TIER_ACTION_LIFE =
+  "This is an ACTION moment: allow ONE contained but energetic beat of movement — a quick, decisive motion or a short burst of dynamic energy, " +
+  "stronger than a calm living photo but still controlled and believable. Keep each character's identity, face and the art style intact — " +
+  "NO morphing, NO distortion, NO warping of faces or the composition, and NEVER add characters, people or objects not in the still. ";
 // ★'그림 속 그림'의 인물은 정지 — 사진·초상·포스터·표지·그림·간판·화면 안에 그려진 사람은 움직이지 않는다.
 const PICTURE_STATIC =
   "Anyone or any face shown INSIDE a photograph, portrait, poster, painting, drawing, magazine or book cover, framed picture, " +
@@ -1525,13 +1543,17 @@ function buildVideoPrompt(cut, shownCharIds, storyContext) {
   const desc = String(cut?.videoPrompt || "").trim();
   const bodyPhrase = BODY_MOTION_PROMPTS[cut?.bodyMotion] || ""; // 버튼 프리셋
   const action = String(cut?.action || "").trim();
+  const hint = String(cut?.motionPromptHint || "").trim(); // VLM 티어 맞춤 모션 서술(§3)
   const story = String(storyContext || "").trim();
   const explicit = [];
   if (bodyPhrase) explicit.push(`Subject motion: ${bodyPhrase}`);
   else if (action) explicit.push(`Subject action (keep it small and slow): ${action}`);
+  else if (hint) explicit.push(`Motion (${cut?.motionTier || "auto"} tier): ${hint}`); // 명시 동작 없을 때 티어 힌트
   if (desc) explicit.push(`What happens in this shot: ${desc}`);
+  // ★모션 티어(§3): action 이면 절제 완화(강한 한 박자), 그 외(talk/idle/emote)는 절제 유지(SUBTLE_LIFE).
+  const lifeClause = cut?.motionTier === "action" ? TIER_ACTION_LIFE : SUBTLE_LIFE;
   // 기본: 사진·표지 속 인물 정지. 컷별 animatePicture 켜면(가끔 움직여야 할 때) 생략.
-  let base = `${CAMERA_STATIC}${SUBTLE_LIFE}${cut?.animatePicture ? "" : PICTURE_STATIC}`;
+  let base = `${CAMERA_STATIC}${lifeClause}${cut?.animatePicture ? "" : PICTURE_STATIC}`;
   // ★스토리 맥락 — 모델이 상황·감정에 어긋나는 동작을 만들지 않게(죽어가는 인물이 웃으며 벌떡 일어나는 등 금지).
   if (story)
     base += `STORY CONTEXT (obey the mood and situation; the motion must NOT contradict it — e.g. do not make a dying, injured, sad or unconscious character suddenly cheer up, smile, or jump up): ${story}. `;

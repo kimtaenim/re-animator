@@ -149,7 +149,7 @@ UI
 3) 웹앱 클라이언트 프리뷰 + 파라미터 편집 + 씬 목록 재정의(9절)  ← **[완료]** (프리뷰·편집 + §9 아코디언: 접힌 줄 4요소·미결만 보기·삽입대사 일괄끄기)
 4) VLM 스키마 확장(모션 티어 + 오디오 제안 + 다국어 동시 번역 + vertigo/보간 후보 태그)  ← **[분류 산출 완료]** (classify.mjs strict 스키마+prompts.json: motion_tier·audio_suggestions·보간후보; 다국어 동시번역은 Phase 5)
 5) 다국어 데이터 모델 + 작업 언어 토글 + 언어별 duration/타임라인  ← **[데이터모델·번역생성 완료 / UI토글·언어별 TTS·compose 후속]** (DialogueBubble.tracks 하위호환, Project.targetLanguages, translateScenesMultilang 한 콜 동시번역, extract 조건부 배선)
-6) 티어별 I2V 요청 규칙 + duration 2단계 + 트림/홀드/슬로우
+6) 티어별 I2V 요청 규칙 + duration 2단계 + 트림/홀드/슬로우  ← **[티어→I2V 완료]** (estimateVideoSeconds 티어 길이범위, buildVideoPrompt action 절제완화·motionPromptHint; duration final/트림/홀드/슬로우는 TTS 도착 의존 → Phase 8)
 7) crash_zoom 3프레이밍 잡 + 병합 확장 동작 보간 + orbit I2V 예외 경로
 8) 언어별 TTS·자막 ASS + 오디오 3트랙 합성 + 덕킹 + whip·이펙트 오버레이 + 프록시 렌더 + 언어별 출력 잡
 
