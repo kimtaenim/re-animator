@@ -952,7 +952,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
                   }`}
                 >
-                  ⚙
+                  ⚙️
                 </button>
               )}
               {b.audioUrl ? (
@@ -3515,7 +3515,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                               : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
                           }`}
                         >
-                          {advCut.has(s.id) ? "⚙ 연출 접기" : "⚙ 연출·세부"}
+                          {advCut.has(s.id) ? "⚙️ 연출 접기" : "⚙️ 연출·세부"}
                         </button>
                         <button
                           type="button"
