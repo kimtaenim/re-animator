@@ -141,6 +141,7 @@ export interface CutOntology {
   subtitleY?: number; // 자막 세로 중심(0=위,1=아래). 있으면 subtitlePos보다 우선. 컷별 9분할 수동
   subtitleX?: number; // 자막 가로 중심(0=왼쪽,1=오른쪽). 컷별 9분할 수동. 기본 0.5(중앙)
   noCastRef?: boolean; // 재생성 시 캐스팅 정본 참고 끄기(피·변신 등 특수 상태 컷 — 정본이 상태를 덮지 않게)
+  cameraWork?: CameraWork; // ★연출 레이어(스펙 §2). 저장은 이 JSON 만; 픽셀은 워커(camerafx)/프리뷰가 테이블로 굽는다.
   confirmed: boolean; // 사람이 G1 에서 타입 확정했는지
 }
 
@@ -200,8 +201,6 @@ export interface Scene {
   id: string;
   order: number;
   sourceRegion: SourceRegion; // 가상 캔버스 전역 좌표
-  cameraWork?: CameraWork; // ★연출 레이어(스펙 §2). 저장은 이 JSON 만; 픽셀은 워커/프리뷰가 테이블로 굽는다.
-  cameraTable?: CameraKeyframeTable; // 캐시된 키프레임 테이블(cameraWork 로부터 파생, 순수 연산). 없으면 즉석 생성.
   cut?: CutOntology; // 컷 온톨로지(타입+내용). 미분류면 type=null.
   originalImage?: string; // 추출된 원본 컷 Blob URL (확정 후 워커가 채움)
   regenMode?: "mask" | "full"; // 재생성 방식: mask=원본보존+빈공간/글씨만, full=통째 재생성

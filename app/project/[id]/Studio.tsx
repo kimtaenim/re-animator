@@ -14,6 +14,7 @@ import { blankCut } from "@/lib/ontology";
 import { splitRuns, wordTokens, toggleWordEmphasis } from "@/lib/emphasis";
 import BoundaryEditor, { type SavedRegion } from "./BoundaryEditor";
 import CastReview from "./CastReview";
+import CameraWorkEditor from "./CameraWorkEditor";
 
 const STEP_LABEL: Record<StepKind, string> = {
   source: "1. 소스 · 컷 분할",
@@ -1590,6 +1591,55 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     } catch (e) {
       clear();
       setError(e instanceof Error ? e.message : "후처리 실패");
+    }
+  }
+
+  // ── 카메라워크(스펙 §2 계층 A) 굽기 — scene.cut.cameraWork 를 워커가 클립 위에 실픽셀로 굽는다. ──
+  //   저장(cameraWork JSON)은 슬라이더 편집 시 updateCut 이 이미 반영. 여기선 굽기 잡만.
+  async function applyCameraFx(sceneId: string) {
+    const s = projectRef.current.scenes.find((x) => x.id === sceneId);
+    if (!s?.videoUrl) {
+      setError("먼저 동영상을 생성하세요 — 카메라워크는 생성된 클립 위에 굽습니다.");
+      return;
+    }
+    setError("");
+    setFxPending((prev) => new Set([...prev, sceneId]));
+    const clear = () =>
+      setFxPending((prev) => {
+        const n = new Set(prev);
+        n.delete(sceneId);
+        return n;
+      });
+    try {
+      const r = await fetch("/api/camerafx", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneIds: [sceneId] }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "카메라워크 적용 실패");
+      const iv = setInterval(async () => {
+        try {
+          const jr = await fetch(`/api/job?id=${d.jobId}`, { cache: "no-store" });
+          const jd = await jr.json();
+          if (jd.ok && (jd.status === "done" || jd.status === "error")) {
+            clearInterval(iv);
+            clear();
+            if (jd.status === "error") setError(`카메라워크 실패: ${jd.error ?? ""}`);
+            const pr = await fetch(`/api/project/${project.id}`, { cache: "no-store" });
+            const pd = await pr.json();
+            if (pd.ok) setProject(pd.project);
+            if (jd.status === "done") setScenePreview(sceneId); // 굽고 나서 미리보기 자동 오픈(최종 픽셀)
+          }
+        } catch {}
+      }, 4000);
+      setTimeout(() => {
+        clearInterval(iv);
+        clear();
+      }, 10 * 60_000);
+    } catch (e) {
+      clear();
+      setError(e instanceof Error ? e.message : "카메라워크 적용 실패");
     }
   }
 
@@ -3433,6 +3483,19 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           </button>
                         ))}
                       </div>
+                      {/* 🎥 카메라워크(스펙 §2 계층 A) — 정지이미지 위 Web Animations 근사 프리뷰 +
+                          파라미터 슬라이더(저장=cameraWork JSON). '적용'은 워커 camerafx 로 실픽셀 굽기.
+                          기존 ⚡후처리 카메라(아래)는 유지 — 두 방식 공존, 사용자 확정 후 정리. */}
+                      {!isCardScene && (s.generatedImage || s.originalImage) && (
+                        <CameraWorkEditor
+                          cameraWork={s.cut?.cameraWork}
+                          imageUrl={s.generatedImage ?? s.originalImage}
+                          onChange={(cw) => updateCut(s.id, { cameraWork: cw })}
+                          onApply={() => applyCameraFx(s.id)}
+                          applying={fxPending.has(s.id)}
+                          busy={busy}
+                        />
+                      )}
                       {/* ⚡후처리 줌 — 워커가 실픽셀에 굽고(컷당 20~40초) fxUrl 저장. 미리보기·합성이
                           그대로 사용(미리보기=최종). 원본 videoUrl 보존이라 재적용·해제 자유. */}
                       {!isCardScene && s.videoUrl && (

@@ -8,6 +8,9 @@
 - **v0.2 (2026-07-20, 진행 중)**
   - **계층 B(2레이어 합성) 연기 결정 (사용자 승인):** 현 파이프라인은 인물/배경 분리 매트를 만들지 않는다(사용자가 지시한 적 없음). 계층 B(parallax_push·vertigo)는 모든 컷에 필요한 게 아니라 필요할 때만 쓰므로, 분리 매트는 **필요 시점에 온디맨드**로 나중에 붙인다. 수식 모듈은 이미 character/background 2트랙을 뱉으므로 매트 확보 시 즉시 연결 가능. → Phase 2는 **계층 A만** 구현.
   - Phase 2: 워커 계층 A 렌더러 `worker/cameraRender.mjs` — ffmpeg **sendcmd**로 crop w/h/x/y 에 키프레임 테이블의 리터럴 픽셀값을 프레임마다 주입(zoompan 수식 직접 기술 금지 준수). 단일 패스 스트리밍이라 프레임별 sharp 디코딩 없음(합성 OOM 회피). 업스케일 트리거(needsUpscale)는 결정 로직만; Real-ESRGAN 실제 패스는 후속.
+  - Phase 3(부분): 웹앱 클라이언트 프리뷰 + 파라미터 편집. `app/project/[id]/CameraWorkEditor.tsx` — 정지이미지 위 Web Animations API 근사 프리뷰 + 슬라이더(preset·길이·줌속도·드리프트·시작줌·배경델타·흔들진폭), "근사"/orbit "프록시 렌더 필수"/계층B "매트 준비 후" 라벨. 저장은 `cameraWork` JSON 만(updateCut→/api/cut). "적용(굽기)"→ /api/camerafx. 기존 ⚡후처리 카메라(effect/strength)는 유지(공존, 사용자 확정 후 정리).
+  - **cameraWork 저장 위치: `Scene` → `CutOntology`로 이동.** 앱 저장 경로가 cut 기반(/api/cut + 화이트리스트 cleanCut)이라, 검증된 경로를 재사용하고 데이터 소실(화이트리스트 누락=필드 증발, 과거 번역 버그)을 피하기 위함. `lib/cutClean.ts`에 `cleanCameraWork`(단일 원천·경계값 클램프) 추가. 워커 runCameraFx 는 `s.cut.cameraWork` 읽음.
+  - **§9 접힌 줄 재정의 연기:** motion_tier(Phase 4)·작업 언어(Phase 5)에 의존하므로 그 단계 후 진행. 접힌 줄의 파괴적 수술은 의존 데이터 확보 후.
   - Phase 1 착수: 카메라워크 수식 모듈 `lib/cameraKeyframes.mjs`(순수 ESM·무의존) + 정규화 키프레임 테이블 + 골든 테스트(`scripts/test-camera-keyframes.mjs`). 계층 A(단일 crop track)/계층 B(character·background 2 track), 시드 PRNG 셰이크, easing, `toPixelCrop`/`toWebTransform` 헬퍼. 워커/웹앱이 이 테이블만 소비(수식 단일 소스).
   - `lib/types.ts`: `CameraWork`, `CameraState`, `KeyframeTable`, `KeyframeTrack`, `CameraPreset`, `CAMERA_PRESETS`, `Scene.cameraWork` 추가.
   - **배포 주의(확인됨):** Render 워커는 `render.yaml`(`rootDir: worker`, node 런타임)로 배포되고 `worker/Dockerfile`은 미사용. 전체 레포가 클론되므로 워커가 런타임에 `../lib/*.mjs`를 import 가능. 단 `rootDir` 밖(`lib/`)만 바뀐 push는 워커 자동재배포를 트리거하지 않을 수 있으므로, 공유 수식 변경은 워커 소비 코드와 **같은 커밋**으로 push해 재배포를 보장한다.
@@ -141,7 +144,7 @@ UI
 
 1) 카메라워크 수식 모듈(계층 A/B 트랙 포함) + 키프레임 테이블 + 골든 테스트  ← **[완료 · 9123986]** (골든 103 pass, 워커↔웹 2px)
 2) 워커 렌더러(프레임별 crop·2레이어 합성, 업스케일 트리거 포함)  ← **[계층 A 완료]** (sendcmd crop, 통합 11 pass; 계층 B/ESRGAN 후속)
-3) 웹앱 클라이언트 프리뷰 + 파라미터 편집 + 씬 목록 재정의(9절)
+3) 웹앱 클라이언트 프리뷰 + 파라미터 편집 + 씬 목록 재정의(9절)  ← **[프리뷰·편집 완료 / §9 재정의 연기(Phase 4·5 의존)]**
 4) VLM 스키마 확장(모션 티어 + 오디오 제안 + 다국어 동시 번역 + vertigo/보간 후보 태그)
 5) 다국어 데이터 모델 + 작업 언어 토글 + 언어별 duration/타임라인
 6) 티어별 I2V 요청 규칙 + duration 2단계 + 트림/홀드/슬로우

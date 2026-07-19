@@ -1,9 +1,45 @@
 // 말풍선(대사) 저장 정리 — /api/cut 저장 시 신뢰 못 할 입력을 화이트리스트로 정리한다.
 // ★한 곳에서만 정의(단일 원천) — 필드 추가 시 여기만 고치면 저장 경로 전체에 반영·테스트 가능.
 //   translation(번역)이 여기서 빠지면 편집 저장 때 번역이 통째로 날아간다(과거 버그).
-import { EMOTIONS, type DialogueBubble } from "./types";
+import { EMOTIONS, type DialogueBubble, type CameraWork, type CameraPreset, type CameraEasing } from "./types";
 
 const EMOTION_IDS = new Set(EMOTIONS.map((e) => e.id));
+
+// 카메라워크(스펙 §2) 저장 정리 — 저장 경로가 화이트리스트라 여기 없으면 통째로 날아간다.
+const CAM_PRESETS = new Set<CameraPreset>([
+  "push_in", "pull_out", "pan", "static", "shake", "crash_zoom", "whip", "parallax_push", "vertigo", "orbit",
+]);
+const CAM_EASINGS = new Set<CameraEasing>(["linear", "easeIn", "easeOut", "easeInOut"]);
+const clampNum = (v: unknown, lo: number, hi: number): number | undefined =>
+  typeof v === "number" && isFinite(v) ? Math.max(lo, Math.min(hi, v)) : undefined;
+
+export function cleanCameraWork(raw: unknown): CameraWork | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.preset !== "string" || !CAM_PRESETS.has(r.preset as CameraPreset)) return undefined;
+  const cw: CameraWork = {
+    preset: r.preset as CameraPreset,
+    duration_s: clampNum(r.duration_s, 0.3, 20) ?? 3.5,
+  };
+  const zr = clampNum(r.zoom_rate_pct_per_s, -15, 15);
+  if (zr !== undefined) cw.zoom_rate_pct_per_s = zr;
+  if (r.drift_px_per_s && typeof r.drift_px_per_s === "object") {
+    const d = r.drift_px_per_s as Record<string, unknown>;
+    cw.drift_px_per_s = { x: clampNum(d.x, -300, 300) ?? 0, y: clampNum(d.y, -300, 300) ?? 0 };
+  }
+  const bg = clampNum(r.bg_scale_delta_pct_per_s, -15, 15);
+  if (bg !== undefined) cw.bg_scale_delta_pct_per_s = bg;
+  if (typeof r.easing === "string" && CAM_EASINGS.has(r.easing as CameraEasing)) cw.easing = r.easing as CameraEasing;
+  const ss = clampNum(r.shake_seed, 0, 1e9);
+  if (ss !== undefined) cw.shake_seed = Math.round(ss);
+  const sa = clampNum(r.shake_amp_px, 0, 40);
+  if (sa !== undefined) cw.shake_amp_px = sa;
+  const sd = clampNum(r.shake_damp, 0, 20);
+  if (sd !== undefined) cw.shake_damp = sd;
+  const sz = clampNum(r.start_zoom, 1, 3);
+  if (sz !== undefined) cw.start_zoom = sz;
+  return cw;
+}
 
 export function cleanBubble(raw: unknown): DialogueBubble {
   const b = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;

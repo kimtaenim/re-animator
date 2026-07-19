@@ -1806,7 +1806,7 @@ export async function runCameraFx(projectId, payload) {
 
   let done = 0;
   for (const s of targets) {
-    const cw = s.cameraWork;
+    const cw = s.cut?.cameraWork; // 카메라워크는 cut 에 저장(저장 경로 재사용 — /api/cut 화이트리스트)
     let dir;
     try {
       dir = await mkdtemp(join(tmpdir(), "recam-"));

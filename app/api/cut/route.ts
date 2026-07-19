@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProject, saveProject } from "@/lib/projectStore";
 import { CUT_TYPES, TEXT_KINDS, blankCut } from "@/lib/ontology";
 import { type CutOntology } from "@/lib/types";
-import { cleanBubbles } from "@/lib/cutClean";
+import { cleanBubbles, cleanCameraWork } from "@/lib/cutClean";
 
 export const runtime = "nodejs";
 
@@ -82,6 +82,10 @@ function cleanCut(raw: unknown): CutOntology {
     c.subtitleX = Math.max(0.05, Math.min(0.95, r.subtitleX)); // 가로 중심 비율
   }
   if (r.noCastRef === true) c.noCastRef = true; // 재생성 시 캐스팅 정본 참고 끄기(피·변신 등 특수 상태 컷)
+  if (r.cameraWork !== undefined) {
+    const cw = cleanCameraWork(r.cameraWork); // 카메라워크(스펙 §2) — 화이트리스트(cutClean 단일 원천)
+    if (cw) c.cameraWork = cw;
+  }
   c.confirmed = r.confirmed === true;
   return c;
 }
