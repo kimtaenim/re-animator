@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProject, saveProject } from "@/lib/projectStore";
 import { CUT_TYPES, TEXT_KINDS, blankCut } from "@/lib/ontology";
 import { type CutOntology } from "@/lib/types";
-import { cleanBubbles, cleanCameraWork } from "@/lib/cutClean";
+import { cleanBubbles, cleanCameraWork, cleanAudioSuggestions } from "@/lib/cutClean";
 
 export const runtime = "nodejs";
 
@@ -85,6 +85,18 @@ function cleanCut(raw: unknown): CutOntology {
   if (r.cameraWork !== undefined) {
     const cw = cleanCameraWork(r.cameraWork); // 카메라워크(스펙 §2) — 화이트리스트(cutClean 단일 원천)
     if (cw) c.cameraWork = cw;
+  }
+  // 모션 티어(스펙 §3) — VLM 자동 분류 결과·사람 수정. 옵셔널.
+  if (typeof r.motionTier === "string" && ["talk", "idle", "emote", "action"].includes(r.motionTier)) {
+    c.motionTier = r.motionTier as CutOntology["motionTier"];
+  }
+  if (typeof r.tierConfidence === "number" && isFinite(r.tierConfidence)) c.tierConfidence = Math.max(0, Math.min(1, r.tierConfidence));
+  if (typeof r.tierEvidence === "string") c.tierEvidence = r.tierEvidence.slice(0, 200);
+  if (typeof r.motionPromptHint === "string") c.motionPromptHint = r.motionPromptHint.slice(0, 400);
+  if (r.interpolationCandidate === true) c.interpolationCandidate = true;
+  if (r.audioSuggestions !== undefined) {
+    const sug = cleanAudioSuggestions(r.audioSuggestions); // 오디오 제안(스펙 §6) — 화이트리스트
+    if (sug) c.audioSuggestions = sug;
   }
   c.confirmed = r.confirmed === true;
   return c;

@@ -109,6 +109,18 @@ export const EMOTIONS: { id: string; label: string; tag: string }[] = [
   { id: "sigh", label: "😮‍💨 한숨", tag: "sighs" },
 ];
 
+// ── 오디오 채움 제안(스펙 §6) — VLM 이 무음 구간 최소화용으로 제안. 기본 승인. ──────────
+export interface AudioSuggestion {
+  type: "sfx" | "vocal_reaction" | "insert_line"; // 효과음 / 배역 리액션 발성 / 삽입 대사(창작)
+  text: string; // 소리/발성/대사 내용(작업 언어)
+  speaker?: string | null; // 배역 id(vocal_reaction·insert_line). null=미상
+  timing?: "start" | "mid" | "end";
+  confidence?: number; // 0-1
+  enabled?: boolean; // insert_line 은 창작이라 on/off 관리(기본 on). sfx/vocal 은 항상 on.
+  ko?: string; // 한국어 병기(§10 — 작업자 이해용, 산출물 제외)
+  audioUrl?: string; // 생성된 오디오 Blob URL(§6 경로)
+}
+
 export interface CutOntology {
   type: CutType | null; // null = 미분류(사람이 채움)
   textKind: TextKind | null; // type=text 일 때만
@@ -142,6 +154,13 @@ export interface CutOntology {
   subtitleX?: number; // 자막 가로 중심(0=왼쪽,1=오른쪽). 컷별 9분할 수동. 기본 0.5(중앙)
   noCastRef?: boolean; // 재생성 시 캐스팅 정본 참고 끄기(피·변신 등 특수 상태 컷 — 정본이 상태를 덮지 않게)
   cameraWork?: CameraWork; // ★연출 레이어(스펙 §2). 저장은 이 JSON 만; 픽셀은 워커(camerafx)/프리뷰가 테이블로 굽는다.
+  // ── 모션 티어(스펙 §3) — VLM 자동 분류(추가 호출 없음). 없으면 미분류. ────────────────
+  motionTier?: "talk" | "idle" | "emote" | "action"; // 티어별 I2V 요청 규칙(길이·모션)에 사용
+  tierConfidence?: number; // 0-1. 낮으면 "미결만 보기"에 포함
+  tierEvidence?: string; // 근거 한 줄
+  motionPromptHint?: string; // 티어 규칙 준수 I2V 모션 서술
+  interpolationCandidate?: boolean; // 인접 컷 자세차 큼 → 동작 보간 후보(스펙 §4, G2 배지)
+  audioSuggestions?: AudioSuggestion[]; // 오디오 채움 제안(스펙 §6)
   confirmed: boolean; // 사람이 G1 에서 타입 확정했는지
 }
 

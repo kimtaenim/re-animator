@@ -1,7 +1,7 @@
 // 말풍선(대사) 저장 정리 — /api/cut 저장 시 신뢰 못 할 입력을 화이트리스트로 정리한다.
 // ★한 곳에서만 정의(단일 원천) — 필드 추가 시 여기만 고치면 저장 경로 전체에 반영·테스트 가능.
 //   translation(번역)이 여기서 빠지면 편집 저장 때 번역이 통째로 날아간다(과거 버그).
-import { EMOTIONS, type DialogueBubble, type CameraWork, type CameraPreset, type CameraEasing } from "./types";
+import { EMOTIONS, type DialogueBubble, type CameraWork, type CameraPreset, type CameraEasing, type AudioSuggestion } from "./types";
 
 const EMOTION_IDS = new Set(EMOTIONS.map((e) => e.id));
 
@@ -78,4 +78,29 @@ export function cleanBubble(raw: unknown): DialogueBubble {
 export function cleanBubbles(raw: unknown): DialogueBubble[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((b) => !!b && typeof b === "object").map(cleanBubble).slice(0, 12);
+}
+
+// 오디오 채움 제안(스펙 §6) 저장 정리 — 화이트리스트.
+const SUG_TYPES = new Set(["sfx", "vocal_reaction", "insert_line"]);
+const SUG_TIMING = new Set(["start", "mid", "end"]);
+export function cleanAudioSuggestions(raw: unknown): AudioSuggestion[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw
+    .filter((s): s is Record<string, unknown> => !!s && typeof s === "object" && SUG_TYPES.has(String((s as Record<string, unknown>).type)))
+    .map((s) => {
+      const sug: AudioSuggestion = {
+        type: s.type as AudioSuggestion["type"],
+        text: typeof s.text === "string" ? s.text.slice(0, 300) : "",
+      };
+      if (typeof s.speaker === "string") sug.speaker = s.speaker;
+      else if (s.speaker === null) sug.speaker = null;
+      if (typeof s.timing === "string" && SUG_TIMING.has(s.timing)) sug.timing = s.timing as AudioSuggestion["timing"];
+      if (typeof s.confidence === "number" && isFinite(s.confidence)) sug.confidence = Math.max(0, Math.min(1, s.confidence));
+      if (s.enabled === false) sug.enabled = false;
+      if (typeof s.ko === "string") sug.ko = s.ko.slice(0, 300);
+      if (typeof s.audioUrl === "string") sug.audioUrl = s.audioUrl; // 생성 오디오 보존
+      return sug;
+    })
+    .slice(0, 8);
+  return out;
 }
