@@ -66,10 +66,33 @@ function buildSchema(typeEnum, textKindEnum) {
               sfx: { type: "string" },
               description: { type: "string" },
               promptDraft: { type: "string" },
+              // ── 연출 정보(스펙 §3·§4·§6) — strict 라 전부 required. 미상이어도 기본값으로 채운다. ──
+              motion_tier: { type: "string", enum: ["talk", "idle", "emote", "action"] },
+              tier_confidence: { type: "number" },
+              tier_evidence: { type: "string" },
+              motion_prompt_hint: { type: "string" },
+              interpolation_candidate: { type: "boolean" },
+              audio_suggestions: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    type: { type: "string", enum: ["sfx", "vocal_reaction", "insert_line"] },
+                    text: { type: "string" },
+                    speaker: { type: "string" },
+                    timing: { type: "string", enum: ["start", "mid", "end"] },
+                    confidence: { type: "number" },
+                  },
+                  required: ["type", "text", "speaker", "timing", "confidence"],
+                },
+              },
             },
             required: [
               "n", "type", "textKind", "characters", "setting",
               "objects", "dialogue", "dialogueTranslation", "sfx", "description", "promptDraft",
+              "motion_tier", "tier_confidence", "tier_evidence", "motion_prompt_hint",
+              "interpolation_candidate", "audio_suggestions",
             ],
           },
         },
@@ -130,6 +153,30 @@ export function normalizeCut(raw, R) {
   if (typeof raw.sfx === "string") c.sfx = raw.sfx.slice(0, 120);
   if (typeof raw.description === "string") c.description = raw.description.slice(0, 800);
   if (typeof raw.promptDraft === "string") c.promptDraft = raw.promptDraft.slice(0, 800);
+  // ── 연출 정보(스펙 §3·§4·§6) → CutOntology camelCase. 빈 값은 저장 안 함(옵셔널). ──
+  const TIERS = new Set(["talk", "idle", "emote", "action"]);
+  if (TIERS.has(raw.motion_tier)) c.motionTier = raw.motion_tier;
+  if (typeof raw.tier_confidence === "number" && isFinite(raw.tier_confidence)) {
+    c.tierConfidence = Math.max(0, Math.min(1, raw.tier_confidence));
+  }
+  if (typeof raw.tier_evidence === "string" && raw.tier_evidence.trim()) c.tierEvidence = raw.tier_evidence.slice(0, 200);
+  if (typeof raw.motion_prompt_hint === "string" && raw.motion_prompt_hint.trim()) c.motionPromptHint = raw.motion_prompt_hint.slice(0, 400);
+  if (raw.interpolation_candidate === true) c.interpolationCandidate = true;
+  if (Array.isArray(raw.audio_suggestions) && raw.audio_suggestions.length) {
+    const SUG_T = new Set(["sfx", "vocal_reaction", "insert_line"]);
+    const SUG_TM = new Set(["start", "mid", "end"]);
+    const sug = raw.audio_suggestions
+      .filter((s) => s && typeof s === "object" && SUG_T.has(s.type) && typeof s.text === "string" && s.text.trim())
+      .map((s) => {
+        const o = { type: s.type, text: String(s.text).slice(0, 300) };
+        if (typeof s.speaker === "string" && s.speaker.trim()) o.speaker = s.speaker.slice(0, 120);
+        if (SUG_TM.has(s.timing)) o.timing = s.timing;
+        if (typeof s.confidence === "number" && isFinite(s.confidence)) o.confidence = Math.max(0, Math.min(1, s.confidence));
+        return o;
+      })
+      .slice(0, 8);
+    if (sug.length) c.audioSuggestions = sug;
+  }
   return c;
 }
 
