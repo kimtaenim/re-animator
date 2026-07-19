@@ -9,6 +9,7 @@ import {
   type CutOntology,
   STEP_ORDER,
   EMOTIONS,
+  LANGUAGES,
 } from "@/lib/types";
 import { blankCut } from "@/lib/ontology";
 import { splitRuns, wordTokens, toggleWordEmphasis } from "@/lib/emphasis";
@@ -1300,6 +1301,17 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ storyContext: v }),
+    }).catch(() => {});
+  }
+  // 번역·출력 대상 언어(§10) — 토글. 켜면 다음 컷 추출부터 tracks 채움(기존 컷은 재추출 시 반영).
+  async function toggleTargetLanguage(lang: string) {
+    const cur = project.targetLanguages ?? [];
+    const next = cur.includes(lang) ? cur.filter((l) => l !== lang) : [...cur, lang];
+    setProject((prev) => ({ ...prev, targetLanguages: next }));
+    await fetch(`/api/project/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ targetLanguages: next }),
     }).catch(() => {});
   }
   // 이 컷의 '자동 조립 프롬프트' 초안(영문) — 프롬프트 직접 편집 시작점. 워커 buildVideoPrompt 와 같은 취지.
@@ -2939,6 +2951,24 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               placeholder="예: 비극. 주인공은 칼에 찔려 죽어가는 중 — 밝거나 활기찬 동작·미소 금지. 시종 어둡고 무거운 톤."
               className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-xs"
             />
+            {/* 🌐 번역·출력 대상 언어(§10) — 켜면 이후 컷 추출 때 원어→언어별 tracks 채움. 한국어(역:)는 항상 병기. */}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]" title="선택한 언어로 대사를 번역해 언어별 버전 출력에 사용(스펙 §10). 지금은 번역·데이터 채움까지 — 언어별 TTS·자막·합성은 후속.">
+              <span className="text-[var(--muted)]">🌐 대상 언어</span>
+              {LANGUAGES.map((l) => {
+                const on = (project.targetLanguages ?? []).includes(l.id);
+                return (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() => toggleTargetLanguage(l.id)}
+                    className={`rounded border px-1.5 py-0.5 ${on ? "border-[var(--accent)] font-medium text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--panel-2)]"}`}
+                  >
+                    {on ? "✓ " : ""}{l.label}
+                  </button>
+                );
+              })}
+              <span className="text-[var(--muted)]">· 한국어는 항상 병기</span>
+            </div>
           </div>
 
           {/* 더빙(음성 생성) — 동영상과 별개. 얇은 한 줄로(설명은 툴팁). */}
