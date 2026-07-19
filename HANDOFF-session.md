@@ -16,11 +16,12 @@
 - `9aa4229` Phase 4 VLM 산출 — `worker/classify.mjs` strict 스키마+`config/prompts.json`에 motion_tier(talk/idle/emote/action)·tier_confidence·tier_evidence·motion_prompt_hint·interpolation_candidate·audio_suggestions 추가. normalizeCut 이 snake_case→camelCase 매핑. **분류 로직·기존 필드 무변경(가산)**. (사용자가 "푸시 안 하면 검증도 안 된다"며 명시 허용 → 배포 검증 대상.)
 - `055476f` Phase 5(기반) 다국어 — **하위호환 재구조화**: `DialogueBubble.tracks`(BubbleTrack), `Project.targetLanguages`, `LANGUAGES`/`LANG_SPEED_CPS`. 기존 필드 불변(text=원어·translation=한국어), tracks 가산. `cleanTracks` 화이트리스트. `worker/translate.mjs` `translateToLanguages`(한 콜 동시번역)+`translateScenesMultilang`(말풍선→tracks[lang].text). jobs.mjs extract 에 **targetLanguages 있을 때만** 조건부 배선(미설정=무영향·회귀 0).
 - `33b0ed1` 대상 언어 선택 UI — 스토리 맥락 아래 "🌐 대상 언어" 토글(ja/en). 켜야 다국어 번역이 돈다.
+- `41cc61a` §9 씬 목록 아코디언 재정의 — 접힌 줄 4요소(대사 한국어주·원어보조 / 길이 / 발화자 / 모션티어 드롭다운), 펼치면 기존 카드 본문 전부. 상단 "미결만 보기"·"삽입 대사 일괄 끄기". ★기능 제거 아님(본문 조건부 래핑, 카드 시작·끝 2지점만 수술). 다중선택 체크박스는 펼침 본문으로 이동(트레이드오프).
 
 **핵심 아키텍처 원칙(회귀 금지):** 카메라워크 수식은 `lib/cameraKeyframes.mjs` **한 곳**에만. 워커·웹앱은 그 테이블만 소비(두 벌 구현 금지). 셰이크는 shake_seed 시드 PRNG 로 양쪽 동일 궤적. 계층 B(parallax/vertigo)는 **인물/배경 매트가 없어 현재 스킵**(사용자 승인 — 온디맨드 매트 확보 후). orbit 은 I2V 위임(후처리 없음).
 
 **남은 것(다음 세션 — 대부분 배포 env·API 키 필요해 로컬 검증 불가):**
-1. **§9 접힌 씬 줄 재정의** — 이제 motion_tier(Phase 4 완)·작업 언어(Phase 5 완) 데이터가 있으니 착수 가능. 접힌 줄 4요소(대사+한국어 병기 / 길이 / 발화자 / motion_tier 드롭다운)로 단순화, 나머지는 펼침 화면. 거대 Studio.tsx 라 신중히(리셋 금지·기능 제거 금지 회귀 주의).
+1. **~~§9 접힌 씬 줄 재정의~~ [완료 41cc61a]** — 배포 후 확인: 4단계 씬 목록이 접힌 4요소 줄로 뜨는지, 줄 클릭 시 펼쳐 기존 컨트롤 다 보이는지, 모션티어 드롭다운·"미결만 보기"·"삽입 대사 일괄 끄기" 동작하는지. (다중선택 생성 체크박스가 펼침 안으로 들어감 — 불편하면 접힌 줄 복귀 요청.)
 2. **Phase 5 나머지(다국어 완성):** 작업 언어 토글(ja/en 화면 전환), G1 다국어 셀(원어/한국어/언어 전체 표시·수정), 언어별 TTS(tracks[lang].audioUrl)·ASS 자막·duration_final, compose 언어별 출력 잡(ep01_ja.mp4/ep01_en.mp4). 데이터·번역 기반은 완료됨.
 3. **Phase 6** 티어별 I2V 요청 규칙(motionTier→길이·모션, buildVideoPrompt) + duration 2단계(est/final) + 트림/홀드/슬로우.
 4. **Phase 7** crash_zoom 3프레이밍 잡 + 병합 확장 동작 보간(interpolationCandidate 활용) + orbit I2V 경로.
