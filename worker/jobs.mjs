@@ -1551,6 +1551,10 @@ export async function runVideo(projectId, payload) {
       if (g.url) {
         s.videoUrl = g.url;
         s.videoError = undefined;
+        // ★새 영상 생성 → 옛 영상 기준으로 구운 후처리(fxUrl/fx) 무효화. 안 지우면 카드·미리보기가
+        //   fxUrl 을 우선 보여줘서 "다시 생성해도 똑같다"(옛 영상)가 됨. 카메라워크는 새 영상에 다시 구우면 됨.
+        delete s.fxUrl;
+        delete s.fx;
       } else {
         s.videoError = g.error || "영상 실패";
       }
