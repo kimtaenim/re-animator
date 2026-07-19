@@ -2840,6 +2840,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             >
               {sceneRunning ? "생성 중…" : "전체 동영상 생성"}
             </button>
+            {/* 🧹 구운 후처리 카메라 전부 해제 → 원본(가장 최근 생성한) 영상 표시. 렌더·API 없음(토큰 0). */}
+            {project.scenes.some((s) => s.fxUrl) && (
+              <button
+                onClick={() => {
+                  const ids = project.scenes.filter((s) => s.fxUrl).map((s) => s.id);
+                  if (ids.length) runFxJob(ids, "none", 2);
+                }}
+                disabled={busy}
+                title="구운 후처리 카메라를 한 번에 전부 해제 → 이미 생성해둔 원본 영상 표시. 렌더·토큰 없음."
+                className="rounded-md border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
+              >
+                🧹 카메라효과 전체 해제
+              </button>
+            )}
           </div>
 
           {/* 📖 스토리 맥락 — 모든 영상 생성 프롬프트에 주입해 맥락 어긋난 동작(죽어가는데 벌떡 등)을 막는다. */}
