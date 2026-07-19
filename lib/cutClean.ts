@@ -30,6 +30,12 @@ export function cleanBubble(raw: unknown): DialogueBubble {
         ? Math.max(0.05, Math.min(0.95, b.subtitleY))
         : undefined,
     emotion: EMOTION_IDS.has(String(b.emotion)) ? String(b.emotion) : undefined,
+    volume:
+      typeof b.volume === "number" && isFinite(b.volume) && b.volume > 0 && b.volume !== 1
+        ? Math.max(0.1, Math.min(3, b.volume))
+        : undefined, // 목소리 크기 배수(합성 적용)
+    distant: b.distant === true ? true : undefined, // 거리감(멀리서)
+    noSubtitle: b.noSubtitle === true ? true : undefined, // 자막 제외(소리는 유지)
   } as DialogueBubble;
 }
 

@@ -323,6 +323,20 @@ function normalizeNarration(cut) {
   delete cut.narrationSpeakerId;
   delete cut.narrationAudioUrl;
 }
+
+// 검출된 효과음 문자열(cut.sfx) → 통제 가능한 '효과음' 말풍선(speakerId=__sfx__)으로 통일.
+// 사용자가 연출 보고서/편집기에서 보고 지우거나 고칠 수 있고(=통제), 더빙 때만 ElevenLabs 효과음으로
+// 생성된다. 절제: OCR 이 실제로 잡은 의성어/앰비언스만 한 줄로 등록하고, 원치 않으면 사용자가 지운다.
+function normalizeSfx(cut) {
+  if (!cut) return;
+  const sfx = (cut.sfx || "").trim();
+  if (!sfx) return;
+  cut.bubbles = cut.bubbles ?? [];
+  const norm = (t) => String(t || "").replace(/\s+/g, "").trim();
+  const already = cut.bubbles.some((b) => b.speakerId === "__sfx__" && norm(b.text) === norm(sfx));
+  if (!already) cut.bubbles.push({ text: sfx, speakerId: "__sfx__" });
+  cut.sfx = ""; // 단일 원천 = 말풍선(__sfx__). 중복 등록 방지.
+}
 import { loadSplitConfig } from "./config.mjs";
 import { directCut, CAMERA_PROMPTS } from "./director.mjs";
 
@@ -358,6 +372,42 @@ async function stripAudio(buf) {
       const pr = spawn(ff, ["-y", "-i", inp, "-c", "copy", "-an", "-movflags", "+faststart", out]);
       let err = "";
       pr.stderr.on("data", (d) => (err += d));
+      pr.on("error", rej);
+      pr.on("close", (c) => (c === 0 ? res() : rej(new Error(`ffmpeg ${c}: ${err.slice(-200)}`))));
+    });
+    return await readFile(out);
+  } catch {
+    return null;
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+// 프로젝트 지정 비율의 출력 픽셀(합성 targetDims 과 동일 값 — 단일 원천처럼 맞춘다).
+function targetDims(project) {
+  const ar = project?.aspectRatio;
+  if (ar === "9:16") return [720, 1280];
+  if (ar === "1:1") return [1024, 1024];
+  return [1280, 720];
+}
+
+// Grok I2V 출력을 '지정 비율'로 채워-크롭(crop-to-fill) + 오디오 제거. Grok 이 입력(예: 1:1)과 무관하게
+// 가로형 등 기본 비율로 내는 걸 바로잡는다. force_original_aspect_ratio=increase → 중앙 crop = 검은 띠 없이
+// 프레임을 꽉 채움. (1:1 이미지가 가로 프레임에 필러박스로 들어온 경우, 중앙 crop 이 원래 1:1 내용을 정확히 복원)
+async function conformVideo(buf, project) {
+  let dir;
+  try {
+    const ff = await ffmpegPath();
+    const [W, H] = targetDims(project);
+    dir = await mkdtemp(join(tmpdir(), "vconf-"));
+    const inp = join(dir, "in.mp4");
+    const out = join(dir, "out.mp4");
+    await writeFile(inp, buf);
+    const vf = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1`;
+    await new Promise((res, rej) => {
+      const pr = spawn(ff, ["-y", "-i", inp, "-vf", vf, "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", out]);
+      let err = "";
+      pr.stderr.on("data", (d) => { err += d; if (err.length > 8000) err = err.slice(-8000); });
       pr.on("error", rej);
       pr.on("close", (c) => (c === 0 ? res() : rej(new Error(`ffmpeg ${c}: ${err.slice(-200)}`))));
     });
@@ -796,7 +846,7 @@ export async function runExtract(projectId) {
     }
   }
 
-  for (const s of scenes) normalizeNarration(s.cut); // 레거시 내레이션 문자열 → 내레이터 말풍선으로 통일
+  for (const s of scenes) { normalizeNarration(s.cut); normalizeSfx(s.cut); } // 내레이션·효과음 문자열 → 통제 가능한 말풍선으로 통일
   // ★OCR 교정(보수적) — 추출 단계에서도 오독·고유명사 불일치를 전체 문맥으로 잡는다(단계마다 검출).
   //   기존 프로젝트도 추출 재실행 때 교정됨. bubble.text 교정 → cut.dialogue 재구성 후 번역.
   try {
@@ -1387,37 +1437,85 @@ function estimateVideoSeconds(cut) {
 // ★사용자 지정(2026-07-18): Grok 은 거의 '정지'로 — 카메라워크는 워커 후처리(postfx 줌 커브)로
 //   따로 굽는다. Grok 이 크게 움직이면 그림이 뭉개져 품질이 무너졌음. 여기선 '살아있는 사진'
 //   수준의 미세한 생동감만 요청하고, 카메라 이동은 절대 시키지 않는다.
-const MOTION_GUIDANCE =
+// 카메라는 항상 정지(카메라워크는 후처리). 항상 붙는다.
+const CAMERA_STATIC =
   "Keep the CAMERA completely STATIC — a locked, fixed frame. NO camera movement of any kind: no pan, no tilt, no zoom, " +
-  "no push-in, no dolly, no shake, no rotation. (Camera work is added afterward, so the base clip must stay perfectly stable.) " +
-  "Bring the still subtly to life ONLY with tiny, slow, natural motion: gentle breathing, slow blinking, small hair and cloth " +
-  "sway, a slight weight shift, a very small 3D head movement. Keep ALL motion MINIMAL, slow and calm — like a living photograph. " +
-  "CONTINUE any action already depicted in the still (someone drawn mid-walk keeps walking at the same pace); " +
-  "do not START new actions or gestures not already happening. " +
-  "Keep each character's facial EXPRESSION exactly as drawn — do not change the emotion. " +
+  "no push-in, no dolly, no shake, no rotation. (Camera work is added afterward, so the base clip must stay perfectly stable.) ";
+// ★동작 크기 상한 — 사용자가 "동작이 너무 크다"고 지적. 모든 움직임을 작고 절제되게, 과장·빠른 동작 금지.
+const SUBTLE_LIFE =
+  "Keep ALL motion SMALL, slow, calm and RESTRAINED — like a subtle living photograph, not an action scene. " +
+  "Absolutely avoid large, fast, sweeping or exaggerated movement; err on the side of too little motion. " +
+  "Bring the still to life only with gentle breathing, slow blinking, small hair and cloth sway, a slight weight shift, " +
+  "a very small 3D head movement. Keep each character's facial EXPRESSION exactly as drawn — do not change the emotion. " +
   "NEVER add characters, people or objects not in the still. Keep the art style and colors; no text; " +
-  "do not distort or morph faces or the composition.";
+  "do not distort or morph faces or the composition. ";
+// 명시적 동작(버튼·프롬프트)이 없을 때만 — 이미 있는 동작만 이어가고 새 동작 창작 금지.
+const CONTINUE_ONLY =
+  "CONTINUE only the action already depicted in the still (someone drawn mid-walk keeps walking at the same pace); " +
+  "do not START new actions or gestures not already happening. ";
+// 인물 몸동작 프리셋(버튼) id → 영어 지시. 모두 '작고 절제되게'로 상한을 건다(사용자: 동작이 너무 큼).
+const BODY_MOTION_PROMPTS = {
+  still: "The body stays still and grounded; only the faintest signs of life (soft breathing, a slow blink). No stepping, no walking, no gestures.",
+  sway: "Only a very small, slow weight shift or gentle sway — barely perceptible. No stepping, no big moves.",
+  "walk-in": "The character walks slowly and calmly a SHORT distance into the frame with small, unhurried steps. Gentle and restrained — not fast, not far.",
+  "walk-out": "The character walks slowly and calmly a SHORT distance across or out of the frame with small, unhurried steps. Gentle and restrained — not fast, not far.",
+  run: "The character moves at a light, controlled jog — believable and contained, NOT frantic or exaggerated. Keep the pace moderate and the movement small within the frame.",
+  turn: "The character slowly turns their head and upper body to look — a small, calm movement. No large body rotation.",
+  gesture: "A small, slow hand or arm gesture — subtle, not large or sweeping.",
+};
 // 대사 있는 인물 컷: '말하는 것처럼' 입/얼굴 움직임(진짜 립싱크 아님 — Grok I2V 한계).
 const SPEAKING_GUIDANCE =
   "The character is talking: natural, subtle lip and mouth movement as if speaking, with a slight, " +
   "lively facial expression. Keep the same identity and pose; do not add text or captions.";
-// 이 컷에 '인물이 하는 대사'가 있나 — 인물/액션 컷 + ★화자가 캐릭터(charId)로 지정된★ 대사.
-// 내레이션(speakerId=null)·미지정(undefined) 은 입이 안 움직인다 = 대사와 내레이션의 유일한 차이.
-function hasSpokenDialogue(cut) {
+// ★이 컷에 보이는 인물은 지금 말하는 사람이 아님(다른/화면 밖 인물이 말함) → 입 다물기 명시.
+const MOUTH_CLOSED_GUIDANCE =
+  "The visible character(s) are NOT the ones speaking right now — someone off-screen or a different person is talking. " +
+  "Keep every visible character's mouth firmly CLOSED and still, with a calm, neutral expression. " +
+  "Do NOT add any lip movement, mouth opening, or talking motion to anyone on screen.";
+
+// 이 컷에 효과음 아닌 '대사'가 하나라도 있나(화자 상관없이).
+function hasAnyDialogue(cut) {
+  const bubs = cut?.bubbles ?? [];
+  if (bubs.length) return bubs.some((b) => b.speakerId !== "__sfx__" && (b.text || "").trim() !== "");
+  return (cut?.dialogue || "").trim() !== "";
+}
+// 이 컷에 '보이는 인물이 직접 하는 대사'가 있나 — 인물/액션 컷 + 화자(charId)가 ★이 컷에 등장하는 인물★일 때만.
+// 내레이션(speakerId=null)·효과음·★다른/화면 밖 인물★이 말하면 false = 이 컷 인물은 입이 안 움직인다.
+//   shownCharIds = 캐스팅상 이 컷에 나오는 캐릭터 id 들. 없으면(폴백) 예전처럼 화자만 있으면 말하는 것으로.
+function hasSpokenDialogue(cut, shownCharIds) {
   if (!cut || (cut.type !== "person" && cut.type !== "action")) return false;
   const bubs = cut.bubbles ?? [];
   if (bubs.length)
-    return bubs.some((b) => !!b.speakerId && b.speakerId !== "__sfx__" && (b.text || "").trim() !== "");
+    return bubs.some((b) => {
+      if (!b.speakerId || b.speakerId === "__sfx__" || !(b.text || "").trim()) return false;
+      if (Array.isArray(shownCharIds) && shownCharIds.length) return shownCharIds.includes(b.speakerId);
+      return true;
+    });
   return (cut.dialogue || "").trim() !== "";
 }
-function buildVideoPrompt(cut) {
-  // ★카메라(cut.motion)는 Grok 에 주지 않는다 — 카메라워크는 워커 후처리(postfx)로. 여기선 정지
-  //   + 미세 생동감(MOTION_GUIDANCE) + 이미 있는 동작 이어가기만.
+function buildVideoPrompt(cut, shownCharIds, storyContext) {
+  // ★사용자가 프롬프트를 직접 편집(고급)했으면 그대로 사용 — 전체 제어(자동 조립 무시).
+  const override = String(cut?.videoPromptOverride || "").trim();
+  if (override) return override;
+  // ★카메라(cut.motion)는 Grok 에 안 준다(카메라워크=후처리). 여기선 정지 + 절제된 생동감(SUBTLE_LIFE)
+  //   + 스토리 맥락(맥락 어긋남 방지) + 명시 동작(버튼 bodyMotion / 프롬프트 videoPrompt / 자유 action).
+  const desc = String(cut?.videoPrompt || "").trim();
+  const bodyPhrase = BODY_MOTION_PROMPTS[cut?.bodyMotion] || ""; // 버튼 프리셋
   const action = String(cut?.action || "").trim();
-  const base = action
-    ? `${MOTION_GUIDANCE} Subject action (continue ONLY what is already happening, small and slow): ${action}.`
-    : MOTION_GUIDANCE;
-  return hasSpokenDialogue(cut) ? `${base} ${SPEAKING_GUIDANCE}` : base;
+  const story = String(storyContext || "").trim();
+  const explicit = [];
+  if (bodyPhrase) explicit.push(`Subject motion: ${bodyPhrase}`);
+  else if (action) explicit.push(`Subject action (keep it small and slow): ${action}`);
+  if (desc) explicit.push(`What happens in this shot: ${desc}`);
+  let base = `${CAMERA_STATIC}${SUBTLE_LIFE}`;
+  // ★스토리 맥락 — 모델이 상황·감정에 어긋나는 동작을 만들지 않게(죽어가는 인물이 웃으며 벌떡 일어나는 등 금지).
+  if (story)
+    base += `STORY CONTEXT (obey the mood and situation; the motion must NOT contradict it — e.g. do not make a dying, injured, sad or unconscious character suddenly cheer up, smile, or jump up): ${story}. `;
+  base += explicit.length ? explicit.join(" ") : CONTINUE_ONLY;
+  if (hasSpokenDialogue(cut, shownCharIds)) return `${base} ${SPEAKING_GUIDANCE}`;
+  // 대사는 있는데 화자가 이 컷 인물이 아니면 → 이 컷 인물은 입 다물기(다른/화면 밖 사람이 말하는 컷).
+  if (hasAnyDialogue(cut)) return `${base} ${MOUTH_CLOSED_GUIDANCE}`;
+  return base;
 }
 
 // ── video(M4): 재생성 컷(generatedImage)을 Grok I2V 로 영상화 → Scene.videoUrl ─
@@ -1484,9 +1582,11 @@ export async function runVideo(projectId, payload) {
               { imageUrl: s.generatedImage, prompt, duration: grokDur },
               () => log(`컷 ${s.order + 1} 생성 중…(${grokDur}s)`)
             );
+          // 이 컷에 '보이는' 캐릭터들(캐스팅 sceneIds 기준) — 화자가 이 중에 없으면 입 다뭄.
+          const shownCharIds = (p.cast ?? []).filter((c) => (c.sceneIds ?? []).includes(s.id)).map((c) => c.id);
           let videoUrl;
           try {
-            videoUrl = await genVideo(buildVideoPrompt(s.cut));
+            videoUrl = await genVideo(buildVideoPrompt(s.cut, shownCharIds, p.storyContext));
           } catch (e) {
             if (/콘텐츠 정책|content|policy|moderation|safety|flag/i.test(String(e?.message ?? e))) {
               await log(`컷 ${s.order + 1} 정책 거부 → 순화 프롬프트로 재시도`);
@@ -1496,7 +1596,9 @@ export async function runVideo(projectId, payload) {
             } else throw e;
           }
           const raw = await download(videoUrl);
-          const buf = (await stripAudio(raw)) ?? raw; // 그록 자동 오디오 제거(실패 시 원본)
+          // ★지정 비율로 채워-크롭 + 오디오 제거. Grok 이 1:1 입력을 가로형으로 내도 여기서 프로젝트 비율로 바로잡음.
+          //   실패 시 오디오만 제거(stripAudio), 그것도 실패면 원본.
+          const buf = (await conformVideo(raw, p)) ?? (await stripAudio(raw)) ?? raw;
           const { url } = await put(
             `project/${projectId}/vid-${s.order}-${Date.now()}.mp4`,
             buf,
@@ -1599,18 +1701,38 @@ export async function runPostfx(projectId, payload) {
       if (!W || !H || !T) throw new Error("클립 정보를 읽지 못함");
       // 줌 커브 Z(t) — 프리셋 문법과 동일한 2단 속도 철학. crop 은 짝수 강제(코덱 요구).
       const T1 = Math.max(0.3, T - 0.4).toFixed(3); // 크래시인: 마지막 0.4s 에 스냅
-      const Z = {
-        "crash-in": `if(lt(t,${T1}), 1+0.06*t/${T1}, 1.06+(${ZM}-1.06)*pow(min(1,(t-${T1})/0.4),2))`,
-        "crash-out": `if(lt(t,0.35), ${ZM}, max(1, ${ZM}-(${ZM}-1)*pow(min(1,(t-0.35)/0.4),2)))`,
-        "ramp-in": `1+(${ZM}-1)*pow(t/${T.toFixed(3)},2.5)`,
-        punch: `if(lt(t,0.1), 1+(${ZM}-1)*t/0.1, if(lt(t,0.55), ${ZM}-(${ZM}-1.12)*(t-0.1)/0.45, 1.12))`,
-      }[effect];
-      if (!Z) throw new Error(`알 수 없는 효과: ${effect}`);
-      // 펀치는 감쇠 흔들림 추가(수평 0.5s).
-      const shake = effect === "punch" ? `+${(0.015 * strength).toFixed(4)}*iw*sin(55*t)*exp(-6*t)` : "";
-      const vf =
-        `crop=w='floor(iw/(${Z})/2)*2':h='floor(ih/(${Z})/2)*2':` +
-        `x='(iw-ow)/2${shake}':y='(ih-oh)/2',scale=${W}:${H},setsar=1`;
+      const PAN = new Set(["pan-left", "pan-right", "pan-up", "pan-down"]);
+      let vf;
+      if (PAN.has(effect)) {
+        // 느린 팬 — 살짝 확대(ZP)해 여백을 만들고, 그 여백을 클립 길이 동안 한 방향으로 천천히 이동.
+        //   줌은 고정(카메라 이동만), x/y 가 t 에 따라 선형 이동. 강도=여백(=이동량).
+        const ZP = { 1: 1.12, 2: 1.18, 3: 1.25 }[strength];
+        const Tf = Math.max(0.3, Number(T)).toFixed(3);
+        const xExpr =
+          effect === "pan-right" ? `(iw-ow)*min(1,t/${Tf})`
+          : effect === "pan-left" ? `(iw-ow)*(1-min(1,t/${Tf}))`
+          : `(iw-ow)/2`;
+        const yExpr =
+          effect === "pan-down" ? `(ih-oh)*min(1,t/${Tf})`
+          : effect === "pan-up" ? `(ih-oh)*(1-min(1,t/${Tf}))`
+          : `(ih-oh)/2`;
+        vf =
+          `crop=w='floor(iw/${ZP}/2)*2':h='floor(ih/${ZP}/2)*2':` +
+          `x='${xExpr}':y='${yExpr}',scale=${W}:${H},setsar=1`;
+      } else {
+        const Z = {
+          "crash-in": `if(lt(t,${T1}), 1+0.06*t/${T1}, 1.06+(${ZM}-1.06)*pow(min(1,(t-${T1})/0.4),2))`,
+          "crash-out": `if(lt(t,0.35), ${ZM}, max(1, ${ZM}-(${ZM}-1)*pow(min(1,(t-0.35)/0.4),2)))`,
+          "ramp-in": `1+(${ZM}-1)*pow(t/${T.toFixed(3)},2.5)`,
+          punch: `if(lt(t,0.1), 1+(${ZM}-1)*t/0.1, if(lt(t,0.55), ${ZM}-(${ZM}-1.12)*(t-0.1)/0.45, 1.12))`,
+        }[effect];
+        if (!Z) throw new Error(`알 수 없는 효과: ${effect}`);
+        // 펀치는 감쇠 흔들림 추가(수평 0.5s).
+        const shake = effect === "punch" ? `+${(0.015 * strength).toFixed(4)}*iw*sin(55*t)*exp(-6*t)` : "";
+        vf =
+          `crop=w='floor(iw/(${Z})/2)*2':h='floor(ih/(${Z})/2)*2':` +
+          `x='(iw-ow)/2${shake}':y='(ih-oh)/2',scale=${W}:${H},setsar=1`;
+      }
       await new Promise((res, rej) => {
         const pr = spawn(ff, ["-hide_banner", "-nostats", "-loglevel", "warning", "-y", "-i", inp, "-vf", vf, "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", outp]);
         let err = "";
@@ -1654,7 +1776,7 @@ export async function runDub(projectId, payload) {
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
   const cast = p.cast ?? [];
   const narrator = p.narratorVoice || null;
-  const speed = Math.max(0.5, Math.min(2, Number(p.dubSpeed) || 1)); // 말 속도 배수
+  const speed = Math.max(0.5, Math.min(2, Number(p.dubSpeed) || 1.2)); // 말 속도 배수(기본 1.2배)
   const only =
     Array.isArray(payload?.sceneIds) && payload.sceneIds.length ? new Set(payload.sceneIds) : null;
   // ★특정 컷·선택 더빙(only 있음)이면 강제 재생성(사용자가 바꿔서 다시 하려는 것). 전체 더빙은
@@ -1682,6 +1804,7 @@ export async function runDub(projectId, payload) {
     const cut = s.cut;
     if (!cut) continue;
     normalizeNarration(cut); // 레거시 내레이션 문자열 → 내레이터 말풍선(분리 경로 제거)
+    normalizeSfx(cut); // 검출 효과음 문자열 → 효과음 말풍선(__sfx__) — 통제·생성 일관
     let bubs = cut.bubbles ?? [];
     // ★말풍선이 없고 dialogue(한 줄 대사)만 있으면 그걸 단일 말풍선으로 승격 — 예전엔 dialogue 를
     //   무시해서 "대사 없음"으로 실패했음. 승격해두면 더빙·미리보기가 말풍선으로 일관된다.
@@ -1750,7 +1873,8 @@ export async function runDub(projectId, payload) {
     await log(`더빙 ${done}/${units.length} (${Math.round((done / units.length) * 100)}%)`);
   }
 
-  // ★효과음은 자동 생성하지 않는다(사용자 지시). sfx 텍스트는 남겨두되 소리는 안 만든다.
+  // 효과음 줄(__sfx__)은 절제해서 사용: 검출된 것만 통제 가능한 줄로 등록되고, 사용자가 남긴 줄만
+  // ElevenLabs 효과음으로 생성된다(원치 않으면 편집기에서 삭제). 실패해도 그 줄만 스킵(위 try/catch).
 
   // 하나도 못 만들고 전부 목소리 미배정으로 스킵됐으면 → 조용히 넘기지 말고 명확히 알린다.
   if (ok === 0 && skipped > 0) {

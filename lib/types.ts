@@ -92,6 +92,9 @@ export interface DialogueBubble {
   subtitleX?: number; // 이 줄 자막 가로 중심(0~1). 없으면 컷 기본(cut.subtitleX)
   subtitleY?: number; // 이 줄 자막 세로 중심(0~1). 화자가 번갈아 말할 때 줄마다 위치 지정
   emotion?: string; // 감정 연기 id(EMOTIONS) — ElevenLabs v3 오디오 태그로 변환돼 과장 연기
+  volume?: number; // 이 줄 목소리 크기 배수(합성 시 적용). 1=보통, <1 작게, >1 크게. 없으면 1.
+  distant?: boolean; // 멀리서 들리는 느낌(거리감) — 합성 시 로우패스+약한 반향+감쇠.
+  noSubtitle?: boolean; // ★자막에서 제외(소리는 나되 캡션 안 뜸) — 비명·효과음성 대사 등. 화자 목소리 더빙은 유지.
 }
 
 // 감정 연기 프리셋 — id 는 bubble.emotion 에 저장, tag 는 ElevenLabs v3 오디오 태그(워커 tts.mjs 와 동기).
@@ -127,7 +130,10 @@ export interface CutOntology {
   description: string; // VLM 자유 서술(인물·배경·구도·분위기) → image-2 로 그대로 전달
   promptDraft: string; // image-2 재생성용 프롬프트 초안(영문)
   motion: string; // I2V 카메라워크 프롬프트(CAMERA_PROMPTS). '무엇·언제'를 시간구조로 지시.
-  action?: string; // 인물/피사체 동작 힌트(I2V) — ★그림에 이미 있는 동작의 '이어가기'만(새 동작 창작 금지). AI 연출이 디폴트로 채움.
+  action?: string; // 인물/피사체 동작 힌트(I2V, 자유 텍스트) — 버튼(bodyMotion) 없을 때 폴백. AI 연출이 디폴트로 채움.
+  bodyMotion?: string; // 인물 몸동작 프리셋(버튼): still/sway/walk-in/walk-out/run/turn/gesture. I2V 지시로 매핑. 모두 절제.
+  videoPrompt?: string; // 동영상 생성용 내용 설명(사람 입력, I2V) — 무슨 일이 일어나는지·어떤 움직임인지 자유 서술. 카메라워크는 별도(후처리).
+  videoPromptOverride?: string; // ★영상 프롬프트 직접 편집(고급) — 있으면 자동 조립 무시하고 이걸 그대로 Grok 에 보냄(전체 제어).
   durationSec?: number; // 이 컷 영상/씬 길이(초) 사람 지정. 없으면 대사·타입으로 추정.
   transition?: string; // 이 컷 끝의 전환(합성 시): none/fadeout/fadein/black/dissolve
   subtitlePos?: "auto" | "top" | "middle" | "bottom"; // (레거시) 자막 위치 프리셋
@@ -185,6 +191,7 @@ export interface Project {
   composedUrl?: string; // 5단계 합성(이어붙인) 최종 영상 Blob URL
   narratorVoice?: { provider: string; id: string; name: string }; // 나레이션 더빙 목소리(카탈로그에서 선택)
   dubSpeed?: number; // 더빙 말 속도 배수(1=기본, 1.2=조금 빠르게). Typecast tempo / ElevenLabs speed.
+  storyContext?: string; // ★스토리 맥락/톤(사용자 작성) — 모든 영상 생성 프롬프트에 주입해 맥락 어긋난 동작(예: 죽어가는데 벌떡 일어남) 방지.
 
   steps: Record<StepKind, StepState>;
 

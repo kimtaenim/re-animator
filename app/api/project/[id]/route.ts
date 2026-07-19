@@ -18,6 +18,7 @@ export async function PATCH(
         regenMode?: string;
         narratorVoice?: { provider?: string; id?: string; name?: string } | null;
         dubSpeed?: number;
+        storyContext?: string;
       }
   );
   const project = await getProject(id);
@@ -51,6 +52,10 @@ export async function PATCH(
   }
   if (typeof body.dubSpeed === "number" && body.dubSpeed > 0) {
     project.dubSpeed = Math.max(0.5, Math.min(2, body.dubSpeed));
+    changed = true;
+  }
+  if (typeof body.storyContext === "string") {
+    project.storyContext = body.storyContext.slice(0, 2000); // 빈 문자열도 저장(해제)
     changed = true;
   }
   if (changed) await saveProject(project);

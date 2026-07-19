@@ -112,12 +112,26 @@ function audioUnits(cut) {
     if (b.audioUrl)
       units.push({
         audioUrl: b.audioUrl,
-        subText: b.speakerId === "__sfx__" ? "" : (b.text || "").trim(),
+        subText: b.speakerId === "__sfx__" || b.noSubtitle ? "" : (b.text || "").trim(), // 효과음·자막제외 줄은 캡션 없음(소리만)
         sx: b.subtitleX,
         sy: b.subtitleY,
+        vol: b.volume,
+        far: b.distant,
       });
   }
   return units;
+}
+
+// 이 오디오 유닛에 적용할 ffmpeg 오디오 필터 문자열(없으면 ""). 볼륨 배수 + 거리감(멀리서).
+//   far=멀리서: 로우패스로 먹먹하게 + 약한 반향(aecho) + 감쇠. vol 과 합쳐 최종 게인 계산.
+function audioFx(au) {
+  const vol = typeof au.vol === "number" && au.vol > 0 ? au.vol : 1;
+  const far = !!au.far;
+  const parts = [];
+  if (far) parts.push("lowpass=f=2200", "aecho=0.8:0.5:55:0.3");
+  const gain = far ? vol * 0.55 : vol;
+  if (far || Math.abs(gain - 1) > 0.02) parts.push(`volume=${gain.toFixed(2)}`);
+  return parts.join(",");
 }
 
 // 더빙 없는 컷의 자막 유닛(영상 길이에 비례 배치용) — { text, sx, sy }.
@@ -126,7 +140,7 @@ function subtitleUnits(cut) {
   const units = [];
   if (cut?.bubbles?.length) {
     for (const b of cut.bubbles) {
-      if (b.speakerId === "__sfx__") continue;
+      if (b.speakerId === "__sfx__" || b.noSubtitle) continue; // 효과음·자막제외 줄은 캡션 안 함
       const t = (b.text || "").trim();
       if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY });
     }
@@ -201,8 +215,18 @@ export async function runCompose(projectId) {
         const ap = join(dir, `a${i}_${aPaths.length}.${ext}`);
         try {
           await download(au.audioUrl, ap);
-          const ad = (await probeDuration(ap)) || 0.8;
-          aPaths.push(ap);
+          // 볼륨·거리감 필터 — 필요할 때만 재인코딩(m4a). 실패해도 원본으로 진행.
+          let usePath = ap;
+          const af = audioFx(au);
+          if (af) {
+            const fp = join(dir, `af${i}_${aPaths.length}.m4a`);
+            try {
+              await run(FFMPEG, ["-y", "-i", ap, "-af", af, "-c:a", "aac", "-b:a", "128k", fp]);
+              usePath = fp;
+            } catch {}
+          }
+          const ad = (await probeDuration(usePath)) || 0.8;
+          aPaths.push(usePath);
           const start = acc;
           acc += ad;
           if (au.subText) caps.push({ text: au.subText, start, end: acc, sx: au.sx, sy: au.sy });

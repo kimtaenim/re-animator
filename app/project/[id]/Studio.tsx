@@ -82,8 +82,29 @@ const TRANSITIONS: [string, string][] = [
   ["black", "암전"],
   ["dissolve", "디졸브(섞임)"],
 ];
+// 인물 몸동작 프리셋(버튼) — [id, 라벨]. id 는 worker BODY_MOTION_PROMPTS 와 일치해야 함. 모두 절제된 동작.
+const BODY_MOTIONS: [string, string][] = [
+  ["still", "🧍 가만히"],
+  ["sway", "🍃 살짝"],
+  ["walk-in", "🚶 걸어 들어옴"],
+  ["walk-out", "🚶 걸어 나감"],
+  ["run", "🏃 뛰어옴"],
+  ["turn", "🔄 돌아봄"],
+  ["gesture", "👋 손짓"],
+];
+
 // 대사 줄의 화자 특수값 — 효과음(소리 생성). 캐릭터 id 와 안 겹치는 센티넬.
 const SFX_SPEAKER = "__sfx__";
+
+// 연출 보고서 카메라 열 헬퍼 — cut.motion(프롬프트 문구) ↔ CAMERA_MOVES id 변환(모듈 공용).
+const camIdFromMotion = (motion?: string) => CAMERA_MOVES.find(([, , pr]) => (motion ?? "").includes(pr))?.[0] ?? "";
+const setCamMotion = (id: string, curMotion?: string) => {
+  let base = curMotion ?? "";
+  for (const [, , pr] of CAMERA_MOVES) base = base.split(pr).join("");
+  base = base.trim();
+  const chosen = CAMERA_MOVES.find(([cid]) => cid === id)?.[2];
+  return chosen ? (base ? `${base} ${chosen}` : chosen) : base;
+};
 
 // ★목록용 지연 비디오 — ★마우스를 올린 것만★ 재생, 떼면 정지(사용자 지정 — '보이면 재생'도
 //   여러 개가 동시에 돌 수 있어 강화). 평소엔 첫 프레임만 썸네일처럼 표시(preload=metadata).
@@ -123,6 +144,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [project, setProject] = useState<Project>(initialProject);
   const projectRef = useRef(project);
   const [busy, setBusy] = useState(false);
+  // 캐스팅 확정 신호 — 플로팅 리모컨의 '캐스팅 확정'이 이 값을 올리면 CastReview 가 자기 상태로 확정(approve).
+  const [castConfirmNonce, setCastConfirmNonce] = useState(0);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
   const [progressLog, setProgressLog] = useState<string[]>([]);
@@ -170,6 +193,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }, [activeStep]);
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
   const [scenePreview, setScenePreview] = useState<string | null>(null); // 씬 미리보기(영상+자막+더빙)
+  const [bubDropId, setBubDropId] = useState<string | null>(null); // 대사(말풍선) 드래그앤드롭 시 드롭 대상 컷 하이라이트
   const [subIdx, setSubIdx] = useState(0); // 미리보기 자막 박스 순차 표시 인덱스(하나씩)
   // 후처리 줌(postfx) 상태 — 진행 중 씬 id + 카드별 선택값(적용 전 임시).
   const [fxPending, setFxPending] = useState<Set<string>>(new Set());
@@ -443,7 +467,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     projectRef.current = project;
   }, [project]);
 
-  // 누적 API 비용(₩) — 마운트 + 단계 변화(분할 완료 등) 때 갱신.
+  // 누적 API 비용(₩) — 마운트 + ★모든 단계 상태 변화(잡 완료 시 비용 기록됨)마다 갱신 → 항상 최신.
   useEffect(() => {
     let alive = true;
     fetch(`/api/cost?projectId=${project.id}`, { cache: "no-store" })
@@ -455,7 +479,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     return () => {
       alive = false;
     };
-  }, [project.id, sourceStatus]);
+  }, [project.id, sourceStatus, castStatus, regenStatus, sceneStatus, composeStatus, portraitPending.size]);
 
   // ── 액션 ────────────────────────────────────────────────────────────────
   async function uploadFiles(files: FileList | null) {
@@ -843,6 +867,26 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             return (
             <div key={bi} className="flex flex-col gap-0.5">
               <div className="flex items-start gap-1">
+              {/* 순서/이동 — ⠿ 드래그해서 다른 컷으로, ▲▼ 이 컷 안 순서. 더빙 단계에서도 바로 쓰라고 꺼내 둠. */}
+              <div className="flex shrink-0 flex-col items-center pt-0.5 leading-none text-[var(--muted)]">
+                <span
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("application/x-bubble", JSON.stringify({ srcId: s.id, srcIdx: bi }));
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                  title="드래그해서 앞/뒤 컷으로 옮기기"
+                  className="cursor-grab select-none text-[11px] active:cursor-grabbing hover:text-[var(--accent)]"
+                >
+                  ⠿
+                </span>
+                {bubs.length > 1 && (
+                  <>
+                    <button type="button" onClick={() => reorderBubble(s.id, bi, -1)} disabled={bi === 0} className={stackCls} title="이 컷 안에서 위로">▲</button>
+                    <button type="button" onClick={() => reorderBubble(s.id, bi, 1)} disabled={bi === bubs.length - 1} className={stackCls} title="이 컷 안에서 아래로">▼</button>
+                  </>
+                )}
+              </div>
               <div className="pt-0.5">{avatar(b.speakerId)}</div>
               {speakerSelect(b.speakerId, (v) => {
                 const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, speakerId: v } : x));
@@ -956,6 +1000,53 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       )}
                     </div>
                   </label>
+                  {/* 볼륨·거리감 — 합성 시 이 줄 오디오에 적용(멀리서=먹먹+반향). 미리보기엔 근사만. */}
+                  <label className="flex items-center gap-1 text-[10px] text-[var(--muted)]" title="이 줄 목소리 크기 — 합성 결과에 반영">
+                    🔊
+                    <select
+                      value={String(b.volume ?? 1)}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, volume: v === 1 ? undefined : v } : x));
+                        updateCut(s.id, { bubbles: nb });
+                      }}
+                      className={`rounded border bg-[var(--panel)] px-0.5 py-0.5 text-[10px] ${
+                        b.volume && b.volume !== 1 ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)]"
+                      }`}
+                    >
+                      <option value="0.4">아주작게</option>
+                      <option value="0.7">작게</option>
+                      <option value="1">보통</option>
+                      <option value="1.5">크게</option>
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, distant: !x.distant } : x));
+                      updateCut(s.id, { bubbles: nb });
+                    }}
+                    title="멀리서 들리는 느낌(거리감) — 합성 시 먹먹하게+약한 반향+감쇠"
+                    className={`rounded border px-1 py-0.5 text-[10px] leading-none ${
+                      b.distant ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)]"
+                    }`}
+                  >
+                    🌫 멀리서
+                  </button>
+                  {/* 자막 빼기 — 비명·효과음성 대사 등. 소리는 나되(더빙 유지) 자막엔 안 뜸. */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, noSubtitle: !x.noSubtitle } : x));
+                      updateCut(s.id, { bubbles: nb });
+                    }}
+                    title="자막에서 빼기 — 소리는 나되(더빙 유지) 자막엔 안 뜸. 비명·효과음성 대사에."
+                    className={`rounded border px-1 py-0.5 text-[10px] leading-none ${
+                      b.noSubtitle ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)]"
+                    }`}
+                  >
+                    🚫 자막빼기
+                  </button>
                   {/* 순서 이동(▲▼) — 이 컷 안 */}
                   {bubs.length > 1 && (
                     <span className="flex items-center" title="이 컷 안에서 순서 바꾸기">
@@ -1037,6 +1128,122 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     );
   }
 
+  // 연출 보고서(자동 연출) — '한 컷' 분을 컷 카드마다 접이식으로. 큰 표로 스크롤 안 올라가도 그 컷에서
+  //   바로 확인·보정. 대사(역)·화자·감정 / 카메라 / 길이 / 전환 / 동작. updateCut 로 큰 표·편집기와 즉시 싱크.
+  function directionPanel(s: Project["scenes"][number]) {
+    const cast = project.cast ?? [];
+    const bubs = (s.cut?.bubbles ?? []).filter((b) => (b.text || "").trim() && b.speakerId !== SFX_SPEAKER);
+    const dubText = (s.cut?.bubbles ?? []).map((b) => b.text).join(" ") + " " + (s.cut?.narration ?? "");
+    const dubChars = dubText.replace(/\s+/g, "").length;
+    const estSec = dubChars > 0 ? Math.max(2, Math.min(8, Math.round(dubChars / 5))) : s.cut?.type === "transition" ? 1.5 : 1;
+    const cell = "rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 text-[10px]";
+    return (
+      <div className="flex flex-col gap-1.5 text-[11px]">
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] text-[var(--muted)]">대사(역)·화자·감정</span>
+          {bubs.length === 0 ? (
+            <span className="text-[var(--muted)]">(대사 없음)</span>
+          ) : (
+            bubs.map((b, bi) => (
+              <div key={bi} className="flex flex-wrap items-center gap-1">
+                <span className="text-[var(--text)]" title={b.text}>“{b.text.slice(0, 40)}”</span>
+                {(b.translation || "").trim() && (
+                  <span className="font-medium text-[var(--accent)]">· {b.translation!.slice(0, 40)}</span>
+                )}
+                <select
+                  value={b.speakerId ?? ""}
+                  onChange={(e) =>
+                    updateCut(s.id, { bubbles: (s.cut?.bubbles ?? []).map((x) => (x === b ? { ...x, speakerId: e.target.value || null } : x)) })
+                  }
+                  className={`${cell} ${b.speakerId ? "text-[var(--accent)]" : "text-[var(--muted)]"}`}
+                  title="화자"
+                >
+                  <option value="">🎙 내레이터</option>
+                  {cast.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
+                </select>
+                <select
+                  value={b.emotion ?? ""}
+                  onChange={(e) =>
+                    updateCut(s.id, { bubbles: (s.cut?.bubbles ?? []).map((x) => (x === b ? { ...x, emotion: e.target.value || undefined } : x)) })
+                  }
+                  className={cell}
+                  title="감정 연기"
+                >
+                  <option value="">🎭</option>
+                  {EMOTIONS.map((em) => (<option key={em.id} value={em.id}>{em.label}</option>))}
+                </select>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <label className="flex items-center gap-1" title="카메라 프리셋. 실제 카메라워크는 카드의 '후처리 카메라(줌·팬)'가 담당.">
+            <span className="text-[10px] text-[var(--muted)]">카메라</span>
+            <select
+              value={camIdFromMotion(s.cut?.motion)}
+              onChange={(e) => updateCut(s.id, { motion: setCamMotion(e.target.value, s.cut?.motion) })}
+              className={cell}
+            >
+              <option value="">(없음)</option>
+              {CAMERA_MOVES.map(([id, label]) => (<option key={id} value={id}>{label}</option>))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1" title="컷 길이(초) — 비우면 자동 추정">
+            <span className="text-[10px] text-[var(--muted)]">길이</span>
+            <input
+              type="number"
+              step={0.5}
+              min={0.5}
+              max={15}
+              value={s.cut?.durationSec ?? ""}
+              placeholder={String(estSec)}
+              onChange={(e) => {
+                const v = e.target.value;
+                updateCut(s.id, { durationSec: v === "" ? undefined : Math.max(0.5, Math.min(15, Math.round(Number(v) * 2) / 2)) });
+              }}
+              className={`${cell} w-12`}
+            />
+          </label>
+          <label className="flex items-center gap-1" title="이 컷 → 다음 컷 전환(합성 시)">
+            <span className="text-[10px] text-[var(--muted)]">전환</span>
+            <select value={s.cut?.transition ?? "none"} onChange={(e) => updateCut(s.id, { transition: e.target.value })} className={cell}>
+              {TRANSITIONS.map(([id, label]) => (<option key={id} value={id}>{label}</option>))}
+            </select>
+          </label>
+          <label className="flex min-w-[8rem] flex-1 items-center gap-1" title="직접 입력(버튼에 없는 동작). 버튼을 고르면 그게 우선.">
+            <span className="text-[10px] text-[var(--muted)]">직접</span>
+            <input
+              type="text"
+              value={s.cut?.action ?? ""}
+              onChange={(e) => updateCut(s.id, { action: e.target.value })}
+              placeholder="예: 고개를 든다"
+              className={`${cell} min-w-0 flex-1`}
+            />
+          </label>
+        </div>
+        {/* 인물 몸동작 — 버튼으로 지정(모두 절제된 동작). 버튼이 자유입력(직접)보다 우선. */}
+        <div className="flex flex-wrap items-center gap-1" title="이 컷 인물 몸동작 — 버튼으로 지정. 다시 누르면 해제(기본=이어가기).">
+          <span className="text-[10px] text-[var(--muted)]">🎬 동작</span>
+          {BODY_MOTIONS.map(([id, label]) => {
+            const on = s.cut?.bodyMotion === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => updateCut(s.id, { bodyMotion: on ? undefined : id })}
+                className={`rounded border px-1.5 py-0.5 text-[10px] ${
+                  on ? "border-[var(--accent)] font-medium text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)]"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   // 출력 비율 선택(세로/가로/1:1) — 모든 컷이 이 비율로 일관되게 생성됨.
   async function setAspect(aspectRatio: "16:9" | "9:16" | "1:1") {
     setProject((prev) => ({ ...prev, aspectRatio }));
@@ -1055,6 +1262,28 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ dubSpeed: v }),
     }).catch(() => {});
+  }
+  // 스토리 맥락(프로젝트 레벨) — 모든 영상 프롬프트에 주입. onChange=로컬 즉시, onBlur=서버 저장.
+  async function saveStoryContext(v: string) {
+    await fetch(`/api/project/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ storyContext: v }),
+    }).catch(() => {});
+  }
+  // 이 컷의 '자동 조립 프롬프트' 초안(영문) — 프롬프트 직접 편집 시작점. 워커 buildVideoPrompt 와 같은 취지.
+  function composeVideoPromptDraft(s: Project["scenes"][number]): string {
+    const cut = s.cut;
+    const parts = [
+      "Camera is completely STATIC (locked, fixed frame) — no pan, tilt, zoom, dolly or shake. Bring the still subtly to life with only small, slow, restrained motion; avoid any large, fast or exaggerated movement. Keep each character's facial expression exactly as drawn; do not change the emotion. Do not add characters or objects not in the still; keep the art style; no text.",
+    ];
+    const story = (project.storyContext ?? "").trim();
+    if (story) parts.push(`Story context (the motion must NOT contradict this): ${story}.`);
+    const bm = BODY_MOTIONS.find(([id]) => id === cut?.bodyMotion);
+    if (bm) parts.push(`Subject motion: ${bm[1]} (keep it small and slow).`);
+    else if ((cut?.action ?? "").trim()) parts.push(`Subject action (small, slow): ${cut!.action}.`);
+    if ((cut?.videoPrompt ?? "").trim()) parts.push(`What happens in this shot: ${cut!.videoPrompt}.`);
+    return parts.join(" ");
   }
 
   // 나레이터 목소리(프로젝트 레벨) — 카탈로그에서 고른 값 저장. null=해제.
@@ -1287,9 +1516,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 더빙(TTS) 잡 적재 — 대사(화자 목소리)·내레이션(나레이터). sceneIds 없으면 전체.
   // ★비디오(scene 단계)와 독립: 잡 상태를 따로 폴링해 동영상 생성 중에도 더빙을 걸 수 있다.
   const [dubbing, setDubbing] = useState(false); // 더빙 잡 진행 중(비디오와 무관)
+  const dubPollRef = useRef<ReturnType<typeof setInterval> | null>(null); // 더빙 폴링 인터벌 — 정지 시 중단용
+  const dubStartingRef = useRef(false); // 더빙 적재 진행 중(동기 가드) — fetch 도중 재클릭 이중 적재 방지
   const [dubMsg, setDubMsg] = useState<string | null>(null); // 더빙 완료/실패 안내(잠깐 표시)
   // ── 후처리 줌(postfx) — Grok 원본에 줌 커브를 실픽셀로 굽는 잡. fxUrl 이 미리보기·합성에 쓰임. ──
-  async function runFxJob(sceneIds: string[], effect: string, strength: number) {
+  async function runFxJob(sceneIds: string[], effect: string, strength: number, openPreviewId?: string) {
     setError("");
     setFxPending((prev) => new Set([...prev, ...sceneIds]));
     const clear = () =>
@@ -1317,6 +1548,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             const pr = await fetch(`/api/project/${project.id}`, { cache: "no-store" });
             const pd = await pr.json();
             if (pd.ok) setProject(pd.project);
+            // 굽고 나서 카메라워크 결과를 바로 보여준다(요청: "굽고 나서 보여줘도 됨").
+            if (openPreviewId && jd.status === "done") setScenePreview(openPreviewId);
           }
         } catch {}
       }, 4000);
@@ -1331,9 +1564,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }
 
   async function runDubJob(sceneIds?: string[]) {
+    if (dubbing || dubStartingRef.current) return; // ★동기 가드 — 상태(dubbing)는 fetch 후에야 켜져서 그 틈의 재클릭을 막지 못함
+    dubStartingRef.current = true;
     setError("");
     setDubMsg(null);
-    if (dubbing) return;
     try {
       const r = await fetch("/api/dub", {
         method: "POST",
@@ -1346,11 +1580,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       pollDubJob(d.jobId as string);
     } catch (e) {
       setError(e instanceof Error ? e.message : "더빙 실패");
+    } finally {
+      dubStartingRef.current = false;
     }
   }
   // 더빙 잡 상태 폴링 → 끝나면 씬(오디오 URL) 새로고침. 비디오 폴링과 별개.
   function pollDubJob(jobId: string) {
     let tries = 0;
+    if (dubPollRef.current) clearInterval(dubPollRef.current);
     const iv = setInterval(async () => {
       tries++;
       try {
@@ -1362,6 +1599,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         }
         if (d.ok && (d.status === "done" || d.status === "error")) {
           clearInterval(iv);
+          dubPollRef.current = null;
           setDubbing(false);
           setProgress("");
           if (d.status === "error") {
@@ -1375,13 +1613,33 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             const pj = await pr.json();
             if (pj.ok) setProject((prev) => ({ ...prev, scenes: pj.project.scenes }));
           } catch {}
+          // 더빙 비용도 추정 제작비에 즉시 반영(더빙은 단계 상태를 안 바꿔 이펙트가 안 걸림).
+          try {
+            const cr = await fetch(`/api/cost?projectId=${project.id}`, { cache: "no-store" });
+            const cd = await cr.json();
+            if (cd.ok) setCostKrw(cd.krw);
+          } catch {}
         }
       } catch {}
       if (tries > 260) {
         clearInterval(iv);
+        dubPollRef.current = null;
         setDubbing(false);
       }
     }, 3000);
+    dubPollRef.current = iv;
+  }
+  // 더빙 정지 — 워커는 별도 서버라 프로세스는 못 죽이지만(백그라운드서 끝남), UI 폴링을 멈추고
+  //   상태를 풀어 준다(비디오 '중지'와 같은 성격). 이미 만든 오디오는 유지.
+  function cancelDub() {
+    if (dubPollRef.current) {
+      clearInterval(dubPollRef.current);
+      dubPollRef.current = null;
+    }
+    setDubbing(false);
+    setProgress("");
+    setDubMsg("더빙 정지됨 — 이미 만든 줄은 유지돼요(다시 '더빙'으로 이어서)");
+    setTimeout(() => setDubMsg(null), 6000);
   }
 
   // 오디오 재생(더빙 미리듣기) — 한 번에 하나만.
@@ -1396,7 +1654,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       /* ignore */
     }
   }
-  // 씬 오디오 전체 재생 — 말풍선/내레이션 대사만 순서대로. (효과음은 자동생성 폐기 → 재생 안 함)
+  // 씬 오디오 전체 재생 — 말풍선(대사·내레이션·효과음) audioUrl 순서대로. 효과음도 소리로 재생.
   function playSceneAudio(s: Project["scenes"][number]) {
     const urls: string[] = [];
     for (const b of s.cut?.bubbles ?? []) if (b.audioUrl) urls.push(b.audioUrl);
@@ -1413,7 +1671,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     };
     next();
   }
-  // 이 씬에 더빙 오디오가 하나라도 있나(재생 버튼 표시용). 효과음은 재생에서 제외.
+  // 이 씬에 더빙 오디오가 하나라도 있나(재생 버튼 표시용). 효과음 줄 포함.
   const sceneHasAudio = (s: Project["scenes"][number]) =>
     (s.cut?.bubbles ?? []).some((b) => b.audioUrl) || !!s.cut?.narrationAudioUrl;
 
@@ -1424,7 +1682,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     const units: { text: string; sx?: number; sy?: number; tr?: string }[] = [];
     if (cut?.bubbles?.length)
       for (const b of cut.bubbles) {
-        if (b.speakerId === SFX_SPEAKER) continue;
+        if (b.speakerId === SFX_SPEAKER || b.noSubtitle) continue;
         const t = (b.text || "").trim();
         if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY, tr: (b.translation || "").trim() || undefined });
       }
@@ -1575,6 +1833,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       setBusy(false);
     }
   }
+  // ★재캐스팅은 반드시 확인 — 자동 캐스팅을 다시 돌리면 손으로 배정·수정·목소리 지정한 게 전부 날아간다.
+  //   검수 단계에서 실수로 눌러 작업을 뒤엎는 사고 방지(사용자 지시).
+  function reCastGuarded() {
+    if (castRunning || busy) return;
+    if (window.confirm("자동 캐스팅을 다시 돌리면 지금까지 손으로 배정·수정·목소리 지정한 내용이 사라집니다.\n정말 다시 캐스팅할까요?"))
+      runCastJob();
+  }
 
   // ★캐스팅 자동 실행 — 2단계에 들어오면 버튼 안 눌러도 알아서 캐스팅(사용자 요구). 아직 안 한
   //   경우(pending)에만 1회. 에러·완료·진행중이면 자동 안 함(무한 재시도 방지). '다시 캐스팅'은 수동.
@@ -1685,25 +1950,37 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       ? "캐스팅"
       : regenPolling
         ? "이미지 재생성"
-        : scenePolling
-          ? "동영상 생성"
-          : composeRunning
-            ? "합성"
-            : portraitPending.size > 0
-              ? "실사 초상"
-              : "";
+        : dubbing
+          ? "더빙"
+          : scenePolling
+            ? "동영상 생성"
+            : composeRunning
+              ? "합성"
+              : portraitPending.size > 0
+                ? "실사 초상"
+                : "";
 
   // 진행 바 — 로그의 "(N%)" 를 뽑아 표시(없으면 안 그림). 모든 워커 단계 공용.
   // 진행바 + 예상시간 — 워커 로그의 (N%) 또는 "N/M" 에서 퍼센트 추출, 경과시간으로 남은 시간 추정.
   const progressAnchor = useRef<{ at: number; pct: number } | null>(null);
-  const progressBar = () => {
-    let pct: number | null = null;
-    const mp = progress.match(/\((\d+)%\)/);
-    if (mp) pct = Number(mp[1]);
-    else {
-      const mf = progress.match(/(\d+)\s*\/\s*(\d+)/); // "대사 읽기 3/43", "이미지 생성 1~6/12" 등
-      if (mf && Number(mf[2]) > 0) pct = Math.round((Number(mf[1]) / Number(mf[2])) * 100);
-    }
+  // 한 줄에서 진행률(%) 추출 — "(N%)" 우선, 없으면 "N/M"(예: "대사 읽기 3/43", "이미지 생성 1~6/12").
+  const parsePct = (line: string): number | null => {
+    if (!line) return null;
+    const mp = line.match(/\((\d+)%\)/);
+    if (mp) return Number(mp[1]);
+    const mf = line.match(/(\d+)\s*\/\s*(\d+)/);
+    if (mf && Number(mf[2]) > 0) return Math.round((Number(mf[1]) / Number(mf[2])) * 100);
+    return null;
+  };
+  // 진행률(%)+예상시간 계산(공용) — 마지막 줄이 %없는 상태 메시지여도 최근 로그에서 마지막 %를 유지.
+  // 각 단계 시작 시 로그 리셋되므로 과거 단계 오염 없음. 없으면 null.
+  const progressInfo = (): { pct: number; eta: string } | null => {
+    let pct: number | null = parsePct(progress);
+    if (pct === null)
+      for (let i = progressLog.length - 1; i >= 0; i--) {
+        pct = parsePct(progressLog[i]);
+        if (pct !== null) break;
+      }
     if (pct === null) return null;
     pct = Math.max(0, Math.min(100, pct));
     // ETA(대략) — 처음 본 진행률(anchor) 이후 경과시간을 진행량으로 나눠 남은 시간 선형 추정.
@@ -1719,16 +1996,34 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         eta = remain > 90 ? `약 ${Math.round(remain / 60)}분 남음` : `약 ${Math.round(remain)}초 남음`;
       }
     }
+    return { pct, eta };
+  };
+  const progressBar = () => {
+    const info = progressInfo();
+    if (!info) return null;
     return (
       <div className="mb-3 w-full max-w-md">
         <div className="mb-1 flex justify-between text-[11px] text-[var(--muted)]">
-          <span>{pct}%</span>
-          {eta && <span>{eta}</span>}
+          <span>{info.pct}%</span>
+          {info.eta && <span>{info.eta}</span>}
         </div>
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--panel-2)]">
-          <div className="h-full bg-[var(--accent)] transition-all duration-300" style={{ width: `${pct}%` }} />
+          <div className="h-full bg-[var(--accent)] transition-all duration-300" style={{ width: `${info.pct}%` }} />
         </div>
       </div>
+    );
+  };
+  // 미니 진행 바 — 플로팅 리모컨·우하단 상태표시에 인라인으로 얹는 작은 바+%(알약 모양 안 깨지게).
+  const miniBar = () => {
+    const info = progressInfo();
+    if (!info) return null;
+    return (
+      <span className="flex items-center gap-1.5" title={info.eta ? `${info.pct}% · ${info.eta}` : `${info.pct}%`}>
+        <span className="block h-1.5 w-14 overflow-hidden rounded-full bg-[var(--panel-2)]">
+          <span className="block h-full rounded-full bg-[var(--accent)] transition-all duration-300" style={{ width: `${info.pct}%` }} />
+        </span>
+        <span className="text-[11px] tabular-nums text-[var(--muted)]">{info.pct}%</span>
+      </span>
     );
   };
 
@@ -1806,6 +2101,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <button onClick={confirm} disabled={busy || running} className={P}>
                 {running ? "처리 중…" : "경계 확정 · 추출"}
               </button>
+              {running && miniBar()}
               {running && (
                 <button onClick={() => cancelJob("source")} className={S}>■ 중지</button>
               )}
@@ -1814,11 +2110,32 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         if (activeStep === "cast" && approved)
           return (
             <div className={REMOTE}>
-              <button onClick={runCastJob} disabled={busy || castRunning} className={P}>
-                {castRunning ? "캐스팅 중…" : "캐스팅"}
-              </button>
-              {castRunning && (
-                <button onClick={() => cancelJob("cast")} className={S}>■ 중지</button>
+              {castRunning ? (
+                <>
+                  <button disabled className={P}>캐스팅 중…</button>
+                  {miniBar()}
+                  <button onClick={() => cancelJob("cast")} className={S}>■ 중지</button>
+                </>
+              ) : castStatus === "review" ? (
+                // 검수 중 — 주요 액션은 '확정'. 재캐스팅은 확인 거쳐야만(수동 작업 보호).
+                <>
+                  <button onClick={() => setCastConfirmNonce((n) => n + 1)} disabled={busy} className={P}>
+                    캐스팅 확정
+                  </button>
+                  <button onClick={reCastGuarded} disabled={busy} className={G} title="자동 캐스팅 다시 — 손으로 한 배정이 사라짐">
+                    다시 캐스팅
+                  </button>
+                </>
+              ) : castStatus === "approved" ? (
+                <>
+                  <span className="px-2 text-[13px] font-medium text-[var(--ok)]">✓ 캐스팅 확정됨</span>
+                  <button onClick={reCastGuarded} disabled={busy} className={G} title="자동 캐스팅 다시 — 손으로 한 배정이 사라짐">
+                    다시 캐스팅
+                  </button>
+                </>
+              ) : (
+                // 아직 캐스팅 전(pending/error) — 최초 실행.
+                <button onClick={runCastJob} disabled={busy} className={P}>캐스팅</button>
               )}
             </div>
           );
@@ -1836,6 +2153,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <button onClick={runRegenJob} disabled={busy || regenRunning} className={selForRegen.size > 0 ? G : P}>
                 {regenRunning ? "생성 중…" : "전체 생성"}
               </button>
+              {regenPolling && miniBar()}
               {regenPolling && (
                 <button onClick={() => cancelJob("regen")} className={S}>■ 중지</button>
               )}
@@ -1864,8 +2182,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <button onClick={() => runDubJob()} disabled={busy || dubbing} className={P}>
                 {dubbing ? "더빙 중…" : "🎙 전체 더빙"}
               </button>
+              {(sceneRunning || dubbing) && miniBar()}
+              {/* 동영상·더빙은 병렬로 돌 수 있어 정지 버튼도 각각. */}
               {sceneRunning && (
-                <button onClick={() => cancelJob("scene")} className={S}>■ 중지</button>
+                <button onClick={() => cancelJob("scene")} className={S}>■ 동영상 정지</button>
+              )}
+              {dubbing && (
+                <button onClick={cancelDub} className={S}>■ 더빙 정지</button>
               )}
             </div>
           );
@@ -1876,6 +2199,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <button onClick={runComposeJob} disabled={busy || composeRunning} className={P}>
                 {composeRunning ? "합성 중…" : "영상 묶기"}
               </button>
+              {composeRunning && miniBar()}
               {composeRunning && (
                 <button onClick={() => cancelJob("compose")} className={S}>
                   ■ 중지
@@ -2038,8 +2362,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
             ) : (
               <button
-                onClick={runCastJob}
+                onClick={reCastGuarded}
                 disabled={busy || castRunning}
+                title="자동 캐스팅 다시 — 손으로 한 배정·수정이 사라짐(확인 후 진행)"
                 className="rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50"
               >
                 다시 캐스팅
@@ -2083,6 +2408,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 scenes={project.scenes}
                 cast={project.cast ?? []}
                 onSave={saveCast}
+                confirmSignal={castConfirmNonce}
                 onDesignPortrait={designPortrait}
                 portraitPending={portraitPending}
                 onZoom={(src) => setLightbox({ type: "image", src })}
@@ -2505,6 +2831,22 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             </button>
           </div>
 
+          {/* 📖 스토리 맥락 — 모든 영상 생성 프롬프트에 주입해 맥락 어긋난 동작(죽어가는데 벌떡 등)을 막는다. */}
+          <div className="mb-3 rounded-lg border border-[var(--accent)] bg-[var(--panel)] p-2">
+            <label className="mb-1 flex items-center gap-2 text-xs font-semibold text-[var(--accent)]">
+              📖 스토리 맥락
+              <span className="font-normal text-[var(--muted)]">— 전체 톤·상황을 적으면 모든 영상 생성에 반영(맥락 어긋난 동작 방지)</span>
+            </label>
+            <textarea
+              value={project.storyContext ?? ""}
+              onChange={(e) => setProject((prev) => ({ ...prev, storyContext: e.target.value }))}
+              onBlur={(e) => saveStoryContext(e.target.value)}
+              rows={2}
+              placeholder="예: 비극. 주인공은 칼에 찔려 죽어가는 중 — 밝거나 활기찬 동작·미소 금지. 시종 어둡고 무거운 톤."
+              className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-xs"
+            />
+          </div>
+
           {/* 더빙(음성 생성) — 동영상과 별개. 얇은 한 줄로(설명은 툴팁). */}
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs" title="대사=화자 목소리 · 내레이션=나레이터 · 효과음=ElevenLabs · 동영상 생성 중에도 가능">
             <span className="font-semibold text-[var(--accent)]">🎙 더빙</span>
@@ -2516,7 +2858,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   type="button"
                   onClick={() => setDubSpeed(v)}
                   className={`rounded border px-1.5 py-0.5 text-[11px] ${
-                    (project.dubSpeed ?? 1) === v
+                    (project.dubSpeed ?? 1.2) === v
                       ? "border-[var(--accent)] font-medium text-[var(--accent)]"
                       : "border-[var(--border)] hover:bg-[var(--panel-2)]"
                   }`}
@@ -2805,7 +3147,24 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 return (
                   <div
                     key={s.id}
-                    className="group flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2"
+                    onDragOver={(e) => {
+                      if (!e.dataTransfer.types.includes("application/x-bubble")) return;
+                      e.preventDefault(); // 대사 드롭 허용
+                      if (bubDropId !== s.id) setBubDropId(s.id);
+                    }}
+                    onDragLeave={() => setBubDropId((t) => (t === s.id ? null : t))}
+                    onDrop={(e) => {
+                      if (!e.dataTransfer.types.includes("application/x-bubble")) return;
+                      e.preventDefault();
+                      try {
+                        const d = JSON.parse(e.dataTransfer.getData("application/x-bubble") || "{}");
+                        if (d.srcId) moveBubbleToScene(d.srcId, Number(d.srcIdx), s.id);
+                      } catch {}
+                      setBubDropId(null);
+                    }}
+                    className={`group flex items-start gap-2 rounded-lg border bg-[var(--panel)] p-2 ${
+                      bubDropId === s.id ? "border-[var(--accent)] ring-2 ring-[var(--accent)]" : "border-[var(--border)]"
+                    }`}
                   >
                     <div className="flex w-6 shrink-0 flex-col items-center gap-1 pt-8">
                       {!isCardScene && (
@@ -2931,7 +3290,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         <button
                           type="button"
                           onClick={() => toggleAdvCut(s.id)}
-                          title="연출·세부 — 전환·후처리줌·프롬프트·자막위치·카메라·모션"
+                          title="이 컷 자동 연출 — 감정·전환·후처리 카메라(줌·팬)·동작·동영상 프롬프트·자막위치. 접었다 필요할 때 펼치기"
                           className={`rounded border px-2 py-0.5 ${
                             advCut.has(s.id) || s.cut?.motion || s.cut?.transition || s.fx
                               ? "border-[var(--accent)] text-[var(--accent)]"
@@ -2960,6 +3319,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           </button>
                         )}
                       </div>
+                      {/* 🎬 연출 보고서(이 컷) — 큰 표를 컷마다 잘라 붙임. 접어두고 필요할 때 펼쳐 확인·보정. */}
+                      <details className="rounded border border-[var(--border)] bg-[var(--panel-2)]">
+                        <summary className="cursor-pointer select-none px-2 py-1 text-[11px] font-medium text-[var(--accent)]">
+                          🎬 연출 보고서 (이 컷)
+                        </summary>
+                        <div className="px-2 pb-2">{directionPanel(s)}</div>
+                      </details>
                       {advCut.has(s.id) && (<>
                       {/* ★연기(감정) — '이 컷 더빙' 전에 말풍선별 감정 지정. 예전엔 여기 없어서 컷에서
                           연기 지정을 못 했음(감정 픽커가 연출 보고서 테이블에만 있었음). 더빙에 반영됨. */}
@@ -3018,9 +3384,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       {!isCardScene && s.videoUrl && (
                         <div
                           className="flex flex-wrap items-center gap-1 text-[10px]"
-                          title="후처리 줌 — 실제 픽셀에 굽는 확정 카메라워크(크래시 줌·램프·펀치). 오비트류는 Grok 생성 담당"
+                          title="후처리 카메라워크 — 실제 픽셀에 굽는 확정 카메라(줌·펀치·느린 팬). 방향 팬은 살짝 확대 후 그 방향으로 천천히 이동."
                         >
-                          <span className="text-[var(--muted)]">⚡ 후처리 줌</span>
+                          <span className="text-[var(--muted)]">⚡ 후처리 카메라</span>
                           <select
                             value={(fxSel[s.id]?.effect ?? s.fx?.effect) || "none"}
                             onChange={(e) =>
@@ -3036,6 +3402,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             <option value="crash-out">💥 크래시 줌아웃</option>
                             <option value="ramp-in">🚀 램프인(연속 가속)</option>
                             <option value="punch">📳 펀치+흔들</option>
+                            <option value="pan-left">⬅ 느린 팬(왼쪽)</option>
+                            <option value="pan-right">➡ 느린 팬(오른쪽)</option>
+                            <option value="pan-up">⬆ 느린 팬(위)</option>
+                            <option value="pan-down">⬇ 느린 팬(아래)</option>
                           </select>
                           <select
                             value={String(fxSel[s.id]?.strength ?? s.fx?.strength ?? 2)}
@@ -3066,6 +3436,18 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           >
                             {fxPending.has(s.id) ? "굽는 중…" : "적용"}
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const sel = fxSel[s.id] ?? { effect: s.fx?.effect ?? "none", strength: s.fx?.strength ?? 2 };
+                              runFxJob([s.id], sel.effect, sel.strength, s.id); // 굽고 나서 미리보기 자동 오픈
+                            }}
+                            disabled={busy || fxPending.has(s.id)}
+                            title="이 카메라워크를 구운 뒤(컷당 ~20-40초) 미리보기를 자동으로 열어 보여줍니다"
+                            className="rounded border border-[var(--accent)] px-2 py-0.5 font-medium text-[var(--accent)] disabled:opacity-40 hover:bg-[var(--panel-2)]"
+                          >
+                            {fxPending.has(s.id) ? "굽는 중…" : "🎥 굽고 보기"}
+                          </button>
                           {s.fxUrl && (
                             <span className="text-[var(--ok)]" title={`적용됨: ${s.fx?.effect} · 강도 ${s.fx?.strength}`}>
                               FX✓
@@ -3094,6 +3476,89 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             {regenPending.has(s.id) ? "…" : "🖼"}
                           </button>
                         </div>
+                      )}
+                      {/* 동작(이어가기) — AI 자동연출이 채운 피사체 동작. 그림에 이미 있는 동작의 '이어가기'만.
+                          동영상 생성 프롬프트에 반영(cut.action). 연출 보고서와 같은 값 = 싱크. */}
+                      {!isCardScene && (
+                        <div className="flex items-center gap-1 text-[10px]" title="인물/피사체 동작(이어가기) — 그림에 이미 있는 동작만. 동영상 생성에 반영. (자동 연출이 채움)">
+                          <span className="shrink-0 text-[var(--muted)]">🏃 동작</span>
+                          <input
+                            type="text"
+                            value={s.cut?.action ?? ""}
+                            onChange={(e) => updateCut(s.id, { action: e.target.value })}
+                            placeholder="예: 계속 걷는다 (이어가기)"
+                            className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5"
+                          />
+                        </div>
+                      )}
+                      {/* 동영상 프롬프트 — 이 컷 영상 생성에 넣을 '내용·움직임' 설명. 카메라워크는 별도(후처리).
+                          비워두면 자동(정지+미세 생동감). 적으면 그 내용대로 움직임 유도 → 🎬 로 생성. */}
+                      {!isCardScene && (
+                        <div className="flex items-start gap-1">
+                          <textarea
+                            value={s.cut?.videoPrompt ?? ""}
+                            onChange={(e) => updateCut(s.id, { videoPrompt: e.target.value })}
+                            rows={2}
+                            placeholder="동영상 프롬프트(내용·움직임) — 예: 바람에 머리카락 흩날리며 천천히 고개를 든다"
+                            title="이 컷 동영상 생성에 넣을 내용 설명 — 무슨 일이 일어나는지·어떤 움직임인지. 카메라워크는 후처리로 별도."
+                            className="min-w-0 flex-1 resize-none rounded border border-[var(--accent)]/50 bg-[var(--panel-2)] px-1.5 py-1 text-[10px] leading-tight"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => videoOne(s.id)}
+                            disabled={busy || vidPending.has(s.id)}
+                            title="이 프롬프트로 동영상 생성"
+                            className="shrink-0 rounded border border-[var(--border)] px-1.5 py-1 text-sm text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-40"
+                          >
+                            {vidPending.has(s.id) ? "…" : "🎬"}
+                          </button>
+                        </div>
+                      )}
+                      {/* 🎬 프롬프트 직접 편집(고급) — 채우면 자동 조립을 무시하고 이걸 그대로 Grok 에 보냄(전체 제어). */}
+                      {!isCardScene && (
+                        <details className="rounded border border-[var(--border)] bg-[var(--panel-2)]" open={!!(s.cut?.videoPromptOverride || "").trim()}>
+                          <summary className="cursor-pointer select-none px-1.5 py-0.5 text-[10px] text-[var(--muted)]">
+                            🎬 프롬프트 직접 편집(고급){(s.cut?.videoPromptOverride || "").trim() ? " ✓ 사용 중" : ""}
+                          </summary>
+                          <div className="flex flex-col gap-1 px-1.5 pb-1.5">
+                            <textarea
+                              value={s.cut?.videoPromptOverride ?? ""}
+                              onChange={(e) => updateCut(s.id, { videoPromptOverride: e.target.value })}
+                              rows={4}
+                              placeholder="비우면 자동 조립. 채우면 이 문장을 그대로 Grok 에 보냅니다(카메라 정지·절제 지시도 직접 넣어야 함)."
+                              title="채우면 자동 프롬프트를 무시하고 이걸 그대로 사용 — 전체 제어. '기본값 불러오기'로 시작해 다듬으세요."
+                              className="w-full resize-y rounded border border-[var(--accent)]/50 bg-[var(--panel)] px-1.5 py-1 text-[10px] leading-tight"
+                            />
+                            <div className="flex flex-wrap items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => updateCut(s.id, { videoPromptOverride: composeVideoPromptDraft(s) })}
+                                title="현재 자동 조립 프롬프트를 불러와 여기서 다듬기"
+                                className="rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                              >
+                                기본값 불러오기
+                              </button>
+                              {(s.cut?.videoPromptOverride || "").trim() && (
+                                <button
+                                  type="button"
+                                  onClick={() => updateCut(s.id, { videoPromptOverride: "" })}
+                                  title="직접 편집 해제 → 자동 조립으로 복귀"
+                                  className="rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted)] hover:border-[var(--danger)] hover:text-[var(--danger)]"
+                                >
+                                  해제(자동으로)
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => videoOne(s.id)}
+                                disabled={busy || vidPending.has(s.id)}
+                                className="rounded bg-[var(--accent)] px-2 py-0.5 text-[10px] font-medium text-white disabled:opacity-40"
+                              >
+                                {vidPending.has(s.id) ? "…" : "🎬 이 프롬프트로 생성"}
+                              </button>
+                            </div>
+                          </div>
+                        </details>
                       )}
                       </>)}
                       {/* 대사·내레이션 통합 편집 — 각 줄에 화자(캐릭터/내레이션) 지정. 3단계와 싱크. */}
@@ -3209,6 +3674,39 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               {project.steps.compose.error ?? "합성 오류"}
             </p>
           )}
+
+          {/* ✏️ 대사·자막 수정 — 합성 단계에서도 텍스트를 고치고 바로 저장(updateCut 700ms 자동저장).
+              4단계 편집기와 같은 것(같은 저장 = 싱크). 합성 중에도 열려 있음. 자막은 다시 '합성',
+              목소리는 4단계 '더빙'을 다시 돌리면 반영된다. */}
+          {project.scenes.some((s) => (s.cut?.bubbles?.length ?? 0) > 0 || s.generatedImage) && (
+            <details className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--panel)]">
+              <summary className="cursor-pointer select-none px-3 py-2 text-sm font-semibold">
+                ✏️ 대사·자막 수정{" "}
+                <span className="font-normal text-[var(--muted)]">
+                  — 여기서 고치면 자동 저장(자막=다시 합성, 목소리=4단계 더빙 다시 돌리면 반영)
+                </span>
+              </summary>
+              <div className="max-h-[60vh] space-y-2 overflow-auto px-2 pb-2">
+                {project.scenes
+                  .filter((s) => (s.cut?.bubbles?.length ?? 0) > 0 || s.generatedImage)
+                  .slice()
+                  .sort((a, b) => a.order - b.order)
+                  .map((s) => (
+                    <div key={s.id} className="rounded border border-[var(--border)] bg-[var(--panel-2)] p-2">
+                      <div className="mb-1 flex items-center gap-2 text-[10px] text-[var(--muted)]">
+                        {(s.generatedImage || s.originalImage) && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={s.generatedImage || s.originalImage} alt="" className="h-8 w-8 rounded object-cover" />
+                        )}
+                        컷 {s.order + 1}
+                      </div>
+                      {dialogueEditor(s)}
+                    </div>
+                  ))}
+              </div>
+            </details>
+          )}
+
           {project.composedUrl && (
             <div className="space-y-2">
               <video
@@ -3234,11 +3732,24 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         <span className="opacity-60">(환율 1,500원 기준)</span>
       </footer>
 
+      {/* 💰 추정 제작비 — 스크롤 안 해도 항상 보이게 플로팅(하단 왼쪽). 잡 완료마다 갱신됨. */}
+      <div
+        className="fixed bottom-4 left-4 z-40 flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-xs shadow-lg"
+        title="지금까지 이 프로젝트에 든 API 예상 비용(환율 1,500원 기준). 생성할 때마다 갱신됩니다."
+      >
+        <span>💰</span>
+        <span className="text-[var(--muted)]">추정 제작비</span>
+        <span className="font-semibold text-[var(--text)]">
+          {costKrw === null ? "…" : `₩${costKrw.toLocaleString("ko-KR")}`}
+        </span>
+      </div>
+
       {/* 워커 작업 플로팅 표시 — 스크롤·화면 전환과 무관하게 항상 보임 */}
       {workLabel && (
         <div className="fixed bottom-4 right-4 z-40 flex max-w-[90vw] items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-xs shadow-lg">
           <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
           <span className="font-medium">{workLabel} 중</span>
+          {miniBar()}
           {progress && <span className="truncate text-[var(--muted)]">· {progress}</span>}
         </div>
       )}

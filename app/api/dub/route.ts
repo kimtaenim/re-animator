@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { getProject, saveProject, setStep } from "@/lib/projectStore";
+import { getProject } from "@/lib/projectStore";
 import { enqueueJob, type Job } from "@/lib/jobQueue";
 import { getRedis } from "@/lib/redis";
 
@@ -34,9 +34,10 @@ export async function POST(req: NextRequest) {
     createdAt: now,
     updatedAt: now,
   };
+  // ★더빙은 scene 단계를 건드리지 않는다 — 더빙은 클라이언트가 dubbing 상태 + jobId 로 따로 추적한다.
+  //   예전엔 여기서 scene 을 running 으로 박았는데, 워커가 그걸 안 풀어서 더빙 끝난 뒤에도 scene 이
+  //   'running' 에 갇혀 pollScene 이 같은 진행로그(더빙 100%)를 다시 띄웠다 = "두 번 도는" 것처럼 보임.
   await enqueueJob(job);
-  setStep(project, "scene", { status: "running", jobId: job.id, error: undefined });
-  await saveProject(project);
   return NextResponse.json({ ok: true, jobId: job.id });
 }
 

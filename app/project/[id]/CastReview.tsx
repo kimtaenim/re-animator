@@ -66,6 +66,7 @@ interface Props {
   onZoom: (src: string) => void;
   narratorVoice: NarratorVoice | null;
   onSetNarratorVoice: (v: NarratorVoice | null) => void;
+  confirmSignal?: number; // 부모(플로팅 리모컨)가 올리면 현재 편집 상태로 캐스팅 확정(approve)
 }
 
 // 컷의 대사 단위 목록 — bubbles 있으면 풍선별(idx≥0), 없으면 레거시 통대사(idx=-1).
@@ -115,7 +116,9 @@ function splitSpeakerMap(map: Record<string, string>) {
 // 자동 라벨(캐릭터 N)만 순서대로 다시 매김 — 사람이 바꾼 이름은 보존.
 function relabel(list: Character[]): Character[] {
   return list
-    .filter((c) => c.sceneIds.length > 0)
+    // 컷이 붙은 캐릭터는 유지. 컷 0개라도 사람이 직접 만든 빈 캐릭터(＋/화면 밖)는 보존
+    // — 자동 캐릭터가 컷을 다 잃으면 정리되지만, 수동 추가분은 남긴다.
+    .filter((c) => c.sceneIds.length > 0 || /^char-(off|manual)-/.test(c.id))
     .map((c, i) => ({
       ...c,
       label: /^캐릭터 \d+$/.test(c.label) ? `캐릭터 ${i + 1}` : c.label,
@@ -132,6 +135,7 @@ export default function CastReview({
   onZoom,
   narratorVoice,
   onSetNarratorVoice,
+  confirmSignal,
 }: Props) {
   const [cast, setCast] = useState<Character[]>(initial);
   const [saving, setSaving] = useState<null | "save" | "approve">(null);
@@ -312,6 +316,15 @@ export default function CastReview({
     scheduleSave();
   }
 
+  // 빈 캐릭터 추가(＋) — 이름·외모를 적고 썸네일을 끌어다 넣는다. 컷 0개여도 relabel 이 보존.
+  function addEmptyCharacter() {
+    setCast((prev) => [
+      ...prev,
+      { id: `char-manual-${Date.now().toString(36)}`, label: `캐릭터 ${prev.length + 1}`, description: "", sceneIds: [] } as Character,
+    ]);
+    scheduleSave();
+  }
+
   // 화면 밖(오프스크린) 목소리 캐릭터 — 등장 컷 0개로 추가(전화·해설·신 등). 화자로 지정 가능.
   function addOffscreen() {
     const label = window.prompt("화면 밖 인물 이름 (예: 전화 목소리, 해설자)", "화면 밖 인물")?.trim();
@@ -352,6 +365,17 @@ export default function CastReview({
       setSaving(null);
     }
   }
+
+  // 플로팅 리모컨의 '캐스팅 확정' — confirmSignal 이 오르면 현재 편집 상태 그대로 확정(approve).
+  // React 상태(cast/speakerMap)를 바로 읽으므로 자동저장 디바운스와 무관하게 최신 편집이 반영된다.
+  const [seenConfirm, setSeenConfirm] = useState(0);
+  useEffect(() => {
+    if (confirmSignal && confirmSignal !== seenConfirm) {
+      setSeenConfirm(confirmSignal);
+      void doSave(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmSignal]);
 
   // 드롭다운·라벨에 붙일 외모 힌트 — "캐릭터 N" 만으론 누군지 몰라서 특징 앞부분을 덧붙인다.
   const hintOf = (c: Character) => (c.description || "").trim().replace(/\s+/g, " ").slice(0, 16);
@@ -402,6 +426,32 @@ export default function CastReview({
     }
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={s.originalImage} alt="" className={`${cls} rounded object-cover`} />;
+  }
+
+  // 썸네일 + 확대경 — 확대경은 크게(클릭 쉬움), 드래그와 겹치지 않게(draggable=false·mousedown 정지).
+  // 얼굴 가리지 않도록 오른쪽 아래 모서리. 미배정 컷·배정된 컷 어디서나 재사용.
+  function ZoomThumb({ sceneId, cls }: { sceneId?: string; cls?: string }) {
+    const src = sceneId ? sceneById.get(sceneId)?.originalImage : undefined;
+    return (
+      <div className="relative">
+        <Thumb sceneId={sceneId} cls={cls} />
+        {src && (
+          <button
+            type="button"
+            draggable={false}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onZoom(src);
+            }}
+            title="얼굴 크게 보기 (드래그와 무관)"
+            className="absolute -bottom-1.5 -right-1.5 grid h-8 w-8 place-items-center rounded-full border-2 border-white bg-black/75 text-base leading-none text-white shadow-md hover:bg-black active:scale-95"
+          >
+            🔍
+          </button>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -665,25 +715,7 @@ export default function CastReview({
                     style={{ borderColor: isRef ? "var(--accent)" : "var(--border)" }}
                     title="드래그해서 다른 캐릭터로 이동"
                   >
-                    <div className="relative">
-                      <Thumb sceneId={sid} />
-                      {sceneById.get(sid)?.originalImage && (
-                        <button
-                          type="button"
-                          draggable={false}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const u = sceneById.get(sid)?.originalImage;
-                            if (u) onZoom(u);
-                          }}
-                          title="얼굴 크게 보기 (드래그와 무관)"
-                          className="absolute right-0.5 top-0.5 rounded bg-black/60 px-1 text-[11px] leading-none text-white hover:bg-black/85"
-                        >
-                          🔍
-                        </button>
-                      )}
-                    </div>
+                    <ZoomThumb sceneId={sid} />
                     <button
                       onClick={() => setRef(c.id, sid)}
                       className="text-[9px]"
@@ -710,6 +742,16 @@ export default function CastReview({
             </div>
           </div>
         ))}
+        {/* ＋ 새 캐릭터 — 빈 캐릭터 카드 추가(이름·외모 적고 썸네일을 끌어다 넣기) */}
+        <button
+          type="button"
+          onClick={addEmptyCharacter}
+          title="빈 캐릭터 추가 — 이름·외모를 적고 썸네일을 끌어다 넣으세요"
+          className="flex min-h-[8rem] flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-[var(--border)] bg-[var(--panel)] text-[var(--muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+        >
+          <span className="text-4xl leading-none">＋</span>
+          <span className="text-xs font-medium">새 캐릭터</span>
+        </button>
         </div>
 
         {unassigned.length > 0 && (
@@ -726,7 +768,7 @@ export default function CastReview({
                   className="flex cursor-move flex-col items-center gap-0.5 rounded border border-[var(--border)] p-1"
                   title="드래그해서 캐릭터로 배정"
                 >
-                  <Thumb sceneId={s.id} />
+                  <ZoomThumb sceneId={s.id} />
                   <select
                     value=""
                     onChange={(e) => e.target.value && moveScene(s.id, e.target.value)}
