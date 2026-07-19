@@ -10,7 +10,7 @@
   - Phase 2: 워커 계층 A 렌더러 `worker/cameraRender.mjs` — ffmpeg **sendcmd**로 crop w/h/x/y 에 키프레임 테이블의 리터럴 픽셀값을 프레임마다 주입(zoompan 수식 직접 기술 금지 준수). 단일 패스 스트리밍이라 프레임별 sharp 디코딩 없음(합성 OOM 회피). 업스케일 트리거(needsUpscale)는 결정 로직만; Real-ESRGAN 실제 패스는 후속.
   - Phase 3(부분): 웹앱 클라이언트 프리뷰 + 파라미터 편집. `app/project/[id]/CameraWorkEditor.tsx` — 정지이미지 위 Web Animations API 근사 프리뷰 + 슬라이더(preset·길이·줌속도·드리프트·시작줌·배경델타·흔들진폭), "근사"/orbit "프록시 렌더 필수"/계층B "매트 준비 후" 라벨. 저장은 `cameraWork` JSON 만(updateCut→/api/cut). "적용(굽기)"→ /api/camerafx. 기존 ⚡후처리 카메라(effect/strength)는 유지(공존, 사용자 확정 후 정리).
   - **cameraWork 저장 위치: `Scene` → `CutOntology`로 이동.** 앱 저장 경로가 cut 기반(/api/cut + 화이트리스트 cleanCut)이라, 검증된 경로를 재사용하고 데이터 소실(화이트리스트 누락=필드 증발, 과거 번역 버그)을 피하기 위함. `lib/cutClean.ts`에 `cleanCameraWork`(단일 원천·경계값 클램프) 추가. 워커 runCameraFx 는 `s.cut.cameraWork` 읽음.
-  - **§9 접힌 줄 재정의 연기:** motion_tier(Phase 4)·작업 언어(Phase 5)에 의존하므로 그 단계 후 진행. 접힌 줄의 파괴적 수술은 의존 데이터 확보 후.
+  - Phase 3 §9 완료: 4단계 씬 목록을 **아코디언**으로 재정의(Studio.tsx). 접힌 줄=4요소(대사 한국어주·원어보조 / 길이 / 발화자 / **모션티어 드롭다운** 접힌 채 변경 가능). 썸네일·카메라·프롬프트·대사편집·비용은 펼침 본문(openScene 1개만). 목록 상단 "미결만 보기"(티어 미분류·저확신)·"삽입 대사 일괄 끄기". **기능 제거 아님** — 본문(3272~ 원래 카드)은 그대로 두고 조건부로 감쌈(progressive disclosure). 카드 시작·끝 2지점만 수술. (트레이드오프: 다중선택 생성 체크박스가 펼침 본문으로 이동 — 필요 시 접힌 줄 복귀.)
   - Phase 4(그라운드워크): 데이터 모델 옵셔널 필드 + 화이트리스트만 추가(위험 0·가산적). `CutOntology`에 `motionTier`/`tierConfidence`/`tierEvidence`/`motionPromptHint`/`interpolationCandidate`(§3·§4) + `audioSuggestions`(§6, `AudioSuggestion` 타입). `cleanCut`/`cleanAudioSuggestions` 화이트리스트 등록. **VLM 프롬프트·classify 로직은 미변경** — 무인 상태에서 검증 불가(API 키 없음)·분류 회귀 위험이라 배포 검증 가능한 환경에서 진행.
   - **무인 세션 중단점(이하 배포 후·사용자 검증 필요):** Phase 4의 VLM 산출(classify.mjs·prompts.json 확장), Phase 5 다국어 데이터 재구조화(§10 dialogue.tracks — **데이터 위험**, 하위호환 설계 필수), Phase 6-8(티어 I2V·crash 3프레이밍·orbit·TTS·자막·합성). 자세한 다음 단계는 HANDOFF-session.md.
   - Phase 1 착수: 카메라워크 수식 모듈 `lib/cameraKeyframes.mjs`(순수 ESM·무의존) + 정규화 키프레임 테이블 + 골든 테스트(`scripts/test-camera-keyframes.mjs`). 계층 A(단일 crop track)/계층 B(character·background 2 track), 시드 PRNG 셰이크, easing, `toPixelCrop`/`toWebTransform` 헬퍼. 워커/웹앱이 이 테이블만 소비(수식 단일 소스).
@@ -146,7 +146,7 @@ UI
 
 1) 카메라워크 수식 모듈(계층 A/B 트랙 포함) + 키프레임 테이블 + 골든 테스트  ← **[완료 · 9123986]** (골든 103 pass, 워커↔웹 2px)
 2) 워커 렌더러(프레임별 crop·2레이어 합성, 업스케일 트리거 포함)  ← **[계층 A 완료]** (sendcmd crop, 통합 11 pass; 계층 B/ESRGAN 후속)
-3) 웹앱 클라이언트 프리뷰 + 파라미터 편집 + 씬 목록 재정의(9절)  ← **[프리뷰·편집 완료 / §9 재정의 연기(Phase 4·5 의존)]**
+3) 웹앱 클라이언트 프리뷰 + 파라미터 편집 + 씬 목록 재정의(9절)  ← **[완료]** (프리뷰·편집 + §9 아코디언: 접힌 줄 4요소·미결만 보기·삽입대사 일괄끄기)
 4) VLM 스키마 확장(모션 티어 + 오디오 제안 + 다국어 동시 번역 + vertigo/보간 후보 태그)  ← **[분류 산출 완료]** (classify.mjs strict 스키마+prompts.json: motion_tier·audio_suggestions·보간후보; 다국어 동시번역은 Phase 5)
 5) 다국어 데이터 모델 + 작업 언어 토글 + 언어별 duration/타임라인  ← **[데이터모델·번역생성 완료 / UI토글·언어별 TTS·compose 후속]** (DialogueBubble.tracks 하위호환, Project.targetLanguages, translateScenesMultilang 한 콜 동시번역, extract 조건부 배선)
 6) 티어별 I2V 요청 규칙 + duration 2단계 + 트림/홀드/슬로우

@@ -188,6 +188,22 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       n.has(id) ? n.delete(id) : n.add(id);
       return n;
     });
+  // 4단계 씬 목록 아코디언(스펙 §9) — 접힌 줄은 4요소만, 펼치면 본문(썸네일·카메라·프롬프트·대사 편집).
+  //   항상 최대 1개 펼침. 클릭으로 토글.
+  const [openScene, setOpenScene] = useState<string | null>(null);
+  const [onlyUnresolved, setOnlyUnresolved] = useState(false); // "미결만 보기" — 티어 미분류·저확신
+  // 미결 판정(§9·§3): 모션 티어가 없거나 확신도 낮은 컷.
+  const isUnresolvedScene = (s: Project["scenes"][number]) =>
+    !s.cut?.motionTier || (typeof s.cut?.tierConfidence === "number" && s.cut.tierConfidence < 0.5);
+  // "삽입 대사 일괄 끄기"(§6·§9) — 모든 컷의 insert_line 오디오 제안을 enabled=false 로.
+  function bulkDisableInsertLines() {
+    for (const s of project.scenes) {
+      const sug = s.cut?.audioSuggestions;
+      if (sug?.some((x) => x.type === "insert_line" && x.enabled !== false)) {
+        updateCut(s.id, { audioSuggestions: sug.map((x) => (x.type === "insert_line" ? { ...x, enabled: false } : x)) });
+      }
+    }
+  }
   // 활성 단계 — 한 화면에 5단계를 다 쌓지 않고, 고른 단계만 보여준다(스크롤·무게 급감).
   // 초기값은 진행 상황에 맞춰: 이미지 있으면 4단계, 승인됐으면 2단계, 아니면 1단계.
   const [activeStep, setActiveStep] = useState<StepKind>(() =>
@@ -3233,9 +3249,31 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             </p>
           )}
 
+          {/* 씬 목록 상단 바(스펙 §9) — "미결만 보기" 필터 + "삽입 대사 일괄 끄기". 아코디언 규칙 유지. */}
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setOnlyUnresolved((v) => !v)}
+              title="모션 티어가 없거나 확신도 낮은(미결) 컷만 표시"
+              className={`rounded border px-2 py-0.5 ${onlyUnresolved ? "border-[var(--accent)] font-medium text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--panel-2)]"}`}
+            >
+              {onlyUnresolved ? "✓ " : ""}미결만 보기
+            </button>
+            <button
+              type="button"
+              onClick={bulkDisableInsertLines}
+              title="AI 가 제안한 '삽입 대사'(원작에 없는 창작 대사)를 모든 컷에서 한 번에 끕니다"
+              className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:bg-[var(--panel-2)]"
+            >
+              삽입 대사 일괄 끄기
+            </button>
+            <span className="text-[var(--muted)]">· 줄을 눌러 펼치기(카메라·프롬프트·대사 편집)</span>
+          </div>
+
           <div className="space-y-2">
             {project.scenes
               .filter((s) => s.generatedImage || (s.cut?.type === "text" && (s.cut?.bubbles?.length ?? 0) > 0))
+              .filter((s) => !onlyUnresolved || isUnresolvedScene(s))
               .map((s) => {
                 const isCardScene = !s.generatedImage; // 무성영화 자막 씬(영상·이미지 불필요)
                 const bubs = s.cut?.bubbles ?? [];
@@ -3286,10 +3324,56 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       } catch {}
                       setBubDropId(null);
                     }}
-                    className={`group flex items-start gap-2 rounded-lg border bg-[var(--panel)] p-2 ${
+                    className={`group rounded-lg border bg-[var(--panel)] p-2 ${
                       bubDropId === s.id ? "border-[var(--accent)] ring-2 ring-[var(--accent)]" : "border-[var(--border)]"
                     }`}
                   >
+                    {/* 접힌 줄(스펙 §9) — 4요소만: 대사(한국어 주·원어 보조) / 길이 / 발화자 / 모션티어 드롭다운.
+                        썸네일·상태·카메라·비용·프롬프트·대사편집은 펼침 본문으로. 줄 클릭=펼침/접기(아코디언). */}
+                    {(() => {
+                      const koP = (bubs.map((b) => b.translation).filter(Boolean).join(" ") || s.cut?.dialogueTranslation || "").trim();
+                      const srcP = (bubs.map((b) => b.text).filter(Boolean).join(" ") || s.cut?.dialogue || "").trim();
+                      // TODO(Phase5 작업언어 토글): 작업 언어 track 이 있으면 그걸 주 표기로. 지금은 한국어 주·원어 보조.
+                      const primary = koP || srcP || (isCardScene ? "(자막 씬)" : "(무대사)");
+                      const secondary = koP && srcP && srcP !== koP ? srcP : "";
+                      const isOpen = openScene === s.id;
+                      return (
+                        <div className="flex items-center gap-2 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => setOpenScene((o) => (o === s.id ? null : s.id))}
+                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                            title="펼치기/접기"
+                          >
+                            <span className="shrink-0 text-[var(--muted)]">{isOpen ? "▾" : "▸"} {s.order + 1}</span>
+                            {isUnresolvedScene(s) && (
+                              <span className="shrink-0 rounded bg-[var(--panel-2)] px-1 text-[9px] text-[var(--warn,#c90)]" title="모션 티어 미분류·저확신(미결)">미결</span>
+                            )}
+                            <span className="min-w-0 flex-1 truncate">
+                              {primary}
+                              {secondary && <span className="ml-1 text-[var(--muted)]">· {secondary}</span>}
+                            </span>
+                            <span className="shrink-0 text-[var(--muted)]" title="예상 길이(초)">{curDur}s</span>
+                            <span className="max-w-[90px] shrink-0 truncate text-[var(--muted)]" title="발화자">{speakerLabel}</span>
+                          </button>
+                          <select
+                            value={s.cut?.motionTier ?? ""}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => updateCut(s.id, { motionTier: (e.target.value || undefined) as CutOntology["motionTier"] })}
+                            title="모션 티어(§3) — 다음 동영상 생성에 반영. talk=입·표정 / idle=숨·머리카락 / emote=표정전환 / action=강한 순간동작"
+                            className="shrink-0 rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 text-[10px]"
+                          >
+                            <option value="">티어?</option>
+                            <option value="talk">🗣 talk</option>
+                            <option value="idle">🌿 idle</option>
+                            <option value="emote">😮 emote</option>
+                            <option value="action">⚡ action</option>
+                          </select>
+                        </div>
+                      );
+                    })()}
+                    {openScene === s.id && (
+                    <div className="mt-2 flex items-start gap-2">
                     <div className="flex w-6 shrink-0 flex-col items-center gap-1 pt-8">
                       {!isCardScene && (
                         <input
@@ -3768,6 +3852,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       />
                       </>)}
                     </div>
+                    </div>
+                    )}
                   </div>
                 );
               })}
