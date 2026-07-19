@@ -12,17 +12,25 @@
 - `9123986` Phase 1 — 카메라워크 **수식 모듈 단일 소스** `lib/cameraKeyframes.mjs`(순수 ESM·무의존): `CameraWork → 정규화 키프레임 테이블`. 계층 A(단일 crop track)/B(character·background 2 track)/C(orbit=I2V 위임). 헬퍼 `toPixelCrop`(워커), `toWebTransform`/`toWebKeyframes`(웹), 시드 PRNG 셰이크, **가시범위 clamp**(scale 여백 밖 이동 흡수 → 워커·웹 좌표 구조적 일치). `lib/types.ts` 카메라 타입. 골든 테스트 `scripts/test-camera-keyframes.mjs` **103 pass**(워커↔웹 2px).
 - `c317a43` Phase 2 — 워커 렌더러(계층 A) `worker/cameraRender.mjs`: 테이블의 리터럴 픽셀 crop 을 ffmpeg **sendcmd**(crop w/h/x/y = T 플래그 런타임 command)로 프레임마다 재생. **zoompan 수식 직접 기술 금지 준수**. 단일 패스 스트리밍(합성 OOM 회피). `runCameraFx` 잡 + `camerafx` 타입(index.mjs/jobQueue.ts) + `/api/camerafx`. 통합 테스트 `scripts/test-camera-render.mjs` **11 pass**(실제 ffmpeg·psnr). 기존 `runPostfx`(effect/strength) 유지.
 - `b804f30` Phase 3(부분) — `app/project/[id]/CameraWorkEditor.tsx`: 정지이미지 위 **Web Animations 근사 프리뷰** + 슬라이더(preset·길이·줌속도·드리프트·시작줌·배경델타·흔들). 저장 = `cameraWork` JSON(`updateCut`). "적용(굽기)" = camerafx. "근사"/orbit "프록시 렌더 필수"/계층B "매트 후" 라벨. Studio 씬 카드 삽입(기존 ⚡후처리 카메라와 **공존**). **cameraWork 저장 위치 = `CutOntology`**(Scene 아님) — 앱 저장 경로가 cut 기반(/api/cut+화이트리스트 cleanCut)이라 재사용+소실 회피. `cleanCameraWork` 추가.
-- `4c3c48b` Phase 4 그라운드워크 — `CutOntology`에 `motionTier`/`tierConfidence`/`tierEvidence`/`motionPromptHint`/`interpolationCandidate`(§3·§4)+`audioSuggestions`(§6). `cleanCut`/`cleanAudioSuggestions` 화이트리스트. **VLM 로직 미변경**(옵셔널 필드만).
+- `4c3c48b` Phase 4 그라운드워크 — `CutOntology`에 `motionTier`/`tierConfidence`/`tierEvidence`/`motionPromptHint`/`interpolationCandidate`(§3·§4)+`audioSuggestions`(§6). `cleanCut`/`cleanAudioSuggestions` 화이트리스트.
+- `9aa4229` Phase 4 VLM 산출 — `worker/classify.mjs` strict 스키마+`config/prompts.json`에 motion_tier(talk/idle/emote/action)·tier_confidence·tier_evidence·motion_prompt_hint·interpolation_candidate·audio_suggestions 추가. normalizeCut 이 snake_case→camelCase 매핑. **분류 로직·기존 필드 무변경(가산)**. (사용자가 "푸시 안 하면 검증도 안 된다"며 명시 허용 → 배포 검증 대상.)
+- `055476f` Phase 5(기반) 다국어 — **하위호환 재구조화**: `DialogueBubble.tracks`(BubbleTrack), `Project.targetLanguages`, `LANGUAGES`/`LANG_SPEED_CPS`. 기존 필드 불변(text=원어·translation=한국어), tracks 가산. `cleanTracks` 화이트리스트. `worker/translate.mjs` `translateToLanguages`(한 콜 동시번역)+`translateScenesMultilang`(말풍선→tracks[lang].text). jobs.mjs extract 에 **targetLanguages 있을 때만** 조건부 배선(미설정=무영향·회귀 0).
+- `33b0ed1` 대상 언어 선택 UI — 스토리 맥락 아래 "🌐 대상 언어" 토글(ja/en). 켜야 다국어 번역이 돈다.
 
 **핵심 아키텍처 원칙(회귀 금지):** 카메라워크 수식은 `lib/cameraKeyframes.mjs` **한 곳**에만. 워커·웹앱은 그 테이블만 소비(두 벌 구현 금지). 셰이크는 shake_seed 시드 PRNG 로 양쪽 동일 궤적. 계층 B(parallax/vertigo)는 **인물/배경 매트가 없어 현재 스킵**(사용자 승인 — 온디맨드 매트 확보 후). orbit 은 I2V 위임(후처리 없음).
 
-**무인이라 일부러 안 한 것 + 이유(다음 세션이 이어서):**
-1. **§9 접힌 씬 줄 재정의** — motion_tier 드롭다운·작업 언어 표기에 의존(Phase 4 VLM·Phase 5 다국어). 거대 Studio.tsx 의 파괴적 접힌 줄 수술은 사용자 미확인 무인 상태에서 안 함. 의존 데이터 확보 후.
-2. **Phase 4 VLM 산출**(classify.mjs·config/prompts.json 에 motion_tier·audio_suggestions·다국어 동시번역·vertigo/보간 태그) — API 키 없어 로컬 검증 불가, 프롬프트 수술은 분류 회귀 위험. 배포 검증 가능 환경에서.
-3. **Phase 5 다국어 데이터 재구조화**(§10 `dialogue.tracks{ja,en}`) — **데이터 위험 최상**. 반드시 하위호환(기존 bubbles 보존, tracks 는 가산). 사용자와 방향 합의 권장.
-4. **Phase 6-8**(티어별 I2V 규칙+duration 2단계, crash_zoom 3프레이밍 잡, orbit I2V 경로, TTS·ASS 자막·오디오 3트랙 덕킹·whip·이펙트·프록시 렌더·언어별 출력) — 대부분 배포 env 필요.
+**남은 것(다음 세션 — 대부분 배포 env·API 키 필요해 로컬 검증 불가):**
+1. **§9 접힌 씬 줄 재정의** — 이제 motion_tier(Phase 4 완)·작업 언어(Phase 5 완) 데이터가 있으니 착수 가능. 접힌 줄 4요소(대사+한국어 병기 / 길이 / 발화자 / motion_tier 드롭다운)로 단순화, 나머지는 펼침 화면. 거대 Studio.tsx 라 신중히(리셋 금지·기능 제거 금지 회귀 주의).
+2. **Phase 5 나머지(다국어 완성):** 작업 언어 토글(ja/en 화면 전환), G1 다국어 셀(원어/한국어/언어 전체 표시·수정), 언어별 TTS(tracks[lang].audioUrl)·ASS 자막·duration_final, compose 언어별 출력 잡(ep01_ja.mp4/ep01_en.mp4). 데이터·번역 기반은 완료됨.
+3. **Phase 6** 티어별 I2V 요청 규칙(motionTier→길이·모션, buildVideoPrompt) + duration 2단계(est/final) + 트림/홀드/슬로우.
+4. **Phase 7** crash_zoom 3프레이밍 잡 + 병합 확장 동작 보간(interpolationCandidate 활용) + orbit I2V 경로.
+5. **Phase 8** 오디오 채움(audioSuggestions→sfx/vocal/insert 생성) + 오디오 3트랙 덕킹 + whip·이펙트 오버레이 + 프록시 렌더 + 언어별 출력.
 
-**배포 후 사용자 검증 항목:** 4단계 씬 카드에 "🎥 카메라워크" 편집기가 뜨는지, 프리셋·슬라이더로 프리뷰가 움직이는지, "적용(굽기)" 후 fxUrl 이 갱신돼 미리보기가 카메라워크 반영하는지. (로컬엔 키·env 없어 실제 굽기는 배포에서만 가능.)
+**배포 후 사용자 검증 항목:**
+- (카메라) 4단계 씬 카드 "🎥 카메라워크" 편집기 표시, 프리셋·슬라이더 프리뷰 동작, "적용(굽기)" 후 fxUrl 갱신·미리보기 반영.
+- (VLM) 프로젝트 재분할/재추출 후 `scene.cut.motionTier`·`audioSuggestions` 채워지는지(worker 로그).
+- (다국어) 프로젝트 설정 "🌐 대상 언어"에서 ja/en 켜고 **재추출**하면 워커 로그에 "다국어 번역(ja·en) N줄", `bubble.tracks.{ja,en}.text` 채워지는지. 미선택이면 기존과 동일해야(회귀 0).
+- 로컬엔 키·env 없어 실제 생성·굽기·번역은 배포에서만 검증 가능.
 
 ## 0. 무엇보다 먼저 — 배포 규칙 (직전 세션 최대 사고)
 - 앱은 **Vercel**, 워커는 **Render**. **`git push origin main` 하면 둘 다 자동 배포**된다. 로컬 편집·빌드만으로는 배포된 앱에 아무 변화가 없다.
