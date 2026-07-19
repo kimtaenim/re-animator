@@ -132,6 +132,7 @@ export interface CutOntology {
   motion: string; // I2V 카메라워크 프롬프트(CAMERA_PROMPTS). '무엇·언제'를 시간구조로 지시.
   action?: string; // 인물/피사체 동작 힌트(I2V, 자유 텍스트) — 버튼(bodyMotion) 없을 때 폴백. AI 연출이 디폴트로 채움.
   bodyMotion?: string; // 인물 몸동작 프리셋(버튼): still/sway/walk-in/walk-out/run/turn/gesture. I2V 지시로 매핑. 모두 절제.
+  animatePicture?: boolean; // 사진·초상·표지 속 인물도 움직임 허용(기본=정지). 가끔 그림 속 인물이 움직여야 하는 컷용.
   videoPrompt?: string; // 동영상 생성용 내용 설명(사람 입력, I2V) — 무슨 일이 일어나는지·어떤 움직임인지 자유 서술. 카메라워크는 별도(후처리).
   videoPromptOverride?: string; // ★영상 프롬프트 직접 편집(고급) — 있으면 자동 조립 무시하고 이걸 그대로 Grok 에 보냄(전체 제어).
   durationSec?: number; // 이 컷 영상/씬 길이(초) 사람 지정. 없으면 대사·타입으로 추정.

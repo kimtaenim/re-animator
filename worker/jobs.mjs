@@ -1512,7 +1512,8 @@ function buildVideoPrompt(cut, shownCharIds, storyContext) {
   if (bodyPhrase) explicit.push(`Subject motion: ${bodyPhrase}`);
   else if (action) explicit.push(`Subject action (keep it small and slow): ${action}`);
   if (desc) explicit.push(`What happens in this shot: ${desc}`);
-  let base = `${CAMERA_STATIC}${SUBTLE_LIFE}${PICTURE_STATIC}`;
+  // 기본: 사진·표지 속 인물 정지. 컷별 animatePicture 켜면(가끔 움직여야 할 때) 생략.
+  let base = `${CAMERA_STATIC}${SUBTLE_LIFE}${cut?.animatePicture ? "" : PICTURE_STATIC}`;
   // ★스토리 맥락 — 모델이 상황·감정에 어긋나는 동작을 만들지 않게(죽어가는 인물이 웃으며 벌떡 일어나는 등 금지).
   if (story)
     base += `STORY CONTEXT (obey the mood and situation; the motion must NOT contradict it — e.g. do not make a dying, injured, sad or unconscious character suddenly cheer up, smile, or jump up): ${story}. `;

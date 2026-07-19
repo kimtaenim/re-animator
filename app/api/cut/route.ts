@@ -60,6 +60,7 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.motion === "string") c.motion = r.motion.slice(0, 800); // 프롬프트 잘림 방지
   if (typeof r.action === "string") c.action = r.action.slice(0, 200); // 인물 동작(이어가기) 힌트 — 빈 문자열도 저장(동작 없음 확정)
   if (typeof r.bodyMotion === "string" && r.bodyMotion) c.bodyMotion = r.bodyMotion.slice(0, 20); // 몸동작 프리셋(버튼)
+  if (r.animatePicture === true) c.animatePicture = true; // 사진·표지 속 인물 움직임 허용(기본=정지)
   if (typeof r.videoPrompt === "string") c.videoPrompt = r.videoPrompt.slice(0, 800); // 동영상 내용 프롬프트(사람 입력) — 빈 문자열도 저장
   if (typeof r.videoPromptOverride === "string") c.videoPromptOverride = r.videoPromptOverride.slice(0, 2000); // 프롬프트 직접 편집(고급) — 빈 문자열도 저장
   if (typeof r.durationSec === "number" && r.durationSec > 0) {

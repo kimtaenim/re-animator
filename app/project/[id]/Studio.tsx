@@ -1239,6 +1239,17 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </button>
             );
           })}
+          {/* 기본은 사진·표지 속 인물 정지. 가끔 움직여야 하면 켜기. */}
+          <button
+            type="button"
+            onClick={() => updateCut(s.id, { animatePicture: s.cut?.animatePicture ? undefined : true })}
+            title="기본: 사진·초상·표지 속 인물은 정지. 이 컷에서 그림 속 인물도 움직여야 하면 켜세요."
+            className={`rounded border px-1.5 py-0.5 text-[10px] ${
+              s.cut?.animatePicture ? "border-[var(--accent)] font-medium text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)]"
+            }`}
+          >
+            🖼 사진 속도 움직임
+          </button>
         </div>
       </div>
     );
