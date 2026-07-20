@@ -1366,6 +1366,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       body: JSON.stringify(v === "auto" ? { videoEngine: null } : { videoEngine: v }),
     }).catch(() => {});
   }
+  // 작업 언어(§10) — 화면 표시·더빙·자막이 이 언어로. ""=원어. 더빙/합성이 tracks[lang] 를 씀.
+  async function setWorkingLanguage(lang: string) {
+    setProject((prev) => ({ ...prev, workingLanguage: lang || undefined }));
+    await fetch(`/api/project/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workingLanguage: lang }),
+    }).catch(() => {});
+  }
   // 번역·출력 대상 언어(§10) — 토글. 켜면 다음 컷 추출부터 tracks 채움(기존 컷은 재추출 시 반영).
   async function toggleTargetLanguage(lang: string) {
     const cur = project.targetLanguages ?? [];
@@ -3032,6 +3041,29 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               })}
               <span className="text-[var(--muted)]">· 한국어는 항상 병기</span>
             </div>
+            {/* 🗣 작업 언어(§10) — 화면 대사·더빙·자막이 이 언어로 나감. 원어 또는 켠 대상 언어 중 선택. */}
+            {(project.targetLanguages?.length ?? 0) > 0 && (
+              <div
+                className="mt-2 flex flex-wrap items-center gap-1.5 rounded border border-[var(--accent)] bg-[var(--panel-2)] px-2 py-1 text-[11px]"
+                title="화면 대사·더빙·자막이 이 언어로 나갑니다. 원어=번역 전 원문. 언어를 고르면 그 번역문으로 더빙·자막(그 언어를 읽는 목소리 필요). 바꾼 뒤 더빙·합성 다시 하세요."
+              >
+                <span className="font-semibold text-[var(--accent)]">🗣 작업 언어</span>
+                {[{ id: "", label: "원어" }, ...(project.targetLanguages ?? []).map((id) => ({ id, label: LANGUAGES.find((l) => l.id === id)?.label ?? id }))].map((o) => {
+                  const on = (project.workingLanguage ?? "") === o.id;
+                  return (
+                    <button
+                      key={o.id || "src"}
+                      type="button"
+                      onClick={() => setWorkingLanguage(o.id)}
+                      className={`rounded border px-2 py-0.5 ${on ? "border-[var(--accent)] bg-[var(--accent)] font-medium text-white" : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--panel)]"}`}
+                    >
+                      {o.label}
+                    </button>
+                  );
+                })}
+                <span className="text-[var(--muted)]">— 더빙·자막이 이 언어로</span>
+              </div>
+            )}
             {/* 🎬 영상 엔진(§4) — 자동(키 유무)/Kling/Grok. Kling 만 액션 첫+끝 프레임 보간 가능. */}
             <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]" title="I2V 엔진. Kling 은 첫+끝 프레임 보간(액션)·네이티브 품질. Grok 은 기존. 자동=키 있으면 Kling. Kling 은 워커에 KLING_ACCESS_KEY/SECRET_KEY 필요.">
               <span className="text-[var(--muted)]">🎬 영상 엔진</span>
