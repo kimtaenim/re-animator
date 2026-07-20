@@ -24,7 +24,9 @@
 1. **~~§9 접힌 씬 줄 재정의~~ [완료 41cc61a]** — 배포 후 확인: 4단계 씬 목록이 접힌 4요소 줄로 뜨는지, 줄 클릭 시 펼쳐 기존 컨트롤 다 보이는지, 모션티어 드롭다운·"미결만 보기"·"삽입 대사 일괄 끄기" 동작하는지. (다중선택 생성 체크박스가 펼침 안으로 들어감 — 불편하면 접힌 줄 복귀 요청.)
 2. **Phase 5 나머지(다국어 완성):** 작업 언어 토글(ja/en 화면 전환), G1 다국어 셀(원어/한국어/언어 전체 표시·수정), 언어별 TTS(tracks[lang].audioUrl)·ASS 자막·duration_final, compose 언어별 출력 잡(ep01_ja.mp4/ep01_en.mp4). 데이터·번역 기반은 완료됨.
 3. **~~Phase 6 티어→I2V~~ [완료 734f1e3]** — estimateVideoSeconds 티어 길이범위, buildVideoPrompt action 절제완화·motionPromptHint 사용. 남은 것: duration 2단계(est/final)·트림/홀드/슬로우는 TTS 도착 의존 → Phase 8. (배포 후 확인: 컷 모션티어 바꾸고 재생성 시 길이·동작 결이 티어대로 나오는지.)
-4. **Phase 7** crash_zoom 3프레이밍 잡 + 병합 확장 동작 보간(interpolationCandidate 활용) + orbit I2V 경로.
+4. **Phase 7** crash_zoom 3프레이밍 잡 + 병합 확장 동작 보간 + orbit I2V 경로.
+   - **[진행] I2V 엔진 Kling 전환(ddc2275):** Grok 은 끝 프레임 미지원 → Kling 채택(worker/kling.mjs, image_tail). 기본 Kling(키 있으면)·없으면 Grok 폴백. UI 🎬 영상 엔진 토글. **★사용자 할 일: Kling 가입 → AccessKey/SecretKey 발급 → Render 워커 env 에 KLING_ACCESS_KEY·KLING_SECRET_KEY 추가.** 넣기 전엔 Grok 으로 폴백됨.
+   - **[남음] 보간 Slice 2:** 두 컷 병합(mergecut 확장)해서 둘째 이미지를 Scene.tailImage 로 저장 + "동작 보간" 토글(cut.interpolationOn) UI. 그러면 Kling 이 image_tail 로 첫→끝 보간. (배선·데이터 필드·화이트리스트는 준비됨.)
 5. **Phase 8** 오디오 채움(audioSuggestions→sfx/vocal/insert 생성) + 오디오 3트랙 덕킹 + whip·이펙트 오버레이 + 프록시 렌더 + 언어별 출력.
 
 **배포 후 사용자 검증 항목:**
