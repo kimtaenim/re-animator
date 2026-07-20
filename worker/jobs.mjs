@@ -1585,7 +1585,7 @@ export async function runVideo(projectId, payload) {
   if (cand.length === 0) throw new Error("영상 만들 컷이 없어요(먼저 3단계 재생성)");
   // ★기본 엔진 = Kling(스펙 §4: 액션=첫+끝 프레임 보간은 Kling 만 가능). 단 키 없으면 Grok 폴백(생성 안 끊김).
   //   project.videoEngine 로 명시 지정 가능("grok"|"kling"). 명시 kling 인데 키 없으면 Kling 이 명확히 에러냄.
-  const hasKling = !!(process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY);
+  const hasKling = !!(process.env.KLING_API_KEY || (process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY));
   const engine =
     p.videoEngine === "grok" ? "grok" : p.videoEngine === "kling" ? "kling" : hasKling ? "kling" : "grok";
   await log(`영상 생성 대상 ${cand.length}컷 · ${engine === "kling" ? "Kling" : "Grok"} · 동시 ${VIDEO_CONCURRENCY}`);

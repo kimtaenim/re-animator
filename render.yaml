@@ -26,7 +26,10 @@ services:
       # M4 영상(Grok I2V — 폴백/옵션)
       - key: XAI_API_KEY
         sync: false
-      # M4 영상(Kling I2V — 기본 엔진, 첫+끝 프레임 보간). 콘솔에서 발급한 AccessKey/SecretKey.
+      # M4 영상(Kling I2V — 기본 엔진, 첫+끝 프레임 보간). 콘솔에서 발급한 단일 API Key(Bearer).
+      - key: KLING_API_KEY
+        sync: false
+      # (레거시 옵션) 구형 Open Platform AK/SK→JWT. 신형은 KLING_API_KEY 만 있으면 됨.
       - key: KLING_ACCESS_KEY
         sync: false
       - key: KLING_SECRET_KEY

@@ -10,8 +10,9 @@
 //        → { data: { task_status: submitted|processing|succeed|failed, task_result:{ videos:[{url}] } } }
 //   ★image_tail = 끝 프레임 → 첫+끝 프레임 동작 보간(Grok 은 미지원이라 Kling 채택 이유).
 //   ★duration 은 "5" 또는 "10"(초)만. 짧은 티어는 다운스트림에서 트림(스펙 §5).
-// 인증: AK/SK 로 서명한 JWT(HS256, exp ~30분). Authorization: Bearer <jwt>.
-// 필요 env(Render 워커): KLING_ACCESS_KEY, KLING_SECRET_KEY, KLING_VIDEO_MODEL(선택).
+// 인증(공식 Kling API 2.0, 문서 확인): **단일 API Key** 를 `Authorization: Bearer <KEY>` 로.
+//   (AK/SK→JWT 는 legacy — 있으면 폴백 지원.) 필요 env: KLING_API_KEY (또는 레거시 AK/SK).
+// 필요 env(Render 워커): KLING_API_KEY, KLING_VIDEO_MODEL(선택).
 // ============================================================================
 import { createHmac } from "node:crypto";
 
@@ -23,16 +24,18 @@ const KLING_MODE = process.env.KLING_VIDEO_MODE || "pro"; // std | pro
 // 초당 단가(USD, 대략). pro ~$0.075/s. 길이 × 이 값이 대략 비용. env 로 조정.
 export const KLING_VIDEO_COST = Number(process.env.KLING_VIDEO_COST || 0.075);
 
-function keys() {
+// Authorization 에 넣을 Bearer 토큰. 신형=단일 API Key 그대로. 레거시=AK/SK→JWT.
+function authToken() {
+  const apiKey = process.env.KLING_API_KEY;
+  if (apiKey) return apiKey; // ★신형(권장): Authorization: Bearer <API_KEY>
   const ak = process.env.KLING_ACCESS_KEY;
   const sk = process.env.KLING_SECRET_KEY;
-  if (!ak || !sk) throw new Error("KLING_ACCESS_KEY / KLING_SECRET_KEY 없음(Render 워커 환경변수에 넣어주세요)");
-  return { ak, sk };
+  if (ak && sk) return klingJwt(ak, sk); // 레거시: AK/SK→JWT
+  throw new Error("KLING_API_KEY 없음(Render 워커 환경변수에 넣어주세요) — 또는 레거시 KLING_ACCESS_KEY/SECRET_KEY");
 }
 
-// AK/SK → JWT(HS256). payload: iss=AK, exp=+30분, nbf=-5초. 무의존(node:crypto).
-function klingJwt() {
-  const { ak, sk } = keys();
+// (레거시) AK/SK → JWT(HS256). payload: iss=AK, exp=+30분, nbf=-5초. 무의존(node:crypto).
+function klingJwt(ak, sk) {
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
   const now = Math.floor(Date.now() / 1000);
   const head = b64({ alg: "HS256", typ: "JWT" });
@@ -105,7 +108,7 @@ async function submit({ imageUrl, imageTailUrl, prompt, duration }) {
   if (prompt) body.prompt = String(prompt).slice(0, 2500);
   const r = await fetchRetry(`${BASE}${PATH}`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${klingJwt()}` },
+    headers: { "content-type": "application/json", authorization: `Bearer ${authToken()}` },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
@@ -119,7 +122,7 @@ async function submit({ imageUrl, imageTailUrl, prompt, duration }) {
 
 async function poll(taskId) {
   const r = await fetchRetry(`${BASE}${PATH}/${taskId}`, {
-    headers: { authorization: `Bearer ${klingJwt()}` },
+    headers: { authorization: `Bearer ${authToken()}` },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!r.ok) return { status: "failed", error: klingError(r.status, await r.text().catch(() => "")) };
