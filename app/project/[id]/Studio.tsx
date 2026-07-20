@@ -1392,9 +1392,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }
   // 번역·출력 대상 언어(§10) — 토글. 켜면 다음 컷 추출부터 tracks 채움(기존 컷은 재추출 시 반영).
   async function toggleTargetLanguage(lang: string) {
-    const cur = project.targetLanguages ?? [];
-    const next = cur.includes(lang) ? cur.filter((l) => l !== lang) : [...cur, lang];
-    setProject((prev) => ({ ...prev, targetLanguages: next }));
+    // ★함수형 업데이트로 최신 상태에서 계산(빠른 연속 클릭 시 stale 클로저로 한 토글이 유실되던 것 방지).
+    let next: string[] = [];
+    setProject((prev) => {
+      const cur = prev.targetLanguages ?? [];
+      next = cur.includes(lang) ? cur.filter((l) => l !== lang) : [...cur, lang];
+      return { ...prev, targetLanguages: next };
+    });
     await fetch(`/api/project/${project.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
