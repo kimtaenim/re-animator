@@ -3697,6 +3697,42 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           </div>
                         );
                       })()}
+                      {/* 🔊 오디오 제안(스펙 §6) — VLM 이 뽑은 효과음·리액션 발성·삽입 대사. 삽입 대사는 원작에
+                          없는 창작이라 체크박스로 on/off(기본 on). 생성되면(audioUrl) 재생. */}
+                      {!isCardScene && (s.cut?.audioSuggestions?.length ?? 0) > 0 && (
+                        <div className="rounded border border-[var(--border)] bg-[var(--panel-2)] p-1.5 text-[11px]">
+                          <div className="mb-1 text-[var(--muted)]">🔊 오디오 제안 — 무음 최소화(효과음·리액션·삽입대사)</div>
+                          <div className="flex flex-col gap-1">
+                            {s.cut!.audioSuggestions!.map((sug, si) => {
+                              const icon = sug.type === "sfx" ? "💥" : sug.type === "vocal_reaction" ? "😮" : "💬";
+                              const isInsert = sug.type === "insert_line";
+                              const on = sug.enabled !== false;
+                              return (
+                                <div key={si} className="flex items-center gap-1.5">
+                                  {isInsert && (
+                                    <input
+                                      type="checkbox"
+                                      checked={on}
+                                      title="삽입 대사 켜기/끄기 — 원작에 없는 창작 대사"
+                                      onChange={(e) => {
+                                        const nb = (s.cut?.audioSuggestions ?? []).map((x, j) => (j === si ? { ...x, enabled: e.target.checked ? undefined : false } : x));
+                                        updateCut(s.id, { audioSuggestions: nb });
+                                      }}
+                                    />
+                                  )}
+                                  <span title={sug.type}>{icon}</span>
+                                  <span className={`min-w-0 flex-1 truncate ${isInsert && !on ? "text-[var(--muted)] line-through" : ""}`}>
+                                    {sug.text}
+                                    {sug.speaker && <span className="text-[var(--muted)]"> · {sug.speaker}</span>}
+                                    {sug.timing && <span className="text-[var(--muted)]"> ({sug.timing})</span>}
+                                  </span>
+                                  {sug.audioUrl && <audio src={sug.audioUrl} controls className="h-5" />}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                       {/* ⚡후처리 줌 — 워커가 실픽셀에 굽고(컷당 20~40초) fxUrl 저장. 미리보기·합성이
                           그대로 사용(미리보기=최종). 원본 videoUrl 보존이라 재적용·해제 자유. */}
                       {!isCardScene && s.videoUrl && (
