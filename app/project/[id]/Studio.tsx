@@ -3346,7 +3346,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                                   onChange={(e) => updateCut(s.id, { interpolationOn: e.target.checked || undefined })}
                                   className="h-3 w-3"
                                 />
-                                🎞
+                                🎞 다음 컷 액션연결
                               </label>
                             );
                           })()}
