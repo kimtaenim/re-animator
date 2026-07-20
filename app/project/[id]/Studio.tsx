@@ -83,6 +83,7 @@ const TRANSITIONS: [string, string][] = [
   ["fadein", "페이드인"],
   ["black", "암전"],
   ["dissolve", "디졸브(섞임)"],
+  ["whip", "휩(모션블러 스와이프)"],
 ];
 // 인물 몸동작 프리셋(버튼) — [id, 라벨]. id 는 worker BODY_MOTION_PROMPTS 와 일치해야 함. 모두 절제된 동작.
 const BODY_MOTIONS: [string, string][] = [

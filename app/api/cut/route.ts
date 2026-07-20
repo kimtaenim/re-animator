@@ -68,7 +68,7 @@ function cleanCut(raw: unknown): CutOntology {
   }
   if (
     typeof r.transition === "string" &&
-    ["none", "fadeout", "fadein", "black", "dissolve"].includes(r.transition)
+    ["none", "fadeout", "fadein", "black", "dissolve", "whip"].includes(r.transition)
   ) {
     c.transition = r.transition;
   }

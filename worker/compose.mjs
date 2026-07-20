@@ -319,6 +319,14 @@ export async function runCompose(projectId) {
           `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,setpts=${speed.toFixed(4)}*PTS,fps=${FPS}`;
       if (fadeIn) filter += `,fade=t=in:st=0:d=${FADE}`;
       if (fadeOut) filter += `,fade=t=out:st=${Math.max(0, finalDur - FADE).toFixed(2)}:d=${FADE}`;
+      // ★whip(스펙 §2) — 씬 전환 속성. 컷 경계에서 짧고 강한 모션블러 whoosh(≈12프레임).
+      //   whip 씬의 끝 0.15s 를 블러 아웃, 그 다음 씬의 시작 0.15s 를 블러 인(하드컷+블러=휩 느낌).
+      const WHIP = 0.15;
+      const whipR = Math.max(4, Math.round(Math.min(W, H) / 12)); // 블러 반경(px)
+      const whipOut = s.cut?.transition === "whip";
+      const whipIn = scenes[i - 1]?.cut?.transition === "whip";
+      if (whipIn) filter += `,boxblur=luma_radius=${whipR}:luma_power=1:enable='lt(t,${WHIP})'`;
+      if (whipOut) filter += `,boxblur=luma_radius=${whipR}:luma_power=1:enable='gte(t,${Math.max(0, finalDur - WHIP).toFixed(2)})'`;
       filter += `[bg]`;
       let prev = "bg";
       capPaths.forEach((c, k) => {
