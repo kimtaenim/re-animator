@@ -21,6 +21,7 @@ export async function PATCH(
         storyContext?: string;
         targetLanguages?: unknown;
         videoEngine?: unknown;
+        workingLanguage?: unknown;
       }
   );
   const project = await getProject(id);
@@ -72,6 +73,11 @@ export async function PATCH(
     changed = true;
   } else if (body.videoEngine === null) {
     project.videoEngine = undefined; // 자동(키 유무로 결정)
+    changed = true;
+  }
+  if (typeof body.workingLanguage === "string") {
+    // 작업 언어(§10): "" = 원어, "ja"/"en" = 그 언어. 빈 문자열도 저장(원어로 되돌림).
+    project.workingLanguage = /^[a-z]{2,5}$/.test(body.workingLanguage) ? body.workingLanguage : undefined;
     changed = true;
   }
   if (changed) await saveProject(project);

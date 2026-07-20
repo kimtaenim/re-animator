@@ -105,14 +105,17 @@ function normalizeNarration(cut) {
 
 // 이 컷의 '오디오 유닛'(재생 순서) — 말풍선(대사·내레이션·효과음) audioUrl + 그 자막 텍스트.
 // sx/sy = 이 줄의 자막 위치(0~1 중심). 화자가 번갈아 말하면 줄마다 다르게 지정됨.
-function audioUnits(cut) {
+function audioUnits(cut, workingLang) {
   normalizeNarration(cut);
   const units = [];
   for (const b of cut?.bubbles ?? []) {
-    if (b.audioUrl)
+    // ★작업 언어(§10): 그 언어 트랙의 오디오·텍스트 우선(원문 대신). 효과음은 언어 무관.
+    const tr = workingLang && b.speakerId !== "__sfx__" ? b.tracks?.[workingLang] : null;
+    const audioUrl = tr?.audioUrl || b.audioUrl;
+    if (audioUrl)
       units.push({
-        audioUrl: b.audioUrl,
-        subText: b.speakerId === "__sfx__" || b.noSubtitle ? "" : (b.text || "").trim(), // 효과음·자막제외 줄은 캡션 없음(소리만)
+        audioUrl,
+        subText: b.speakerId === "__sfx__" || b.noSubtitle ? "" : ((tr?.text || b.text || "").trim()), // 효과음·자막제외 줄은 캡션 없음(소리만)
         sx: b.subtitleX,
         sy: b.subtitleY,
         vol: b.volume,
@@ -135,13 +138,14 @@ function audioFx(au) {
 }
 
 // 더빙 없는 컷의 자막 유닛(영상 길이에 비례 배치용) — { text, sx, sy }.
-function subtitleUnits(cut) {
+function subtitleUnits(cut, workingLang) {
   normalizeNarration(cut);
   const units = [];
   if (cut?.bubbles?.length) {
     for (const b of cut.bubbles) {
       if (b.speakerId === "__sfx__" || b.noSubtitle) continue; // 효과음·자막제외 줄은 캡션 안 함
-      const t = (b.text || "").trim();
+      const tr = workingLang ? b.tracks?.[workingLang] : null; // 작업 언어(§10) 번역 우선
+      const t = ((tr?.text || b.text) || "").trim();
       if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY });
     }
   } else if (cut?.dialogue?.trim()) {
@@ -181,8 +185,9 @@ export async function runCompose(projectId) {
 
   const p = await getProject(projectId);
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  const workingLang = (p.workingLanguage || "").trim(); // ★작업 언어(§10) — 자막·오디오를 이 언어로
   // 자막 씬(무성영화 카드, text 컷)은 영상 없이도 합성 대상 — 검은 배경+카드로 직접 렌더.
-  const isCardScene = (s) => !s.videoUrl && s.cut?.type === "text" && subtitleUnits(s.cut).length > 0;
+  const isCardScene = (s) => !s.videoUrl && s.cut?.type === "text" && subtitleUnits(s.cut, workingLang).length > 0;
   const scenes = (p.scenes ?? [])
     .slice()
     .sort((a, b) => a.order - b.order)
@@ -210,7 +215,7 @@ export async function runCompose(projectId) {
       const aPaths = [];
       const caps = []; // { text, start, end }
       let acc = 0;
-      for (const au of audioUnits(s.cut)) {
+      for (const au of audioUnits(s.cut, workingLang)) {
         const ext = au.audioUrl.includes(".wav") ? "wav" : "mp3";
         const ap = join(dir, `a${i}_${aPaths.length}.${ext}`);
         try {
@@ -252,7 +257,7 @@ export async function runCompose(projectId) {
 
       // 더빙 없으면 자막을 영상 길이에 글자수 비례로 순차. (카드 씬은 글자수 기반 길이)
       if (!aPaths.length) {
-        const subs = subtitleUnits(s.cut);
+        const subs = subtitleUnits(s.cut, workingLang);
         if (subs.length) {
           const textLen = subs.reduce((n, u) => n + stripMarks(u.text).replace(/\s/g, "").length, 0);
           const baseDur = isCard

@@ -1919,6 +1919,7 @@ export async function runDub(projectId, payload) {
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
   const cast = p.cast ?? [];
   const narrator = p.narratorVoice || null;
+  const workingLang = (p.workingLanguage || "").trim(); // ★작업 언어(§10) — 있으면 그 언어 번역을 더빙(원문 대신)
   const speed = Math.max(0.5, Math.min(2, Number(p.dubSpeed) || 1.2)); // 말 속도 배수(기본 1.2배)
   const only =
     Array.isArray(payload?.sceneIds) && payload.sceneIds.length ? new Set(payload.sceneIds) : null;
@@ -1957,14 +1958,20 @@ export async function runDub(projectId, payload) {
       cut.dialogue = "";
     }
     for (let i = 0; i < bubs.length; i++) {
-      const text = (bubs[i].text || "").trim();
+      const b = bubs[i];
+      // ★작업 언어(§10): 그 언어 번역(tracks[lang].text)이 있으면 원문 대신 그걸 더빙하고 tracks[lang].audioUrl 에 저장.
+      //   효과음(__sfx__)은 언어 무관. 미설정·번역 없으면 기존대로 원문(b.text) → b.audioUrl.
+      const langText = workingLang && b.speakerId !== "__sfx__" ? (b.tracks?.[workingLang]?.text || "").trim() : "";
+      const useLang = !!langText;
+      const text = useLang ? langText : (b.text || "").trim();
       if (!text) continue;
-      if (!force && (bubs[i].audioUrl || "").trim()) { alreadyDone++; continue; } // 이미 더빙된 줄 스킵(전체 더빙)
-      if (bubs[i].speakerId === "__sfx__") {
+      const existing = useLang ? (b.tracks?.[workingLang]?.audioUrl || "") : (b.audioUrl || "");
+      if (!force && existing.trim()) { alreadyDone++; continue; } // 이미 더빙된 줄 스킵(전체 더빙)
+      if (b.speakerId === "__sfx__") {
         units.push({ s, kind: "sfx", idx: i, text, voice: "__sfx__" }); // 효과음 줄 → 소리 생성
       } else {
-        // 화자 null = 내레이터. 캐릭터 대사·내레이션 모두 이 한 경로로만 더빙된다.
-        units.push({ s, kind: "bubble", idx: i, text, voice: resolve(bubs[i].speakerId), emotion: bubs[i].emotion });
+        // 화자 null = 내레이터. 캐릭터 대사·내레이션 모두 이 한 경로로만 더빙된다. lang 있으면 그 언어 트랙에 저장.
+        units.push({ s, kind: "bubble", idx: i, text, voice: resolve(b.speakerId), emotion: b.emotion, lang: useLang ? workingLang : "" });
       }
     }
     // ── 오디오 제안(§6) 생성 — enabled 인 것만. sfx=효과음, vocal_reaction/insert_line=배역 발성(TTS). ──
@@ -2017,8 +2024,13 @@ export async function runDub(projectId, payload) {
           );
           if (u.kind === "sug_sfx" || u.kind === "sug_voice") {
             if (u.s.cut?.audioSuggestions?.[u.sugIdx]) u.s.cut.audioSuggestions[u.sugIdx].audioUrl = url; // 오디오 제안(§6)
+          } else if (u.kind === "bubble" && u.lang && u.s.cut?.bubbles?.[u.idx]) {
+            // 작업 언어 더빙 → 그 언어 트랙에 저장(§10). 원문 audioUrl 은 보존.
+            const bb = u.s.cut.bubbles[u.idx];
+            bb.tracks = bb.tracks || {};
+            bb.tracks[u.lang] = { ...(bb.tracks[u.lang] || {}), audioUrl: url, status: "tts" };
           } else if (u.s.cut?.bubbles?.[u.idx]) {
-            u.s.cut.bubbles[u.idx].audioUrl = url; // 대사·내레이션·효과음 줄 모두 말풍선 audioUrl 에
+            u.s.cut.bubbles[u.idx].audioUrl = url; // 원문 대사·내레이션·효과음 줄 → 말풍선 audioUrl
           }
           ok++;
         } catch (e) {

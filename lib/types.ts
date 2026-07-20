@@ -284,6 +284,7 @@ export interface Project {
   storyContext?: string; // ★스토리 맥락/톤(사용자 작성) — 모든 영상 생성 프롬프트에 주입해 맥락 어긋난 동작(예: 죽어가는데 벌떡 일어남) 방지.
   targetLanguages?: string[]; // ★번역·출력 대상 언어(스펙 §10, 예 ["ja","en"]). 없으면 레거시(단일 — 기존 동작). LANGUAGES 참조.
   videoEngine?: "grok" | "kling"; // I2V 엔진. 기본 kling(키 있으면; 스펙 §4 첫+끝 프레임 보간은 Kling만). 없으면 자동(키 유무).
+  workingLanguage?: string; // ★작업 언어(스펙 §10). ""/미설정=원어(source), "ja"/"en"=그 언어 번역으로 표시·더빙·자막. tracks[lang] 사용.
 
   steps: Record<StepKind, StepState>;
 
