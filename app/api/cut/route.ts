@@ -94,6 +94,7 @@ function cleanCut(raw: unknown): CutOntology {
   if (typeof r.tierEvidence === "string") c.tierEvidence = r.tierEvidence.slice(0, 200);
   if (typeof r.motionPromptHint === "string") c.motionPromptHint = r.motionPromptHint.slice(0, 400);
   if (r.interpolationCandidate === true) c.interpolationCandidate = true;
+  if (r.interpolationOn === true) c.interpolationOn = true; // 동작 보간 켜기(§4)
   if (r.audioSuggestions !== undefined) {
     const sug = cleanAudioSuggestions(r.audioSuggestions); // 오디오 제안(스펙 §6) — 화이트리스트
     if (sug) c.audioSuggestions = sug;

@@ -33,6 +33,7 @@ import {
 } from "./regen.mjs";
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
+import { klingVideoFromImage, KLING_VIDEO_COST } from "./kling.mjs";
 import { renderCameraFx } from "./cameraRender.mjs";
 import { readCutText, readCutTextTiled } from "./ocr.mjs";
 import { translateScenes, proofreadScenes, translateScenesMultilang } from "./translate.mjs";
@@ -1582,7 +1583,12 @@ export async function runVideo(projectId, payload) {
     cand = cand.filter((s) => set.has(s.id));
   }
   if (cand.length === 0) throw new Error("영상 만들 컷이 없어요(먼저 3단계 재생성)");
-  await log(`영상 생성 대상 ${cand.length}컷 · Grok · 동시 ${VIDEO_CONCURRENCY}`);
+  // ★기본 엔진 = Kling(스펙 §4: 액션=첫+끝 프레임 보간은 Kling 만 가능). 단 키 없으면 Grok 폴백(생성 안 끊김).
+  //   project.videoEngine 로 명시 지정 가능("grok"|"kling"). 명시 kling 인데 키 없으면 Kling 이 명확히 에러냄.
+  const hasKling = !!(process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY);
+  const engine =
+    p.videoEngine === "grok" ? "grok" : p.videoEngine === "kling" ? "kling" : hasKling ? "kling" : "grok";
+  await log(`영상 생성 대상 ${cand.length}컷 · ${engine === "kling" ? "Kling" : "Grok"} · 동시 ${VIDEO_CONCURRENCY}`);
 
   const byId = new Map(); // sceneId → { url } | { error }
   let costTotal = 0;
@@ -1627,11 +1633,19 @@ export async function runVideo(projectId, payload) {
           const grokDur = Math.max(1, Math.min(10, Math.round(dur))); // Grok 은 정수만
           // ★콘텐츠 정책 거부 시 순화 프롬프트로 1회 자동 재시도 — 프롬프트가 원인이면 통과.
           //   이미지 자체가 걸리면 그래도 실패(그건 3단계에서 그 컷을 순화 재생성해야 함).
+          // ★엔진 분기: kling(첫+끝 프레임 보간 가능·품질) 또는 grok. 프롬프트는 공통(buildVideoPrompt).
+          //   image_tail = 동작 보간용 끝 프레임(scene.tailImage) — 보간 켜짐+kling 일 때만 전달(스펙 §4).
+          const tailUrl = engine === "kling" && s.cut?.interpolationOn ? s.tailImage : undefined;
           const genVideo = (prompt) =>
-            grokVideoFromImage(
-              { imageUrl: s.generatedImage, prompt, duration: grokDur },
-              () => log(`컷 ${s.order + 1} 생성 중…(${grokDur}s)`)
-            );
+            engine === "kling"
+              ? klingVideoFromImage(
+                  { imageUrl: s.generatedImage, imageTailUrl: tailUrl, prompt, duration: dur },
+                  () => log(`컷 ${s.order + 1} 생성 중…(Kling${tailUrl ? "·보간" : ""})`)
+                )
+              : grokVideoFromImage(
+                  { imageUrl: s.generatedImage, prompt, duration: grokDur },
+                  () => log(`컷 ${s.order + 1} 생성 중…(${grokDur}s)`)
+                );
           // 이 컷에 '보이는' 캐릭터들(캐스팅 sceneIds 기준) — 화자가 이 중에 없으면 입 다뭄.
           const shownCharIds = (p.cast ?? []).filter((c) => (c.sceneIds ?? []).includes(s.id)).map((c) => c.id);
           let videoUrl;

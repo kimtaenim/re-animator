@@ -176,6 +176,7 @@ export interface CutOntology {
   tierEvidence?: string; // 근거 한 줄
   motionPromptHint?: string; // 티어 규칙 준수 I2V 모션 서술
   interpolationCandidate?: boolean; // 인접 컷 자세차 큼 → 동작 보간 후보(스펙 §4, G2 배지)
+  interpolationOn?: boolean; // ★동작 보간 켜기(옵트인, 스펙 §4) — 켜면 Kling I2V 에 first/last frame(scene.tailImage) 전달.
   audioSuggestions?: AudioSuggestion[]; // 오디오 채움 제안(스펙 §6)
   confirmed: boolean; // 사람이 G1 에서 타입 확정했는지
 }
@@ -238,6 +239,7 @@ export interface Scene {
   sourceRegion: SourceRegion; // 가상 캔버스 전역 좌표
   cut?: CutOntology; // 컷 온톨로지(타입+내용). 미분류면 type=null.
   originalImage?: string; // 추출된 원본 컷 Blob URL (확정 후 워커가 채움)
+  tailImage?: string; // ★동작 보간용 끝 프레임 Blob URL(스펙 §4) — 두 컷 병합 시 둘째 컷 이미지. Kling image_tail 로 전달.
   regenMode?: "mask" | "full"; // 재생성 방식: mask=원본보존+빈공간/글씨만, full=통째 재생성
   generatedImage?: string; // M3 재생성 이미지 Blob URL (image-2)
   regenError?: string; // 재생성 실패 사유(있으면)
@@ -282,6 +284,7 @@ export interface Project {
   dubSpeed?: number; // 더빙 말 속도 배수(1=기본, 1.2=조금 빠르게). Typecast tempo / ElevenLabs speed.
   storyContext?: string; // ★스토리 맥락/톤(사용자 작성) — 모든 영상 생성 프롬프트에 주입해 맥락 어긋난 동작(예: 죽어가는데 벌떡 일어남) 방지.
   targetLanguages?: string[]; // ★번역·출력 대상 언어(스펙 §10, 예 ["ja","en"]). 없으면 레거시(단일 — 기존 동작). LANGUAGES 참조.
+  videoEngine?: "grok" | "kling"; // I2V 엔진. 기본 kling(키 있으면; 스펙 §4 첫+끝 프레임 보간은 Kling만). 없으면 자동(키 유무).
 
   steps: Record<StepKind, StepState>;
 

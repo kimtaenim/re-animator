@@ -6,6 +6,7 @@
 ## 변경 이력
 
 - **v0.2 (2026-07-20, 진행 중)**
+  - **I2V 엔진 = Kling 채택(사용자 결정).** 사유: 스펙 §4 동작 보간(첫+끝 프레임)은 Grok(xAI)이 **미지원**(공식 문서 확인 — image-to-video 는 시작 이미지 1장만). Kling 은 `image_tail`(끝 프레임)·네이티브 품질 지원. `worker/kling.mjs` 어댑터(공식 API, AK/SK→JWT HS256, `POST /v1/videos/image2video`, image_tail, 폴링). runVideo 엔진 분기 — **기본 Kling(KLING 키 있으면), 키 없으면 Grok 폴백**(생성 안 끊김); `project.videoEngine`("grok"|"kling")로 강제. UI 🎬 영상 엔진 토글(자동/Kling/Grok). Kling duration 5|10초라 짧은 티어는 다운스트림 트림(§5). 카메라워크는 **후처리 유지**(Kling 네이티브 카메라 미채택 — §2 단일 소스 원칙). env: KLING_ACCESS_KEY/SECRET_KEY(render.yaml·env 예시 반영). 데이터: `Scene.tailImage`·`CutOntology.interpolationOn` 추가(보간 2이미지·토글, 화이트리스트). **남은 것: 두 컷 병합→tailImage 채우기 + 보간 토글 UI(Slice 2).**
   - **계층 B(2레이어 합성) 연기 결정 (사용자 승인):** 현 파이프라인은 인물/배경 분리 매트를 만들지 않는다(사용자가 지시한 적 없음). 계층 B(parallax_push·vertigo)는 모든 컷에 필요한 게 아니라 필요할 때만 쓰므로, 분리 매트는 **필요 시점에 온디맨드**로 나중에 붙인다. 수식 모듈은 이미 character/background 2트랙을 뱉으므로 매트 확보 시 즉시 연결 가능. → Phase 2는 **계층 A만** 구현.
   - Phase 2: 워커 계층 A 렌더러 `worker/cameraRender.mjs` — ffmpeg **sendcmd**로 crop w/h/x/y 에 키프레임 테이블의 리터럴 픽셀값을 프레임마다 주입(zoompan 수식 직접 기술 금지 준수). 단일 패스 스트리밍이라 프레임별 sharp 디코딩 없음(합성 OOM 회피). 업스케일 트리거(needsUpscale)는 결정 로직만; Real-ESRGAN 실제 패스는 후속.
   - Phase 3(부분): 웹앱 클라이언트 프리뷰 + 파라미터 편집. `app/project/[id]/CameraWorkEditor.tsx` — 정지이미지 위 Web Animations API 근사 프리뷰 + 슬라이더(preset·길이·줌속도·드리프트·시작줌·배경델타·흔들진폭), "근사"/orbit "프록시 렌더 필수"/계층B "매트 준비 후" 라벨. 저장은 `cameraWork` JSON 만(updateCut→/api/cut). "적용(굽기)"→ /api/camerafx. 기존 ⚡후처리 카메라(effect/strength)는 유지(공존, 사용자 확정 후 정리).

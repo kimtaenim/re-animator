@@ -1356,6 +1356,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       body: JSON.stringify({ storyContext: v }),
     }).catch(() => {});
   }
+  // I2V 영상 엔진(§4) — 자동(키 유무)/Kling/Grok. Kling 만 첫+끝 프레임 보간(액션) 가능.
+  async function setVideoEngine(v: "grok" | "kling" | "auto") {
+    setProject((prev) => ({ ...prev, videoEngine: v === "auto" ? undefined : v }));
+    await fetch(`/api/project/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(v === "auto" ? { videoEngine: null } : { videoEngine: v }),
+    }).catch(() => {});
+  }
   // 번역·출력 대상 언어(§10) — 토글. 켜면 다음 컷 추출부터 tracks 채움(기존 컷은 재추출 시 반영).
   async function toggleTargetLanguage(lang: string) {
     const cur = project.targetLanguages ?? [];
@@ -3021,6 +3030,25 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 );
               })}
               <span className="text-[var(--muted)]">· 한국어는 항상 병기</span>
+            </div>
+            {/* 🎬 영상 엔진(§4) — 자동(키 유무)/Kling/Grok. Kling 만 액션 첫+끝 프레임 보간 가능. */}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]" title="I2V 엔진. Kling 은 첫+끝 프레임 보간(액션)·네이티브 품질. Grok 은 기존. 자동=키 있으면 Kling. Kling 은 워커에 KLING_ACCESS_KEY/SECRET_KEY 필요.">
+              <span className="text-[var(--muted)]">🎬 영상 엔진</span>
+              {(["auto", "kling", "grok"] as const).map((v) => {
+                const cur = project.videoEngine ?? "auto";
+                const on = cur === v;
+                const label = v === "auto" ? "자동" : v === "kling" ? "Kling(보간)" : "Grok";
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setVideoEngine(v)}
+                    className={`rounded border px-1.5 py-0.5 ${on ? "border-[var(--accent)] font-medium text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--panel-2)]"}`}
+                  >
+                    {on ? "✓ " : ""}{label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

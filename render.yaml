@@ -23,8 +23,13 @@ services:
       # VLM 장면 그룹핑용(없으면 알고리즘 분할만, 폴백). OPENAI_VLM_MODEL 은 선택(기본 gpt-4o-mini).
       - key: OPENAI_API_KEY
         sync: false
-      # M4 영상(Grok I2V)
+      # M4 영상(Grok I2V — 폴백/옵션)
       - key: XAI_API_KEY
+        sync: false
+      # M4 영상(Kling I2V — 기본 엔진, 첫+끝 프레임 보간). 콘솔에서 발급한 AccessKey/SecretKey.
+      - key: KLING_ACCESS_KEY
+        sync: false
+      - key: KLING_SECRET_KEY
         sync: false
       # M6 더빙 TTS — 대사·내레이션 음성 생성. 둘 중 쓰는 provider 키만 있어도 됨.
       - key: TYPECAST_API_KEY
