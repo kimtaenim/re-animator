@@ -990,6 +990,43 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   {b.translation}
                 </div>
               )}
+              {/* 언어별 번역(스펙 §10) — 대상 언어(🌐) 켜져 있으면 원어·한국어 아래에 각 언어 표시·인라인 수정.
+                  값은 재추출 시 워커가 자동으로 채우고(원어→언어별), 여기서 손볼 수 있다. */}
+              {!isSfx && (project.targetLanguages?.length ?? 0) > 0 && (
+                <div className="ml-7 mt-0.5 flex flex-col gap-0.5">
+                  {project.targetLanguages!.map((lang) => {
+                    const langLabel = LANGUAGES.find((l) => l.id === lang)?.label ?? lang;
+                    return (
+                      <div key={lang} className="flex items-center gap-1 text-[11px]">
+                        <span className="w-7 shrink-0 text-[10px] uppercase text-[var(--muted)]" title={langLabel}>
+                          {lang}
+                        </span>
+                        <input
+                          type="text"
+                          value={b.tracks?.[lang]?.text ?? ""}
+                          placeholder={`${langLabel} 번역 — 재추출 시 자동`}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const nb = (s.cut?.bubbles ?? []).map((x, i) =>
+                              i === bi
+                                ? {
+                                    ...x,
+                                    tracks: {
+                                      ...(x.tracks || {}),
+                                      [lang]: { ...(x.tracks?.[lang] || {}), text: val, status: "translated" as const },
+                                    },
+                                  }
+                                : x,
+                            );
+                            updateCut(s.id, { bubbles: nb });
+                          }}
+                          className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {/* ── 세부 컨트롤(접힘 기본) — 감정·자막위치·순서이동·무성씬·강조 ── */}
               {!isSfx && advOpen && (
                 <div className="ml-7 flex flex-wrap items-center gap-2 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1">
