@@ -965,7 +965,27 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 placeholder={isSfx ? "효과음 (예: 웅성웅성, 쾅)" : `대사 ${bi + 1} (Enter=줄바꿈)`}
                 className={`${inputCls} resize-none`}
               />
-              {/* 세부(⚙) 토글 — 감정·자막위치·순서이동·무성씬을 펼침/접음. */}
+              {/* 감정 연기 — 더빙에서 바로 확인·조절하도록 항상 노출(접힘 밖). 자막엔 안 나감. */}
+              {!isSfx && (
+                <select
+                  value={b.emotion ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value || undefined;
+                    const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, emotion: v } : x));
+                    updateCut(s.id, { bubbles: nb });
+                  }}
+                  title="감정 연기 — 더빙 시 연기(자막엔 안 나감)"
+                  className={`shrink-0 rounded border bg-[var(--panel)] px-0.5 py-1 text-[10px] leading-none ${
+                    b.emotion ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)]"
+                  }`}
+                >
+                  <option value="">🎭</option>
+                  {EMOTIONS.map((em) => (
+                    <option key={em.id} value={em.id}>{em.label}</option>
+                  ))}
+                </select>
+              )}
+              {/* 세부(⚙) 토글 — 자막위치·순서이동·무성씬을 펼침/접음. */}
               {!isSfx && (
                 <button
                   type="button"
@@ -1055,27 +1075,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               {/* ── 세부 컨트롤(접힘 기본) — 감정·자막위치·순서이동·무성씬·강조 ── */}
               {!isSfx && advOpen && (
                 <div className="ml-7 flex flex-wrap items-center gap-2 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1">
-                  {/* 감정 연기 */}
-                  <label className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
-                    감정
-                    <select
-                      value={b.emotion ?? ""}
-                      onChange={(e) => {
-                        const v = e.target.value || undefined;
-                        const nb = (s.cut?.bubbles ?? []).map((x, i) => (i === bi ? { ...x, emotion: v } : x));
-                        updateCut(s.id, { bubbles: nb });
-                      }}
-                      className={`rounded border bg-[var(--panel)] px-0.5 py-0.5 text-[10px] ${
-                        b.emotion ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)]"
-                      }`}
-                      title="감정 연기 — 더빙 시 과장 연기(자막엔 안 나감)"
-                    >
-                      <option value="">🎭 없음</option>
-                      {EMOTIONS.map((em) => (
-                        <option key={em.id} value={em.id}>{em.label}</option>
-                      ))}
-                    </select>
-                  </label>
                   {/* 자막 위치 9분할 */}
                   <label className="flex items-center gap-1 text-[10px] text-[var(--muted)]" title="이 줄 자막 위치 — 다시 클릭하면 해제(컷 기본)">
                     자막
