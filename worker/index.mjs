@@ -66,7 +66,7 @@ async function runJob(job) {
     fn(job.projectId, job.payload),
     new Promise((_, rej) =>
       setTimeout(
-        () => rej(new Error(`${job.type} 타임아웃(8분) — 워커 매달림`)),
+        () => rej(new Error(`${job.type} 타임아웃(${Math.round(JOB_TIMEOUT_MS / 60000)}분) — 워커 매달림`)),
         JOB_TIMEOUT_MS
       )
     ),

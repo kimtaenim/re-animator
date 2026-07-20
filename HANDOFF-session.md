@@ -14,12 +14,33 @@
 3. **자주 push해서 배포로 검증하는 건 맞다(사용자 확인).** push를 아끼지 마라. 단 in-flight 잡은 재배포 때 죽으니, 사용자가 돌리는 중이면 감안.
 4. **진짜 문제는 코드 품질이다.** 추측·땜질 말고 정독·검증. 사용자 왈 "네가 코드를 잘 짜면 안 생길 문제들."
 
-**★ 지금 열려 있는 버그(사용자 보고, 미해결):**
-- **분할(runSplit)이 "OCR 교정" 다음에 멈춤/매우 느림.** 그 다음이 `translateScenes`(Claude). 90s 타임아웃 넣었으니 완료되는지 재검증. runSplit은 classify+풀해상도 OCR+proofread+translate를 한 잡에 다 해서 무겁다(~90s+). 왜 이렇게 무거운지/쪼갤지 검토.
-- **동영상이 16:9인데 정사각형으로 나옴.** `conformVideo`(비율 맞춤)가 실패해 원본으로 폴백하는 듯. 실패 원인 로그 넣음(`f31b975`, `[conformVideo]`) — 워커 로그에서 그 문구 확인. targetDims는 16:9→1280×720 맞음. Kling 출력 aspect(입력이미지 따라감)·ffmpeg 실패 여부 확인.
-- **재생성 이미지가 가끔 안 뜸.** `🔄 새로고침` 버튼 넣음(`bd36f4d`). 뿌리는 위 `../lib` 회귀였을 가능성 — 고쳤으니 재검증.
-- **동영상 생성 시 워커 크래시/행 보고.** Grok 1컷도 터졌다 함 → `../lib` 회귀가 원인이었을 가능성 큼(고침). 재검증 필요.
-- **[진행 중] 코드 리뷰 에이전트**를 띄워 `bb9adc9..HEAD` 전체 결함을 뽑던 중이었다. **새 세션은 그 리뷰(general-purpose 에이전트로 diff 정밀 리뷰)를 다시 돌려 확정 버그부터 고쳐라.**
+**★★ 2026-07-21 재리뷰 완료 — 확정 결함 6건 수정·push(4aa9e5b..HEAD). 아래 옛 목록은 이력.**
+이번 세션(2026-07-21): general-purpose 에이전트 2개로 `bb9adc9..HEAD` 전 diff 재정밀 리뷰 → CRITICAL 0, `../lib` 실제 import 0(주석뿐), 변경된 외부 호출 전부 타임아웃 확인, 화이트리스트 누락 데이터 소실 0. **고친 것(커밋):**
+- `da5a4e6` ① runSplit 경계 소실 — 필수 경계 저장이 무거운 프리뷰(OCR·교정·번역) 뒤라 12분 캡 초과 시 통째 버려짐 → 프리뷰에 soft deadline(t0+9.5분, env `SPLIT_PREVIEW_SOFT_MS`) → 캡 전 멈추고 저장 보장(못 읽은 대사는 추출 2단계가 채움). ← "OCR교정 다음 멈춤/실패"의 진짜 원인. ② Kling 클립 Grok 단가·xai 벤더 오청구 → engine 별 분기. ③ ffmpeg spawn 고아→OOM: cameraRender run/probeRaw + conformVideo 에 타임아웃+SIGKILL(run 4분·conform 3분·probe 30초).
+- `6d588c7` ④ /api/cut 통째 저장이 동시 워커 오디오 URL(bubbles·tracks·narration·sfx·audioSuggestions) 덮던 레이스 → `preserveWorkerAudio`(클라 미전송 오디오 필드만 서버값 복원, 배열은 인덱스+텍스트 가드). 저장 규약 준수.
+- `3e0052f` ⑤ 대상 언어 토글 stale 클로저 유실 → 함수형 업데이트.
+- (다음 커밋) ⑥ 잡 타임아웃 로그 "8분"→상수 반영(index.mjs).
+
+**★ 아직 열린/미확정(사용자 확인·결정 필요):**
+- **[결정 필요] 동영상 16:9인데 정사각형 + "동영상 안 됨/크래시".** conformVideo 필터 코드는 **정상 확인**(16:9→1280×720). 정사각형 = conformVideo 가 null(ffmpeg 실패) 후 원본 폴백 → **워커 로그 `[conformVideo] 비율 맞춤 실패` 문구로 실제 ffmpeg 에러 확인 필요**(추측 금지, spawn 타임아웃 넣어 '매달림'은 배제됨=진짜 에러). **더 큰 리스크: Kling 이 기본 엔진(`jobs.mjs:1598`, 키 있으면)인데 API 2.0 계약이 실제 키로 미검증** — 계약이 틀리면 모든 Kling 컷 실패. 코드는 내부 일관·타임아웃 안전하나 라이브 검증 전엔 확신 불가. 동영상이 계속 실패하면 **기본을 Grok 으로 되돌리고 Kling opt-in** 이 안전(단 전역 기본 변경이라 사용자 승인 후). → 사용자에게 질문함.
+- **재생성 이미지 가끔 안 뜸** — runRegen 은 `bb9adc9..HEAD` 범위 밖 → 이번 세션 변경이 원인 아님. `🔄 새로고침`(bd36f4d)로 미봉. 재현 시 별도 조사.
+- (LOW) 액션/보간 클립 길이: Kling min 3s vs estimateVideoSeconds 1-2s — compose 트림 확인(품질, 크래시 아님).
+- (UX) §9 아코디언 단일 펼침 — 컨트롤 삭제 아님(의도 설계), 여러 컷 동시 비교 불편하면 openScene→Set.
+
+<옛 목록 — 이력>
+- ~~분할 OCR교정 다음 멈춤~~ → ① 로 해결.
+- ~~동영상 정사각형~~ → conformVideo 정상 확인, 위 [결정 필요] 참조.
+- ~~재생성 이미지 안 뜸~~ → 범위 밖, 위 참조.
+- ~~동영상 크래시~~ → `../lib` 회귀 없음·타임아웃 확인, 위 Kling 결정 참조.
+**★ 코드 리뷰 결과(확정/유력 버그, 심각도순 — file:line):**
+1. **[HIGH] 동영상 크래시 유력 원인 = Kling 이 기본 엔진인데 계약 검증 안 됨.** `worker/jobs.mjs:1598` 이 `KLING_API_KEY` 있으면 Kling 기본(사용자에게 키 넣으라 했음) → 모든 컷이 Kling 경로. `worker/kling.mjs`는 내부 일관되나, 리뷰어가 "표준 Kling Open Platform 문서(구형: `/v1/videos/image2video`, flat body, AK/SK→JWT)와 다르다"고 지적. **단 나는 브라우저로 현재 공식 문서(kling.ai/document-api, API 2.0: `/image-to-video/{model}`+contents/settings+`/tasks` 폴링+단일 Bearer)를 직접 읽고 그대로 구현함** → 어느 게 맞는지 **실제 키로 라이브 검증 필수**. 크래시가 계속되면 **일단 기본을 Grok 으로 돌리고(jobs.mjs:1598 의 `hasKling ? "kling":"grok"` → grok 기본), Kling 은 검증될 때까지 opt-in** 으로. (참고: 초기 크래시는 `../lib` 회귀였고 이미 고침 — Kling 이 진짜 원인인지 재확인.)
+2. **[HIGH] 정사각형 출력 = conformVideo 런타임 실패 → 원본 폴백.** `jobs.mjs:1677` `conformVideo(raw,p) ?? stripAudio(raw) ?? raw`. targetDims 는 16:9→1280×720 맞음(우회 아님). conformVideo 가 **throw 하면** raw(엔진 native aspect, 예 Kling 1:1)가 그대로 나감. 메커니즘 확정. **워커 로그의 `[conformVideo]` 문구(f31b975)로 ffmpeg 실패 원인 확인** 후 그 지점 수정.
+3. **[확정→고침, 잔여 있음] 분할 OCR교정 다음 먹통 = Claude 타임아웃 없음(고침 d6e80de).** 잔여: `worker/index.mjs:63-75` JOB_TIMEOUT 이 `Promise.race` 로 **거부만 하고 실행 중 잡을 취소 안 함** → 타임아웃된 잡이 백그라운드로 계속 돌며 다음 잡과 겹침 → 메모리 빡빡한 워커 OOM 위험. Kling(컷당 최대 10분 폴링)이 12분 전체캡과 겹쳐 악화. (사소: 타임아웃 메시지 "8분"인데 상수는 12분 — index.mjs:44 vs 69.)
+4. **[LOW] Kling 비용 오계상.** `jobs.mjs:1684` 이 엔진 무관하게 `GROK_VIDEO_COST` 사용·`vendor:"xai"` 기록. `KLING_VIDEO_COST` import 됐지만 미사용. 기능 무영향.
+5. **[UX, 크래시 아님] "이미지 안 보임" = §9 아코디언이 펼치기 전엔 본문(큰 이미지/영상)을 숨김** — 접힌 줄엔 8×12 썸네일만. 의도된 설계지만 사용자가 불편해함. + 3단계 상태 동기 갭(🔄 새로고침 버튼으로 미봉).
+6. **[깨끗] 화이트리스트 완전(데이터 소실 없음), worker/cameraKeyframes.mjs 는 lib 복사본과 심볼 동일, compose 작업언어·whip null-safe, classify 스키마 일관, Studio nextGenByScene 진짜 O(n).**
+
+**새 세션 우선순위: (1) Kling 라이브 검증 or Grok 기본 복귀 → 동영상 살리기, (2) conformVideo 로그 보고 정사각형 고치기, (3) index.mjs 잡 타임아웃 취소/겹침 방지.**
 
 **남은 미구현(버그 다 잡은 뒤에):** §9 씬별 앞/뒤 단계 이동 화살표(task #7). Phase 8 나머지(오디오 제안을 compose 출력에 믹싱·BGM 3트랙 덕킹·언어별 출력잡·프록시 렌더). 다국어는 "일본어 우선 제대로"가 목표(workingLanguage→더빙/자막/표시가 tracks[lang] 사용, 배역 목소리는 멀티링구얼이어야 일본어 발음).
 
