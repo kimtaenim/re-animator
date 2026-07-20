@@ -3299,6 +3299,34 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             <option value="emote">😮 emote</option>
                             <option value="action">⚡ action</option>
                           </select>
+                          {/* 🎞 동작 보간(§4) — 접힌 줄에 항상 보이게. 다음 컷 있으면 표시, 조건 안 되면 비활성+안내. */}
+                          {!isCardScene && (() => {
+                            let next: Project["scenes"][number] | null = null;
+                            let hasNextScene = false;
+                            for (const x of project.scenes) {
+                              if (x.order > s.order) hasNextScene = true;
+                              if (x.order > s.order && x.generatedImage && (!next || x.order < next.order)) next = x;
+                            }
+                            if (!hasNextScene) return null;
+                            const canInterp = !!(s.generatedImage && next);
+                            const on = s.cut?.interpolationOn === true;
+                            return (
+                              <label
+                                onClick={(e) => e.stopPropagation()}
+                                className={`flex shrink-0 items-center gap-0.5 rounded border px-1 py-0.5 text-[10px] ${on ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)]"} ${canInterp ? "cursor-pointer" : "opacity-40"}`}
+                                title={canInterp ? `동작 보간: 이 컷 이미지 → 다음 컷(#${(next?.order ?? 0) + 1}) 이미지로 Kling 보간(첫+끝 프레임). Kling 엔진 필요.` : "동작 보간하려면 이 컷과 다음 컷을 둘 다 재생성(이미지)해야 합니다."}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={on}
+                                  disabled={!canInterp}
+                                  onChange={(e) => updateCut(s.id, { interpolationOn: e.target.checked || undefined })}
+                                  className="h-3 w-3"
+                                />
+                                🎞
+                              </label>
+                            );
+                          })()}
                         </div>
                       );
                     })()}
@@ -3540,27 +3568,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           busy={busy}
                         />
                       )}
-                      {/* 🎞 동작 보간(스펙 §4) — 이 컷 영상을 '이 이미지→다음 컷 이미지'로 Kling 보간(첫+끝 프레임).
-                          구조 변경 없음(두 컷 다 유지). 끝 프레임은 워커가 다음 컷에서 자동. Kling 엔진 필요. */}
-                      {!isCardScene && s.generatedImage && (() => {
-                        const next = [...project.scenes].sort((a, b) => a.order - b.order).find((x) => x.order > s.order && x.generatedImage);
-                        if (!next) return null;
-                        const on = s.cut?.interpolationOn === true;
-                        const cand = s.cut?.interpolationCandidate === true;
-                        return (
-                          <div className="flex flex-wrap items-center gap-2 rounded border border-[var(--border)] bg-[var(--panel-2)] p-1.5 text-[11px]">
-                            <label className="flex items-center gap-1" title="켜면 이 컷 영상이 이 컷 이미지(첫 프레임)에서 다음 컷 이미지(끝 프레임)로 움직입니다. Kling 엔진에서만 동작.">
-                              <input type="checkbox" checked={on} onChange={(e) => updateCut(s.id, { interpolationOn: e.target.checked || undefined })} />
-                              <span>🎞 동작 보간</span>
-                            </label>
-                            {cand && <span className="rounded bg-[var(--panel)] px-1 text-[9px] text-[var(--accent)]" title="VLM 이 인접 컷과 자세 차가 커서 보간을 제안한 컷">추천</span>}
-                            <span className="text-[var(--muted)]">이 컷 → 다음 컷(#{next.order + 1}) 이미지로 움직임</span>
-                            {on && (project.videoEngine ?? "auto") === "grok" && (
-                              <span className="text-[var(--danger)]" title="Grok 은 끝 프레임 미지원 — 🎬 영상 엔진을 Kling/자동으로">⚠ Kling 필요</span>
-                            )}
-                          </div>
-                        );
-                      })()}
+                      {/* 🎞 동작 보간은 접힌 줄(모션티어 옆 🎞)로 옮김 — 항상 보이게. 여기선 중복 제거. */}
                       {/* 🔊 오디오 제안(스펙 §6) — VLM 이 뽑은 효과음·리액션 발성·삽입 대사. 삽입 대사는 원작에
                           없는 창작이라 체크박스로 on/off(기본 on). 생성되면(audioUrl) 재생. */}
                       {!isCardScene && (s.cut?.audioSuggestions?.length ?? 0) > 0 && (
