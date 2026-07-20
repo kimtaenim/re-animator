@@ -72,6 +72,13 @@ export async function renderCameraFx(o) {
   if (!W || !H) throw new Error("클립 해상도를 읽지 못함");
   const dur = Number(cameraWork.duration_s) || durProbed || 3;
 
+  // ★crash_zoom(스펙 §2): 카메라 이동이 아니라 와이드/바스트/익스트림클로즈업 3장 하드컷 클러스터.
+  //   3장 재생성 대신, 클립을 3단 크롭(1.0/1.6/2.4배)으로 각 ~0.5초 하드컷(단일 ffmpeg 패스).
+  if (cameraWork.preset === "crash_zoom") {
+    await renderCrashZoom({ ff, dir, inPath, outPath, W, H, clipDur: durProbed || dur, onLog: log });
+    return { skipped: false, layer, upscale: false, maxScale: 2.4 };
+  }
+
   const table = buildKeyframeTable(cameraWork, { fps, refWidth: W, refHeight: H });
 
   // 사실상 정지(줌·드리프트·셰이크 없음) → 렌더 스킵(원본 그대로 사용).
@@ -99,6 +106,25 @@ export async function renderCameraFx(o) {
   await run(ff, ["-hide_banner", "-nostats", "-loglevel", "warning", "-y", "-i", inPath, "-vf", vf, "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", outPath], dir);
 
   return { skipped: false, layer, upscale, maxScale: table.maxScale };
+}
+
+// crash_zoom(§2) — 클립을 와이드→바스트→ECU 3단 크롭 하드컷으로 굽는다(단일 filter_complex).
+async function renderCrashZoom({ ff, dir, inPath, outPath, W, H, clipDur, onLog }) {
+  const seg = 0.5; // 각 프레이밍 길이(0.4~0.8 범위 중앙)
+  const zs = [1.0, 1.6, 2.4]; // 와이드 / 바스트 / 익스트림클로즈업
+  const avail = Math.max(seg, Number(clipDur) || seg * 3);
+  const starts = [0, seg, seg * 2].map((v) => Math.max(0, Math.min(v, avail - seg)));
+  const parts = zs.map((z, i) => {
+    const cw = Math.max(2, Math.round(W / z / 2) * 2);
+    const ch = Math.max(2, Math.round(H / z / 2) * 2);
+    const yBias = z > 2 ? 0.35 : 0.5; // ECU 는 얼굴 쪽(살짝 위)
+    const x = Math.round((W - cw) / 2 / 2) * 2;
+    const y = Math.round(((H - ch) * yBias) / 2) * 2;
+    return `[0:v]trim=${starts[i].toFixed(3)}:${(starts[i] + seg).toFixed(3)},setpts=PTS-STARTPTS,crop=${cw}:${ch}:${x}:${y},scale=${W}:${H}:flags=bicubic,setsar=1[v${i}]`;
+  });
+  const filter = parts.join(";") + `;[v0][v1][v2]concat=n=3:v=1:a=0[out]`;
+  await run(ff, ["-hide_banner", "-nostats", "-loglevel", "warning", "-y", "-i", inPath, "-filter_complex", filter, "-map", "[out]", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", outPath], dir);
+  onLog?.(`crash_zoom 3프레이밍(와이드·바스트·ECU 하드컷 ${seg}s×3)`);
 }
 
 // 테이블이 모든 프레임에서 원본(scale≈1, 중심 0.5)인지 → 렌더 불필요.
