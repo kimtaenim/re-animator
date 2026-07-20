@@ -426,7 +426,9 @@ async function conformVideo(buf, project) {
       pr.on("close", (c) => (c === 0 ? res() : rej(new Error(`ffmpeg ${c}: ${err.slice(-200)}`))));
     });
     return await readFile(out);
-  } catch {
+  } catch (e) {
+    // ★실패하면 원본(비율 안 맞음=정사각형 등)으로 폴백되므로, 왜 실패했는지 로그에 남긴다(진단).
+    console.error("[conformVideo] 비율 맞춤 실패 → 원본 폴백:", String(e?.message ?? e).slice(0, 300));
     return null;
   } finally {
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
