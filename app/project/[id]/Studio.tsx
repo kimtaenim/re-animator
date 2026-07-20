@@ -3675,6 +3675,27 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           busy={busy}
                         />
                       )}
+                      {/* 🎞 동작 보간(스펙 §4) — 이 컷 영상을 '이 이미지→다음 컷 이미지'로 Kling 보간(첫+끝 프레임).
+                          구조 변경 없음(두 컷 다 유지). 끝 프레임은 워커가 다음 컷에서 자동. Kling 엔진 필요. */}
+                      {!isCardScene && s.generatedImage && (() => {
+                        const next = [...project.scenes].sort((a, b) => a.order - b.order).find((x) => x.order > s.order && x.generatedImage);
+                        if (!next) return null;
+                        const on = s.cut?.interpolationOn === true;
+                        const cand = s.cut?.interpolationCandidate === true;
+                        return (
+                          <div className="flex flex-wrap items-center gap-2 rounded border border-[var(--border)] bg-[var(--panel-2)] p-1.5 text-[11px]">
+                            <label className="flex items-center gap-1" title="켜면 이 컷 영상이 이 컷 이미지(첫 프레임)에서 다음 컷 이미지(끝 프레임)로 움직입니다. Kling 엔진에서만 동작.">
+                              <input type="checkbox" checked={on} onChange={(e) => updateCut(s.id, { interpolationOn: e.target.checked || undefined })} />
+                              <span>🎞 동작 보간</span>
+                            </label>
+                            {cand && <span className="rounded bg-[var(--panel)] px-1 text-[9px] text-[var(--accent)]" title="VLM 이 인접 컷과 자세 차가 커서 보간을 제안한 컷">추천</span>}
+                            <span className="text-[var(--muted)]">이 컷 → 다음 컷(#{next.order + 1}) 이미지로 움직임</span>
+                            {on && (project.videoEngine ?? "auto") === "grok" && (
+                              <span className="text-[var(--danger)]" title="Grok 은 끝 프레임 미지원 — 🎬 영상 엔진을 Kling/자동으로">⚠ Kling 필요</span>
+                            )}
+                          </div>
+                        );
+                      })()}
                       {/* ⚡후처리 줌 — 워커가 실픽셀에 굽고(컷당 20~40초) fxUrl 저장. 미리보기·합성이
                           그대로 사용(미리보기=최종). 원본 videoUrl 보존이라 재적용·해제 자유. */}
                       {!isCardScene && s.videoUrl && (

@@ -1634,8 +1634,10 @@ export async function runVideo(projectId, payload) {
           // ★콘텐츠 정책 거부 시 순화 프롬프트로 1회 자동 재시도 — 프롬프트가 원인이면 통과.
           //   이미지 자체가 걸리면 그래도 실패(그건 3단계에서 그 컷을 순화 재생성해야 함).
           // ★엔진 분기: kling(첫+끝 프레임 보간 가능·품질) 또는 grok. 프롬프트는 공통(buildVideoPrompt).
-          //   image_tail = 동작 보간용 끝 프레임(scene.tailImage) — 보간 켜짐+kling 일 때만 전달(스펙 §4).
-          const tailUrl = engine === "kling" && s.cut?.interpolationOn ? s.tailImage : undefined;
+          //   동작 보간(스펙 §4): 이 컷 interpolationOn 이면 끝 프레임 = 바로 다음(연속) 컷의 이미지.
+          //   구조 변경 없음 — 두 컷 다 씬으로 남고, 이 컷이 "이 이미지→다음 이미지"로 움직이는 클립이 된다.
+          const nextScene = scenes.find((x) => x.order > s.order && x.generatedImage);
+          const tailUrl = engine === "kling" && s.cut?.interpolationOn && nextScene ? nextScene.generatedImage : undefined;
           const genVideo = (prompt) =>
             engine === "kling"
               ? klingVideoFromImage(

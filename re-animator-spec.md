@@ -151,7 +151,7 @@ UI
 4) VLM 스키마 확장(모션 티어 + 오디오 제안 + 다국어 동시 번역 + vertigo/보간 후보 태그)  ← **[분류 산출 완료]** (classify.mjs strict 스키마+prompts.json: motion_tier·audio_suggestions·보간후보; 다국어 동시번역은 Phase 5)
 5) 다국어 데이터 모델 + 작업 언어 토글 + 언어별 duration/타임라인  ← **[데이터모델·번역생성·G1 표시 완료 / 작업언어 토글·언어별 TTS·compose 후속]** (DialogueBubble.tracks 하위호환, Project.targetLanguages, translateScenesMultilang 한 콜 동시번역, extract 조건부 배선, 대사 행에 언어별 번역 표시·인라인 수정)
 6) 티어별 I2V 요청 규칙 + duration 2단계 + 트림/홀드/슬로우  ← **[티어→I2V 완료]** (estimateVideoSeconds 티어 길이범위, buildVideoPrompt action 절제완화·motionPromptHint; duration final/트림/홀드/슬로우는 TTS 도착 의존 → Phase 8)
-7) crash_zoom 3프레이밍 잡 + 병합 확장 동작 보간 + orbit I2V 예외 경로
+7) crash_zoom 3프레이밍 잡 + 병합 확장 동작 보간 + orbit I2V 예외 경로  ← **[동작 보간 완료(구조변경 없이)]** (컷별 🎞 동작 보간 토글 → 끝 프레임=다음 연속 컷 이미지 자동, Kling first/last; 병합 안 함. crash 3프레이밍·orbit 남음)
 8) 언어별 TTS·자막 ASS + 오디오 3트랙 합성 + 덕킹 + whip·이펙트 오버레이 + 프록시 렌더 + 언어별 출력 잡
 
 각 단계는 실행 가능한 상태로 커밋. 완료마다 spec v0.2에 반영.
