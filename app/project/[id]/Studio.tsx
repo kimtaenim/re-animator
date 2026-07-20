@@ -222,7 +222,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }
   // 활성 단계 — 한 화면에 5단계를 다 쌓지 않고, 고른 단계만 보여준다(스크롤·무게 급감).
   // 초기값은 진행 상황에 맞춰: 이미지 있으면 4단계, 승인됐으면 2단계, 아니면 1단계.
-  const [activeStep, setActiveStep] = useState<StepKind>(() =>
+  // ★단계 키에 UI 전용 'camera'(카메라 미리보기) 추가 — steps 레코드(source/cast/regen/scene/compose)는
+  //   건드리지 않는다(옛 프로젝트 안전·데이터 무변경). 순수 화면 탭으로만 존재.
+  const [activeStep, setActiveStep] = useState<StepKind | "camera">(() =>
     project.scenes?.some((s) => s.generatedImage)
       ? "scene"
       : project.steps?.source?.status === "approved"
@@ -232,7 +234,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // ★단계 전환 시 화면 리셋 방지 — 단계를 조건부 렌더해 언마운트하므로 스크롤이 초기화됐다.
   //   떠나는 단계의 스크롤 위치를 기억했다가, 그 단계로 돌아오면 정확히 그 자리로 복원한다.
   const stepScrollY = useRef<Record<string, number>>({});
-  function goToStep(k: StepKind) {
+  function goToStep(k: StepKind | "camera") {
     stepScrollY.current[activeStep] = window.scrollY; // 떠나기 전 현재 위치 저장
     setActiveStep(k);
   }
@@ -1754,6 +1756,57 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
+  // 카메라 미리보기 탭 — 카메라워크가 지정된 컷들을 한 번에 굽기(camerafx 잡, 다중 sceneIds).
+  //   layer A 프리셋만(정지·orbit·계층B 는 굽기 대상 아님). 단일 applyCameraFx 와 같은 잡·폴링.
+  async function bakeAllCamera() {
+    const BAKEABLE = new Set(["push_in", "pull_out", "pan", "shake", "crash_zoom", "whip"]);
+    const ids = projectRef.current.scenes
+      .filter((s) => s.videoUrl && s.cut?.cameraWork && BAKEABLE.has(s.cut.cameraWork.preset))
+      .map((s) => s.id);
+    if (!ids.length) {
+      setError("구울 카메라워크가 없어요 — 영상 생성된 컷에 카메라워크(정지 제외)를 먼저 정하세요.");
+      return;
+    }
+    setError("");
+    setFxPending((prev) => new Set([...prev, ...ids]));
+    const clearAll = () =>
+      setFxPending((prev) => {
+        const n = new Set(prev);
+        ids.forEach((id) => n.delete(id));
+        return n;
+      });
+    try {
+      const r = await fetch("/api/camerafx", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneIds: ids }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "카메라워크 적용 실패");
+      const iv = setInterval(async () => {
+        try {
+          const jr = await fetch(`/api/job?id=${d.jobId}`, { cache: "no-store" });
+          const jd = await jr.json();
+          if (jd.ok && (jd.status === "done" || jd.status === "error")) {
+            clearInterval(iv);
+            clearAll();
+            if (jd.status === "error") setError(`카메라워크 실패: ${jd.error ?? ""}`);
+            const pr = await fetch(`/api/project/${project.id}`, { cache: "no-store" });
+            const pd = await pr.json();
+            if (pd.ok) setProject(pd.project);
+          }
+        } catch {}
+      }, 4000);
+      setTimeout(() => {
+        clearInterval(iv);
+        clearAll();
+      }, 10 * 60_000);
+    } catch (e) {
+      clearAll();
+      setError(e instanceof Error ? e.message : "카메라워크 적용 실패");
+    }
+  }
+
   async function runDubJob(sceneIds?: string[]) {
     if (dubbing || dubStartingRef.current) return; // ★동기 가드 — 상태(dubbing)는 fetch 후에야 켜져서 그 틈의 재클릭을 막지 못함
     dubStartingRef.current = true;
@@ -2251,13 +2304,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
 
       {/* 단계 네비 — 클릭하면 그 단계만 보임(한 화면 = 한 단계). 상단 고정이라 스크롤해도 항상 보임(위아래 왕복 X). */}
       <nav className="sticky top-0 z-30 -mx-6 mb-4 flex flex-wrap items-center gap-1 border-b border-[var(--border)] bg-[var(--bg)] px-6 py-2 text-xs">
-        {STEP_ORDER.map((k) => {
+        {(["source", "cast", "regen", "scene", "camera", "compose"] as const).map((k) => {
           const hasImages = project.scenes.some((s) => s.generatedImage);
           const avail =
             k === "source" ||
             ((k === "cast" || k === "regen") && approved) ||
-            ((k === "scene" || k === "compose") && approved && hasImages);
+            ((k === "scene" || k === "camera" || k === "compose") && approved && hasImages);
           const cur = activeStep === k;
+          const label = k === "camera" ? "🎥 카메라 미리보기" : STEP_LABEL[k];
           return (
             <button
               key={k}
@@ -2273,7 +2327,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               }`}
               title={avail ? "" : "이전 단계를 먼저 완료하세요"}
             >
-              {STEP_LABEL[k]}
+              {label}
             </button>
           );
         })}
@@ -3578,19 +3632,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           </button>
                         ))}
                       </div>
-                      {/* 🎥 카메라워크(스펙 §2 계층 A) — 정지이미지 위 Web Animations 근사 프리뷰 +
-                          파라미터 슬라이더(저장=cameraWork JSON). '적용'은 워커 camerafx 로 실픽셀 굽기.
-                          기존 ⚡후처리 카메라(아래)는 유지 — 두 방식 공존, 사용자 확정 후 정리. */}
-                      {!isCardScene && (s.generatedImage || s.originalImage) && (
-                        <CameraWorkEditor
-                          cameraWork={s.cut?.cameraWork}
-                          imageUrl={s.generatedImage ?? s.originalImage}
-                          onChange={(cw) => updateCut(s.id, { cameraWork: cw })}
-                          onApply={() => applyCameraFx(s.id)}
-                          applying={fxPending.has(s.id)}
-                          busy={busy}
-                        />
-                      )}
+                      {/* 🎥 카메라워크는 별도 '카메라 미리보기' 탭으로 분리(A안) — 4단계는 영상 생성·더빙에 집중.
+                          편집기·프리뷰·적용(굽기)은 그 탭에서. (여기 있던 CameraWorkEditor 제거) */}
                       {/* 🎞 동작 보간은 접힌 줄(모션티어 옆 🎞)로 옮김 — 항상 보이게. 여기선 중복 제거. */}
                       {/* 🔊 오디오 제안(스펙 §6) — VLM 이 뽑은 효과음·리액션 발성·삽입 대사. 삽입 대사는 원작에
                           없는 창작이라 체크박스로 on/off(기본 on). 생성되면(audioUrl) 재생. */}
@@ -3875,6 +3918,72 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   </div>
                 );
               })}
+          </div>
+        </section>
+      )}
+
+      {/* ── 카메라 미리보기(4단계에서 분리) — 생성된 영상 위 카메라워크 설정·미리보기·굽기 전용 ── */}
+      {activeStep === "camera" && approved && project.scenes.some((s) => s.generatedImage) && (
+        <section className="mb-6 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold">🎥 카메라 미리보기</h2>
+            <span className="text-xs text-[var(--muted)]">
+              생성된 영상 위에 카메라워크를 얹어 미리보고 굽는 단계 — 가장 손이 많이 가고 예측이 어려운 작업이라 따로 뺐습니다. 편집기 프리뷰는 실시간 근사, ‘적용(굽기)’ 후 👁 결과가 최종 픽셀입니다.
+            </span>
+            <button
+              type="button"
+              onClick={bakeAllCamera}
+              disabled={busy || fxPending.size > 0}
+              className="ml-auto rounded bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white disabled:opacity-40"
+              title="카메라워크가 지정된 모든 컷(영상 생성됨·정지 제외)을 한 번에 굽습니다(컷당 ~20-40초)."
+            >
+              {fxPending.size > 0 ? "굽는 중…" : "🎥 전체 굽기"}
+            </button>
+          </div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {project.scenes
+              .filter((s) => s.generatedImage)
+              .slice()
+              .sort((a, b) => a.order - b.order)
+              .map((s) => (
+                <div key={s.id} className="flex flex-col gap-1.5 rounded border border-[var(--border)] bg-[var(--panel)] p-2">
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <span className="font-medium">컷 {s.order + 1}</span>
+                    {(s.fxUrl || s.videoUrl) && (
+                      <span className="text-[10px] text-[var(--muted)]" title="이 미리보기가 만들어진 시각 — 굽고 나면 바뀝니다">
+                        🕐 {fmtClock(urlTimestamp(s.fxUrl ?? s.videoUrl))}{s.fxUrl ? " · 구움" : " · 원본"}
+                      </span>
+                    )}
+                    {s.videoUrl ? (
+                      <button
+                        type="button"
+                        onClick={() => setScenePreview(s.id)}
+                        className="ml-auto rounded border border-[var(--accent)] px-2 py-0.5 text-[var(--accent)] hover:bg-[var(--panel-2)]"
+                        title="구운 결과(최종 픽셀)를 영상+자막+더빙으로 확인"
+                      >
+                        👁 결과 보기
+                      </button>
+                    ) : (
+                      <span className="ml-auto text-[10px] text-[var(--muted)]">영상 미생성 — 4단계에서 먼저 생성</span>
+                    )}
+                  </div>
+                  {s.videoUrl && (
+                    <LazyVideo
+                      src={s.fxUrl ?? s.videoUrl}
+                      onClick={() => setScenePreview(s.id)}
+                      className="h-24 w-full cursor-zoom-in rounded border border-[var(--ok)] object-cover"
+                    />
+                  )}
+                  <CameraWorkEditor
+                    cameraWork={s.cut?.cameraWork}
+                    imageUrl={s.generatedImage ?? s.originalImage}
+                    onChange={(cw) => updateCut(s.id, { cameraWork: cw })}
+                    onApply={() => applyCameraFx(s.id)}
+                    applying={fxPending.has(s.id)}
+                    busy={busy}
+                  />
+                </div>
+              ))}
           </div>
         </section>
       )}
