@@ -2317,6 +2317,19 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <button onClick={runRegenJob} disabled={busy || regenRunning} className={selForRegen.size > 0 ? G : P}>
                 {regenRunning ? "생성 중…" : "전체 생성"}
               </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const r = await fetch(`/api/project/${project.id}`, { cache: "no-store" });
+                    const d = await r.json();
+                    if (d.ok) setProject(d.project);
+                  } catch {}
+                }}
+                className={G}
+                title="워커가 만든 최신 결과(새로 생성한 그림 등)를 강제로 다시 불러옵니다. 그림이 안 보이면 눌러보세요."
+              >
+                🔄 새로고침
+              </button>
               {regenPolling && miniBar()}
               {regenPolling && (
                 <button onClick={() => cancelJob("regen")} className={S}>■ 중지</button>
