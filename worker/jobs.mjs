@@ -1479,6 +1479,10 @@ function estimateVideoSeconds(cut) {
 const CAMERA_STATIC =
   "Keep the CAMERA completely STATIC — a locked, fixed frame. NO camera movement of any kind: no pan, no tilt, no zoom, " +
   "no push-in, no dolly, no shake, no rotation. (Camera work is added afterward, so the base clip must stay perfectly stable.) ";
+// ★orbit(계층 C) 전용 — I2V 에 맡기는 유일한 카메라. 피사체 주위를 천천히 도는 궤도 카메라.
+const ORBIT_CAMERA =
+  "Slowly ORBIT the camera around the main subject in a smooth, gentle circular arc, keeping the subject centered and in focus. " +
+  "Move the CAMERA only — the subject holds its pose. Keep it slow and cinematic; no fast spinning, no warping, no distortion. ";
 // ★동작 크기 상한 — 사용자가 "동작이 너무 크다"고 지적. 모든 움직임을 작고 절제되게, 과장·빠른 동작 금지.
 const SUBTLE_LIFE =
   "Keep ALL motion SMALL, slow, calm and RESTRAINED — like a subtle living photograph, not an action scene. " +
@@ -1553,8 +1557,12 @@ function buildVideoPrompt(cut, shownCharIds, storyContext) {
   if (desc) explicit.push(`What happens in this shot: ${desc}`);
   // ★모션 티어(§3): action 이면 절제 완화(강한 한 박자), 그 외(talk/idle/emote)는 절제 유지(SUBTLE_LIFE).
   const lifeClause = cut?.motionTier === "action" ? TIER_ACTION_LIFE : SUBTLE_LIFE;
+  // ★orbit(스펙 §2 계층 C): 유일하게 I2V 에 카메라를 맡긴다(2D 후처리로 시점 회전 불가). 이 컷은
+  //   camerafx(후처리)에서 스킵되므로 여기서 궤도 카메라를 지시(이중 무빙 방지). 그 외는 카메라 정지.
+  const isOrbit = cut?.cameraWork?.preset === "orbit";
+  const cameraClause = isOrbit ? ORBIT_CAMERA : CAMERA_STATIC;
   // 기본: 사진·표지 속 인물 정지. 컷별 animatePicture 켜면(가끔 움직여야 할 때) 생략.
-  let base = `${CAMERA_STATIC}${lifeClause}${cut?.animatePicture ? "" : PICTURE_STATIC}`;
+  let base = `${cameraClause}${lifeClause}${cut?.animatePicture ? "" : PICTURE_STATIC}`;
   // ★스토리 맥락 — 모델이 상황·감정에 어긋나는 동작을 만들지 않게(죽어가는 인물이 웃으며 벌떡 일어나는 등 금지).
   if (story)
     base += `STORY CONTEXT (obey the mood and situation; the motion must NOT contradict it — e.g. do not make a dying, injured, sad or unconscious character suddenly cheer up, smile, or jump up): ${story}. `;
