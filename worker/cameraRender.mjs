@@ -147,21 +147,32 @@ function probe(fp, file, entry) {
 function probeRaw(fp, file, entry) {
   return new Promise((res) => {
     const pr = spawn(fp, ["-v", "error", "-select_streams", "v:0", "-show_entries", entry, "-of", "default=nw=1:nk=1", file]);
+    // ★매달림 방어: ffprobe 가 멈추면 잡 race 는 잡만 죽이고 이 child 는 고아로 남아 OOM(메모 참조).
+    //   30초 넘으면 SIGKILL 하고 빈 결과로 진행(probe 는 폴백 가능한 부가 정보).
+    const kill = setTimeout(() => { try { pr.kill("SIGKILL"); } catch {} }, 30_000);
     let out = "";
     pr.stdout.on("data", (d) => (out += d));
-    pr.on("close", () => res(out.trim().split(/\s+/).filter(Boolean)));
-    pr.on("error", () => res([]));
+    pr.on("close", () => { clearTimeout(kill); res(out.trim().split(/\s+/).filter(Boolean)); });
+    pr.on("error", () => { clearTimeout(kill); res([]); });
   });
 }
 function run(ff, args, cwd) {
   return new Promise((res, rej) => {
     const pr = spawn(ff, args, { cwd });
+    // ★매달림 방어: ffmpeg 가 멈추면 SIGKILL 하고 잡을 실패시킨다(고아 프로세스 누적→OOM 방지).
+    //   4분 캡은 잡 12분 캡보다 짧아 child 가 확실히 정리된 뒤 잡이 끝난다.
+    let timedOut = false;
+    const kill = setTimeout(() => { timedOut = true; try { pr.kill("SIGKILL"); } catch {} }, 4 * 60 * 1000);
     let err = "";
     pr.stderr.on("data", (d) => {
       err += d;
       if (err.length > 8000) err = err.slice(-8000);
     });
-    pr.on("error", rej);
-    pr.on("close", (c) => (c === 0 ? res() : rej(new Error(`ffmpeg ${c}: ${err.slice(-400)}`))));
+    pr.on("error", (e) => { clearTimeout(kill); rej(e); });
+    pr.on("close", (c) => {
+      clearTimeout(kill);
+      if (timedOut) return rej(new Error("ffmpeg 타임아웃(4분) — 강제 종료"));
+      c === 0 ? res() : rej(new Error(`ffmpeg ${c}: ${err.slice(-400)}`));
+    });
   });
 }

@@ -420,10 +420,13 @@ async function conformVideo(buf, project) {
     const vf = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1`;
     await new Promise((res, rej) => {
       const pr = spawn(ff, ["-y", "-i", inp, "-vf", vf, "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", out]);
+      // ★매달림 방어: ffmpeg 가 멈추면 SIGKILL(고아 프로세스 누적→OOM 방지). 3분 캡(비율 맞춤은 짧은 작업).
+      let timedOut = false;
+      const kill = setTimeout(() => { timedOut = true; try { pr.kill("SIGKILL"); } catch {} }, 3 * 60 * 1000);
       let err = "";
       pr.stderr.on("data", (d) => { err += d; if (err.length > 8000) err = err.slice(-8000); });
-      pr.on("error", rej);
-      pr.on("close", (c) => (c === 0 ? res() : rej(new Error(`ffmpeg ${c}: ${err.slice(-200)}`))));
+      pr.on("error", (e) => { clearTimeout(kill); rej(e); });
+      pr.on("close", (c) => { clearTimeout(kill); timedOut ? rej(new Error("ffmpeg 타임아웃(3분) — 강제 종료")) : (c === 0 ? res() : rej(new Error(`ffmpeg ${c}: ${err.slice(-200)}`))); });
     });
     return await readFile(out);
   } catch (e) {
@@ -572,12 +575,22 @@ export async function runSplit(projectId) {
   //   썸네일에 대사를 맡겨 지어냈음 — 사용자가 처음부터 "썸네일론 안 읽힌다" 지적한 근본 버그.)
   //   자기 이미지 + 예약된 내레이션 밴드(위/아래)를 함께 읽어 읽는 순서(y)대로 bubbles/dialogue
   //   에 채운다 → G1 에서 진짜 대사가 바로 보인다. (추출 2단계가 다시 읽어 덮으므로 실패해도 유실 아님.)
+  // ★프리뷰(OCR·교정·번역)는 best-effort — 필수 결과인 '경계(scenes)'는 이 뒤에 저장된다.
+  //   무거운 프리뷰가 잡 12분 캡을 넘기면 경계까지 통째로 버려진다(열린 버그: OCR교정 다음 멈춤/실패).
+  //   → 프리뷰에 soft deadline(잡 시작 t0 기준)을 둬 캡 전에 스스로 멈추고, 아래 저장이 반드시 돌게 한다.
+  //   못 읽은 대사는 추출 2단계가 다시 읽어 채우므로 유실 아님.
+  const PREVIEW_SOFT_MS = Number(process.env.SPLIT_PREVIEW_SOFT_MS || 9.5 * 60 * 1000);
+  const previewBudgetLeft = () => Date.now() - t0 < PREVIEW_SOFT_MS;
   if (key) {
     const ocrTodo = scenes.filter((s) => s.sourceRegion);
     await log(`대사 읽기(풀해상도) ${ocrTodo.length}컷…`);
     const C = Number(process.env.SPLIT_OCR_CONCURRENCY || 3); // 업스케일 이미지가 커 동시성 낮게(OOM)
     let done = 0;
     for (let i = 0; i < ocrTodo.length; i += C) {
+      if (!previewBudgetLeft()) {
+        await log(`시간 예산 초과 — 남은 ${ocrTodo.length - i}컷 대사 읽기는 추출 단계에서(경계는 저장됨)`);
+        break;
+      }
       await Promise.all(
         ocrTodo.slice(i, i + C).map(async (s) => {
           try {
@@ -620,6 +633,7 @@ export async function runSplit(projectId) {
   // ★OCR 교정(보수적) — 컷마다 따로 읽어 생긴 고유명사 불일치(诺德/诸德/浩德)·오독을 전체 문맥으로
   //   바로잡는다. 번역 전에 원문을 고쳐야 번역도 일관됨. bubble.text 가 바뀌므로 cut.dialogue 재구성.
   try {
+    if (!previewBudgetLeft()) throw new Error("시간 예산 초과(추출 단계서 처리)");
     const { fixed, cost } = await proofreadScenes(scenes);
     if (fixed > 0) {
       for (const s of scenes)
@@ -633,6 +647,7 @@ export async function runSplit(projectId) {
 
   // ★번역(Claude) — G1 검수 화면에 대사·내레이션 뜻이 바로 보이게. 컷 대사 + 말풍선 전부 한 번에.
   try {
+    if (!previewBudgetLeft()) throw new Error("시간 예산 초과(추출 단계서 처리)");
     const { translated, cost } = await translateScenes(scenes);
     await log(`대사 번역(Claude) ${translated}줄 채움(~$${cost.toFixed(4)}) — G1에 '역:' 표시`);
     if (!translated && !process.env.ANTHROPIC_API_KEY) await log("⚠ ANTHROPIC_API_KEY 없음 — 번역 스킵됨(워커 env 확인)");
@@ -1681,7 +1696,7 @@ export async function runVideo(projectId, payload) {
             { access: "public", contentType: "video/mp4", addRandomSuffix: false }
           );
           byId.set(s.id, { url });
-          costTotal += GROK_VIDEO_COST * dur; // 초당 단가 × 길이
+          costTotal += (engine === "kling" ? KLING_VIDEO_COST : GROK_VIDEO_COST) * dur; // 엔진별 초당 단가 × 길이
           ok++;
           await log(`컷 ${s.order + 1} 영상 완료 (${dur}s)`);
         } catch (e) {
@@ -1698,10 +1713,10 @@ export async function runVideo(projectId, payload) {
   try {
     await recordCost({
       projectId,
-      vendor: "xai",
-      model: "grok-imagine-video",
+      vendor: engine === "kling" ? "kling" : "xai",
+      model: engine === "kling" ? "kling-i2v" : "grok-imagine-video",
       costUsd: costTotal,
-      meta: { kind: "video", clips: cand.length, ok },
+      meta: { kind: "video", engine, clips: cand.length, ok },
     });
   } catch {}
 
