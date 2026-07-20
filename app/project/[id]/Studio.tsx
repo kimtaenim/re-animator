@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import {
   type Project,
@@ -196,6 +196,21 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 미결 판정(§9·§3): 모션 티어가 없거나 확신도 낮은 컷.
   const isUnresolvedScene = (s: Project["scenes"][number]) =>
     !s.cut?.motionTier || (typeof s.cut?.tierConfidence === "number" && s.cut.tierConfidence < 0.5);
+  // 각 씬의 '다음 재생성 컷'(동작 보간 끝 프레임) — O(n) 한 번 계산(접힌 줄마다 스캔하면 O(n²)라 먹통).
+  //   뒤에서부터 훑어 가장 가까운(order 큰) generatedImage 컷을 next 로. hasNext=뒤에 씬이 있나.
+  const nextGenByScene = useMemo(() => {
+    const sorted = [...(project.scenes ?? [])].sort((a, b) => a.order - b.order);
+    const m = new Map<string, { hasNext: boolean; next: Project["scenes"][number] | null }>();
+    let lastGen: Project["scenes"][number] | null = null;
+    let hasAny = false;
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      const s = sorted[i];
+      m.set(s.id, { hasNext: hasAny, next: lastGen });
+      hasAny = true;
+      if (s.generatedImage) lastGen = s;
+    }
+    return m;
+  }, [project.scenes]);
   // "삽입 대사 일괄 끄기"(§6·§9) — 모든 컷의 insert_line 오디오 제안을 enabled=false 로.
   function bulkDisableInsertLines() {
     for (const s of project.scenes) {
@@ -3301,13 +3316,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           </select>
                           {/* 🎞 동작 보간(§4) — 접힌 줄에 항상 보이게. 다음 컷 있으면 표시, 조건 안 되면 비활성+안내. */}
                           {!isCardScene && (() => {
-                            let next: Project["scenes"][number] | null = null;
-                            let hasNextScene = false;
-                            for (const x of project.scenes) {
-                              if (x.order > s.order) hasNextScene = true;
-                              if (x.order > s.order && x.generatedImage && (!next || x.order < next.order)) next = x;
-                            }
-                            if (!hasNextScene) return null;
+                            const ng = nextGenByScene.get(s.id) ?? { hasNext: false, next: null };
+                            const next = ng.next;
+                            if (!ng.hasNext) return null;
                             const canInterp = !!(s.generatedImage && next);
                             const on = s.cut?.interpolationOn === true;
                             return (
