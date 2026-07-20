@@ -13,12 +13,12 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { writeFile } from "node:fs/promises";
-import { buildKeyframeTable, sampleTrack, toPixelCrop, presetLayer, needsUpscale } from "../lib/cameraKeyframes.mjs";
+import { buildKeyframeTable, sampleTrack, toPixelCrop, presetLayer, needsUpscale } from "./cameraKeyframes.mjs";
 
 /**
  * 계층 A 테이블 → ffmpeg sendcmd 스크립트 문자열.
  * 각 프레임 시각에 crop w/h/x/y 를 리터럴 짝수 픽셀로 설정한다.
- * @param {import("../lib/cameraKeyframes.mjs").KeyframeTable} table
+ * @param {import("./cameraKeyframes.mjs").KeyframeTable} table
  * @param {number} W @param {number} H
  * @returns {{ script: string, first: {cropW:number,cropH:number,x:number,y:number} }}
  */
@@ -44,7 +44,7 @@ export function buildSendcmdScript(table, W, H) {
  * @param {string} o.dir 작업 디렉터리(sendcmd 스크립트를 여기 쓰고 cwd 로 실행 — 경로 이스케이프 회피)
  * @param {string} o.inPath  입력 클립(절대경로)
  * @param {string} o.outPath 출력(절대경로)
- * @param {import("../lib/cameraKeyframes.mjs").CameraWork} o.cameraWork
+ * @param {import("./cameraKeyframes.mjs").CameraWork} o.cameraWork
  * @param {number} [o.outHeight] 출력 높이(업스케일 판단용, 기본 클립 높이)
  * @param {(m:string)=>void} [o.onLog]
  * @returns {Promise<{ skipped?: boolean, layer: string, upscale: boolean, maxScale: number }>}
