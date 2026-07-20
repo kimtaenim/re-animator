@@ -382,9 +382,18 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       if (!d.ok) return;
       setProgress(d.progress ?? "");
       setProgressLog(d.progressLog ?? []);
+      // ★재생성 결과(generatedImage/regenError)만 필드 단위 병합 — 씬 전체를 덮어쓰면 그 사이
+      //   사용자가 편집 중인 대사·컷 내용이 2.5초마다 되돌려져 "이미지 생성 중엔 스크립트 수정이
+      //   씹힌다". runRegen 은 씬에 generatedImage·regenError 만 쓰므로 그 둘만 받는다(pollScene 과 동일 원칙).
+      const rmap = new Map(
+        ((d.scenes ?? []) as { id: string; generatedImage?: string; regenError?: string }[]).map((x) => [x.id, x])
+      );
       setProject((prev) => ({
         ...prev,
-        scenes: d.scenes ?? prev.scenes,
+        scenes: prev.scenes.map((ps) => {
+          const ss = rmap.get(ps.id);
+          return ss ? { ...ps, generatedImage: ss.generatedImage, regenError: ss.regenError } : ps;
+        }),
         steps: { ...prev.steps, regen: { ...prev.steps.regen, status: d.status, error: d.error } },
       }));
       // 'running' 을 한 번 본 뒤 종료됐을 때만 전부 해제 — 요청 직후 첫 폴링(아직 running
