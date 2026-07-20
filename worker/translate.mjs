@@ -25,7 +25,9 @@ async function getClient() {
   if (_client !== null) return _client;
   if (!process.env.ANTHROPIC_API_KEY) return (_client = false);
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  return (_client = new Anthropic());
+  // ★타임아웃·재시도 상한 — 기본값(10분·재시도2)이면 번역 호출 하나가 느리거나 막힐 때
+  //   워커(한 번에 한 잡)가 몇 분씩 매달려 '먹통'이 된다. 90초·재시도1 로 캡(막히면 빨리 실패).
+  return (_client = new Anthropic({ timeout: 90_000, maxRetries: 1 }));
 }
 
 // texts(원문 배열) → { translations: (string|null)[], cost }. 한국어·기호는 null(스킵). 인덱스 대응 유지.
