@@ -103,6 +103,40 @@ function cleanCut(raw: unknown): CutOntology {
   return c;
 }
 
+// ★워커 소유 오디오 필드 보존(저장 규약) — /api/cut 은 클라이언트가 보낸 컷으로 scene.cut 을
+//   통째 교체한다. 그런데 오디오 URL(더빙·TTS·효과음)은 오직 워커만 생산하고, 클라이언트는
+//   읽기만 한다(직접 쓰지 않음). 더빙 잡이 서버에 audioUrl 을 써넣은 직후, 그 갱신을 아직
+//   폴링 못 한 클라이언트가 모션티어·카메라 슬라이더 등을 건드려 stale 컷을 저장하면 방금 생성한
+//   오디오가 소실된다(재생성 비용·데이터 손실). → 클라이언트가 '안 보낸'(결여) 워커 오디오 필드만
+//   서버 현재값에서 복원한다(fill-when-absent). 클라가 보낸 값은 절대 덮지 않으므로 회귀 0.
+//   배열(bubbles·audioSuggestions)은 인덱스+텍스트 일치일 때만 복원(어긋나면 안전하게 건너뜀).
+function preserveWorkerAudio(cleaned: CutOntology, prev: CutOntology | undefined): CutOntology {
+  if (!prev) return cleaned;
+  if (cleaned.narrationAudioUrl == null && prev.narrationAudioUrl) cleaned.narrationAudioUrl = prev.narrationAudioUrl;
+  if (cleaned.sfxAudioUrl == null && prev.sfxAudioUrl) cleaned.sfxAudioUrl = prev.sfxAudioUrl;
+  const pb = prev.bubbles ?? [];
+  (cleaned.bubbles ?? []).forEach((b, i) => {
+    const o = pb[i];
+    if (!o || (o.text ?? "") !== (b.text ?? "")) return; // 정렬 어긋남 → 복원 안 함
+    if (b.audioUrl == null && o.audioUrl) b.audioUrl = o.audioUrl;
+    if (o.tracks) {
+      b.tracks = b.tracks ?? {};
+      for (const [lang, ot] of Object.entries(o.tracks)) {
+        const nt = b.tracks[lang] ?? (b.tracks[lang] = {});
+        if (nt.audioUrl == null && ot.audioUrl) nt.audioUrl = ot.audioUrl; // 워커 TTS 보존
+        if (nt.durationFinal == null && ot.durationFinal != null) nt.durationFinal = ot.durationFinal;
+      }
+    }
+  });
+  const ps = prev.audioSuggestions ?? [];
+  (cleaned.audioSuggestions ?? []).forEach((s, i) => {
+    const o = ps[i];
+    if (!o || (o.text ?? "") !== (s.text ?? "")) return;
+    if (s.audioUrl == null && o.audioUrl) s.audioUrl = o.audioUrl; // 워커 생성 오디오 보존
+  });
+  return cleaned;
+}
+
 // PATCH {projectId, sceneId, cut} — 한 컷의 내용(타입·묘사·대사·화자 등)을 저장.
 // 경계는 안 건드림. M3 등 어느 단계에서 고쳐도 단일 Project 라 앞단계와 자동 싱크.
 export async function PATCH(req: NextRequest) {
@@ -124,7 +158,7 @@ export async function PATCH(req: NextRequest) {
 
   let changed = false;
   if (body.cut !== undefined) {
-    scene.cut = cleanCut(body.cut);
+    scene.cut = preserveWorkerAudio(cleanCut(body.cut), scene.cut); // 워커가 쓴 오디오 URL 소실 방지
     changed = true;
   }
   if (body.regenMode === "mask" || body.regenMode === "full") {
