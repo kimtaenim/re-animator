@@ -3223,6 +3223,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             title="펼치기/접기"
                           >
                             <span className="shrink-0 text-[var(--muted)]">{isOpen ? "▾" : "▸"} {s.order + 1}</span>
+                            {(s.generatedImage || s.originalImage) && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={s.generatedImage ?? s.originalImage}
+                                alt=""
+                                className="h-8 w-12 shrink-0 rounded border border-[var(--border)] object-cover"
+                              />
+                            )}
                             {isUnresolvedScene(s) && (
                               <span className="shrink-0 rounded bg-[var(--panel-2)] px-1 text-[9px] text-[var(--warn,#c90)]" title="모션 티어 미분류·저확신(미결)">미결</span>
                             )}
