@@ -26,7 +26,8 @@
 3. **~~Phase 6 티어→I2V~~ [완료 734f1e3]** — estimateVideoSeconds 티어 길이범위, buildVideoPrompt action 절제완화·motionPromptHint 사용. 남은 것: duration 2단계(est/final)·트림/홀드/슬로우는 TTS 도착 의존 → Phase 8. (배포 후 확인: 컷 모션티어 바꾸고 재생성 시 길이·동작 결이 티어대로 나오는지.)
 4. **Phase 7** crash_zoom 3프레이밍 잡 + 병합 확장 동작 보간 + orbit I2V 경로.
    - **[진행] I2V 엔진 Kling 전환(ddc2275):** Grok 은 끝 프레임 미지원 → Kling 채택(worker/kling.mjs, image_tail). 기본 Kling(키 있으면)·없으면 Grok 폴백. UI 🎬 영상 엔진 토글. **★사용자 할 일: Kling 가입 → AccessKey/SecretKey 발급 → Render 워커 env 에 KLING_ACCESS_KEY·KLING_SECRET_KEY 추가.** 넣기 전엔 Grok 으로 폴백됨.
-   - **[남음] 보간 Slice 2:** 두 컷 병합(mergecut 확장)해서 둘째 이미지를 Scene.tailImage 로 저장 + "동작 보간" 토글(cut.interpolationOn) UI. 그러면 Kling 이 image_tail 로 첫→끝 보간. (배선·데이터 필드·화이트리스트는 준비됨.)
+   - **[완료]** 동작 보간(495c020, 구조 변경 없이): 컷별 🎞 동작 보간 토글 → 끝 프레임=다음 연속 컷 이미지 자동. orbit(e13a4a3): I2V 궤도 카메라. crash_zoom(a29ba3c): 와이드·바스트·ECU 하드컷. whip(3d6a6b6): compose 경계 모션블러.
+5. **~~Phase 8~~ [부분 완료]** — 오디오 제안 UI(31c0e5f)·생성(9be9d99, dub 에서 sfx/발성 TTS→audioSuggestions[].audioUrl). **[남음, compose 대수술·키 필요]:** ① 오디오 제안을 compose 출력에 실제 믹싱(현재 생성만·미재생) ② BGM 3트랙·덕킹(BGM 소스 기능 없음) ③ 언어별 TTS(tracks[lang].audioUrl)·ASS 자막·언어별 출력 잡 ④ 프록시 렌더(카메라 정확 미리보기 480p). — compose.mjs 는 OOM 민감(메모 참조), 로컬 검증 불가라 신중히.
 5. **Phase 8** 오디오 채움(audioSuggestions→sfx/vocal/insert 생성) + 오디오 3트랙 덕킹 + whip·이펙트 오버레이 + 프록시 렌더 + 언어별 출력.
 
 **배포 후 사용자 검증 항목:**
