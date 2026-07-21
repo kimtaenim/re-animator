@@ -3967,12 +3967,29 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       <span className="ml-auto text-[10px] text-[var(--muted)]">영상 미생성 — 4단계에서 먼저 생성</span>
                     )}
                   </div>
+                  {/* ★오빗은 후처리 굽기가 아니라 '영상 생성(I2V)' 때만 적용된다(2D로 시점 회전 불가) —
+                      인터페이스 문제: 오빗을 고르면 이 컷 영상을 다시 생성해야 반영된다(사용자 지정). */}
+                  {s.cut?.cameraWork?.preset === "orbit" && (
+                    <div className="flex flex-wrap items-center gap-2 rounded border border-[var(--accent)] bg-[var(--panel-2)] px-2 py-1 text-[10px]">
+                      <span className="text-[var(--accent)]">🛰 오빗은 ‘영상 생성’ 때 적용됩니다 — 이 컷 영상을 다시 생성하세요.</span>
+                      <button
+                        type="button"
+                        onClick={() => videoOne(s.id)}
+                        disabled={busy || vidPending.has(s.id)}
+                        className="ml-auto rounded bg-[var(--accent)] px-2 py-0.5 font-medium text-white disabled:opacity-40"
+                        title="오빗 카메라로 이 컷 영상을 다시 생성합니다(I2V)."
+                      >
+                        {vidPending.has(s.id) ? "생성 중…" : "🎬 오빗으로 영상 재생성"}
+                      </button>
+                    </div>
+                  )}
                   <CameraWorkEditor
                     cameraWork={s.cut?.cameraWork}
                     imageUrl={s.generatedImage ?? s.originalImage}
                     videoUrl={s.videoUrl}
                     onChange={(cw) => updateCut(s.id, { cameraWork: cw })}
                     onApply={() => applyCameraFx(s.id)}
+                    onPreview={s.videoUrl ? () => setScenePreview(s.id) : undefined}
                     applying={fxPending.has(s.id)}
                     busy={busy}
                   />

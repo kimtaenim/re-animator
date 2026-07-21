@@ -340,16 +340,19 @@ export function needsUpscale(table, outputHeight = 720) {
 
 // ── 프리셋 기본값(스펙 §2) — 워커·웹앱 공통 어휘. resolveCameraWork 로 병합 ────────
 /** @type {Record<CameraPreset, Partial<CameraWork>>} */
+// ★기본값 = MV 스타일리시(사용자 반복 지정: 동작은 작게, 카메라워크는 스타일리시하게).
+//   인물 동작 절제(SUBTLE_LIFE)는 buildVideoPrompt 담당 — 여기(카메라)는 과감하게 민다.
+//   ★lib/cameraKeyframes.mjs 와 동일 값 유지(단일 소스 규칙 — 두 복제본이 어긋나면 프리뷰≠굽기).
 export const CAMERA_PRESETS = {
-  push_in: { zoom_rate_pct_per_s: 2.5, drift_px_per_s: { x: 4, y: -3 }, easing: "easeInOut" },
-  pull_out: { zoom_rate_pct_per_s: -2.5, start_zoom: 1.18, easing: "easeOut" },
-  pan: { zoom_rate_pct_per_s: 0, start_zoom: 1.25, drift_px_per_s: { x: 20, y: 0 }, easing: "easeInOut" }, // start_zoom 여백 안에서 드리프트(clamp 회피)
+  push_in: { zoom_rate_pct_per_s: 5.5, drift_px_per_s: { x: 8, y: -5 }, easing: "easeInOut" }, // 확실히 밀어들어가는 시네마틱 푸시
+  pull_out: { zoom_rate_pct_per_s: -5.5, start_zoom: 1.42, easing: "easeOut" }, // 넓게 빠지는 리빌
+  pan: { zoom_rate_pct_per_s: 1.5, start_zoom: 1.42, drift_px_per_s: { x: 44, y: 0 }, easing: "easeInOut" }, // 큰 여백(1.42) 안에서 빠른 트래킹 팬 + 살짝 푸시
   static: { zoom_rate_pct_per_s: 0, easing: "linear" },
-  shake: { zoom_rate_pct_per_s: 0, start_zoom: 1.08, shake_seed: 1, shake_amp_px: 8, shake_damp: 0, easing: "linear" },
-  crash_zoom: { zoom_rate_pct_per_s: 8, easing: "easeIn" }, // 3프레이밍은 §7에서 별도 잡, 단일 폴백값
+  shake: { zoom_rate_pct_per_s: 0, start_zoom: 1.12, shake_seed: 1, shake_amp_px: 14, shake_damp: 0, easing: "linear" }, // 강한 핸드헬드 흔들
+  crash_zoom: { zoom_rate_pct_per_s: 12, easing: "easeIn" }, // 확 파고드는 크래시(3프레이밍은 §7 별도, 단일 폴백)
   whip: { zoom_rate_pct_per_s: 0, easing: "linear" }, // 전환 속성(§2), 후처리는 전환 경로
-  parallax_push: { zoom_rate_pct_per_s: 2.0, bg_scale_delta_pct_per_s: 1.5, drift_px_per_s: { x: 3, y: 0 }, easing: "easeInOut" },
-  vertigo: { zoom_rate_pct_per_s: 0.5, bg_scale_delta_pct_per_s: -6, easing: "easeInOut" },
+  parallax_push: { zoom_rate_pct_per_s: 4.0, bg_scale_delta_pct_per_s: 3.0, drift_px_per_s: { x: 6, y: 0 }, easing: "easeInOut" },
+  vertigo: { zoom_rate_pct_per_s: 1.0, bg_scale_delta_pct_per_s: -11, easing: "easeInOut" }, // 강한 달리줌
   orbit: {}, // I2V 위임
 };
 

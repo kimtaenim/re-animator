@@ -45,13 +45,14 @@ function Slider({
 }
 
 export default function CameraWorkEditor({
-  cameraWork, imageUrl, videoUrl, onChange, onApply, applying, busy,
+  cameraWork, imageUrl, videoUrl, onChange, onApply, onPreview, applying, busy,
 }: {
   cameraWork?: CameraWork;
   imageUrl?: string;
   videoUrl?: string; // 있으면: 마우스 올릴 때 '정지 이미지' 대신 '실제 영상(raw)' 위에 카메라를 얹어 재생(굽기 전 실제에 가장 가까움).
   onChange: (cw: CameraWork) => void;
   onApply: () => void;
+  onPreview?: () => void; // 프리뷰 박스 클릭 시 — 큰 결과 미리보기 모달 열기(있을 때만 클릭 가능).
   applying: boolean;
   busy: boolean;
 }) {
@@ -122,9 +123,10 @@ export default function CameraWorkEditor({
         <div
           onMouseEnter={() => videoUrl && setHover(true)}
           onMouseLeave={() => setHover(false)}
-          className="relative w-full overflow-hidden rounded bg-black"
+          onClick={onPreview}
+          className={`relative w-full overflow-hidden rounded bg-black ${onPreview ? "cursor-zoom-in" : ""}`}
           style={{ aspectRatio: "16 / 9" }}
-          title={videoUrl ? "마우스를 올리면 실제 영상 위에서 카메라 재생 — 굽기 전이지만 궤적은 최종과 동일(계층B·orbit 제외)" : undefined}
+          title={videoUrl ? "마우스=실제 영상 위 카메라 재생 · 클릭=큰 결과 미리보기(계층B·orbit 제외)" : onPreview ? "클릭하면 큰 미리보기" : undefined}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img ref={imgRef} src={imageUrl} alt="camera preview" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
@@ -150,7 +152,7 @@ export default function CameraWorkEditor({
       {preset !== "static" && layer !== "C" && (
         <div className="flex flex-col gap-1">
           <Slider label="길이" value={cw?.duration_s ?? 3.5} min={0.5} max={12} step={0.5} suffix="s" onChange={(v) => set({ duration_s: v })} />
-          <Slider label="줌 속도" value={cw?.zoom_rate_pct_per_s ?? 0} min={-8} max={8} step={0.5} suffix="%/s" onChange={(v) => set({ zoom_rate_pct_per_s: v })} />
+          <Slider label="줌 속도" value={cw?.zoom_rate_pct_per_s ?? 0} min={-12} max={12} step={0.5} suffix="%/s" onChange={(v) => set({ zoom_rate_pct_per_s: v })} />
           <Slider label="드리프트X" value={drift.x} min={-100} max={100} step={5} onChange={(v) => set({ drift_px_per_s: { x: v, y: drift.y } })} />
           <Slider label="드리프트Y" value={drift.y} min={-100} max={100} step={5} onChange={(v) => set({ drift_px_per_s: { x: drift.x, y: v } })} />
           {(preset === "pull_out" || preset === "pan" || preset === "shake") && (
