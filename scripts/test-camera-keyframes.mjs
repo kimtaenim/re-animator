@@ -153,13 +153,13 @@ console.log("== camera keyframe golden test ==");
     return [c.cropW, c.cropH, c.x, c.y];
   });
   // RECORD=1 로 재생성. [cropW, cropH, x, y] @ t=0/25/50/75/100% (push_in d=4, W1280×H720).
-  // ★MV 스타일리시 기본값(push_in zoom 5.5·drift{8,-5})으로 갱신 — 2026-07-21.
+  // ★"MV보다 더 거칠게" 기본값(push_in zoom 8·drift{12,-8})으로 갱신 — 2026-07-21.
   const GOLDEN = [
     [1280, 720, 0, 0],
-    [1244, 700, 22, 8],
-    [1152, 648, 80, 26],
-    [1072, 602, 132, 42],
-    [1048, 590, 148, 44],
+    [1230, 692, 30, 10],
+    [1102, 620, 114, 34],
+    [1000, 562, 182, 50],
+    [968, 544, 204, 56],
   ];
   if (RECORD || !GOLDEN) {
     console.log("  GOLDEN(push_in d=4) =", JSON.stringify(snap));

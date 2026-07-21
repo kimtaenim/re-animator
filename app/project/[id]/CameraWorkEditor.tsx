@@ -152,7 +152,7 @@ export default function CameraWorkEditor({
       {preset !== "static" && layer !== "C" && (
         <div className="flex flex-col gap-1">
           <Slider label="길이" value={cw?.duration_s ?? 3.5} min={0.5} max={12} step={0.5} suffix="s" onChange={(v) => set({ duration_s: v })} />
-          <Slider label="줌 속도" value={cw?.zoom_rate_pct_per_s ?? 0} min={-12} max={12} step={0.5} suffix="%/s" onChange={(v) => set({ zoom_rate_pct_per_s: v })} />
+          <Slider label="줌 속도" value={cw?.zoom_rate_pct_per_s ?? 0} min={-15} max={15} step={0.5} suffix="%/s" onChange={(v) => set({ zoom_rate_pct_per_s: v })} />
           <Slider label="드리프트X" value={drift.x} min={-100} max={100} step={5} onChange={(v) => set({ drift_px_per_s: { x: v, y: drift.y } })} />
           <Slider label="드리프트Y" value={drift.y} min={-100} max={100} step={5} onChange={(v) => set({ drift_px_per_s: { x: drift.x, y: v } })} />
           {(preset === "pull_out" || preset === "pan" || preset === "shake") && (
@@ -161,8 +161,9 @@ export default function CameraWorkEditor({
           {layer === "B" && (
             <Slider label="배경 델타" value={cw?.bg_scale_delta_pct_per_s ?? 0} min={-10} max={10} step={0.5} suffix="%p/s" onChange={(v) => set({ bg_scale_delta_pct_per_s: v })} />
           )}
-          {preset === "shake" && (
-            <Slider label="흔들 진폭" value={cw?.shake_amp_px ?? 8} min={0} max={20} step={1} suffix="px" onChange={(v) => set({ shake_amp_px: v, shake_seed: cw?.shake_seed || 1 })} />
+          {/* 흔들 진폭(핸드헬드 그레인) — shake 뿐 아니라 push/pan/crash 에도 노출해 '거칠기'를 직접 조절·제거. */}
+          {(preset === "shake" || preset === "push_in" || preset === "pan" || preset === "crash_zoom") && (
+            <Slider label="흔들 진폭" value={cw?.shake_amp_px ?? 0} min={0} max={40} step={1} suffix="px" onChange={(v) => set({ shake_amp_px: v, shake_seed: cw?.shake_seed || 1 })} />
           )}
         </div>
       )}
