@@ -8,7 +8,7 @@
 //   계층 B(parallax/vertigo)는 인물/배경 매트 미구현 → 프리뷰는 근사(단일 레이어),
 //   굽기는 매트 준비 후. orbit(계층 C)은 클라이언트 프리뷰 불가 → "프록시 렌더 필수".
 // ============================================================================
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CameraWork, CameraPreset } from "@/lib/types";
 // allowJs — 순수 ESM 모듈(무의존)을 그대로 import.
 import { buildKeyframeTable, toWebKeyframes, resolveCameraWork, presetLayer } from "@/lib/cameraKeyframes.mjs";
@@ -45,30 +45,36 @@ function Slider({
 }
 
 export default function CameraWorkEditor({
-  cameraWork, imageUrl, onChange, onApply, applying, busy,
+  cameraWork, imageUrl, videoUrl, onChange, onApply, applying, busy,
 }: {
   cameraWork?: CameraWork;
   imageUrl?: string;
+  videoUrl?: string; // 있으면: 마우스 올릴 때 '정지 이미지' 대신 '실제 영상(raw)' 위에 카메라를 얹어 재생(굽기 전 실제에 가장 가까움).
   onChange: (cw: CameraWork) => void;
   onApply: () => void;
   applying: boolean;
   busy: boolean;
 }) {
   const imgRef = useRef<HTMLImageElement>(null);
+  const vidRef = useRef<HTMLVideoElement>(null);
+  // ★실영상 프리뷰는 hover 시에만 <video> 를 mount(떼면 언마운트) — 컷 많을 때 수십 개 동시 디코딩=크롬 먹통 방지.
+  const [hover, setHover] = useState(false);
   const cw = cameraWork;
   const preset: CameraPreset = cw?.preset ?? "static";
   const layer = presetLayer(preset) as "A" | "B" | "C";
   const cwKey = JSON.stringify(cw ?? {});
+  const liveVideo = !!videoUrl && hover && layer !== "C"; // orbit 은 2D 오버레이로 표현 불가
 
-  // Web Animations 프리뷰 — cameraWork 바뀌면 재생성(즉시 반영).
+  // Web Animations 프리뷰 — cameraWork/대상(이미지↔실영상) 바뀌면 재생성(즉시 반영).
+  //   수식은 lib/cameraKeyframes.mjs 단일 소스라 굽기(ffmpeg crop)와 궤적이 일치(골든 테스트 ~2px).
   useEffect(() => {
-    const el = imgRef.current;
+    const el: HTMLImageElement | HTMLVideoElement | null = liveVideo ? vidRef.current : imgRef.current;
     if (!el) return;
     const start = () => {
       el.getAnimations().forEach((a) => a.cancel());
       if (!cw || layer === "C") return; // orbit: 클라이언트 프리뷰 불가
-      const rw = el.naturalWidth || 1280;
-      const rh = el.naturalHeight || 720;
+      const rw = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth || 1280;
+      const rh = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight || 720;
       const table = buildKeyframeTable(cw, { fps: 24, refWidth: rw, refHeight: rh });
       const track = table.tracks.main ?? table.tracks.character; // 계층 B 는 character 트랙으로 근사
       if (!track) return;
@@ -76,12 +82,23 @@ export default function CameraWorkEditor({
       if (kfs.length < 2) return;
       el.animate(kfs, { duration: Math.max(300, (cw.duration_s || 3) * 1000), iterations: Infinity, easing: "linear", fill: "both" });
     };
-    if (el.complete) start();
-    else {
-      el.addEventListener("load", start, { once: true });
-      return () => el.removeEventListener("load", start);
+    if (liveVideo) {
+      const v = el as HTMLVideoElement;
+      const onReady = () => { v.play().catch(() => {}); start(); };
+      if (v.readyState >= 2) onReady();
+      else {
+        v.addEventListener("loadeddata", onReady, { once: true });
+        return () => v.removeEventListener("loadeddata", onReady);
+      }
+    } else {
+      const img = el as HTMLImageElement;
+      if (img.complete) start();
+      else {
+        img.addEventListener("load", start, { once: true });
+        return () => img.removeEventListener("load", start);
+      }
     }
-  }, [cwKey, layer, imageUrl, cw]);
+  }, [cwKey, layer, imageUrl, videoUrl, liveVideo, cw]);
 
   const set = (patch: Partial<CameraWork>) => {
     const base = cw ?? resolveCameraWork(preset, {}, 3.5);
@@ -100,11 +117,23 @@ export default function CameraWorkEditor({
         {layer === "B" && <span className="text-[var(--muted)]" title="인물/배경 매트가 준비되면 2레이어로 굽습니다(현재 프리뷰는 근사).">계층 B · 매트 준비 후 굽기</span>}
       </div>
 
-      {/* 프리뷰 — 이미지 위 카메라워크(overflow hidden + transform) */}
+      {/* 프리뷰 — 정지 이미지 위 카메라(항상) + 마우스 올리면 실제 영상(raw) 위 카메라로 전환(굽기 전 실제에 가장 가까움). */}
       {imageUrl && (
-        <div className="relative w-full overflow-hidden rounded bg-black" style={{ aspectRatio: "16 / 9" }}>
+        <div
+          onMouseEnter={() => videoUrl && setHover(true)}
+          onMouseLeave={() => setHover(false)}
+          className="relative w-full overflow-hidden rounded bg-black"
+          style={{ aspectRatio: "16 / 9" }}
+          title={videoUrl ? "마우스를 올리면 실제 영상 위에서 카메라 재생 — 굽기 전이지만 궤적은 최종과 동일(계층B·orbit 제외)" : undefined}
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img ref={imgRef} src={imageUrl} alt="camera preview" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
+          {liveVideo && (
+            <video ref={vidRef} src={videoUrl} muted loop playsInline preload="metadata" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
+          )}
+          <span className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/55 px-1 text-[9px] text-white/85">
+            {layer === "C" ? "orbit — 굽기/생성 후 확인" : videoUrl ? (hover ? "실영상 · 굽기 전 미리보기" : "▶ 올리면 실영상") : "정지 이미지 근사"}
+          </span>
         </div>
       )}
 

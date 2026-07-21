@@ -3967,16 +3967,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       <span className="ml-auto text-[10px] text-[var(--muted)]">영상 미생성 — 4단계에서 먼저 생성</span>
                     )}
                   </div>
-                  {s.videoUrl && (
-                    <LazyVideo
-                      src={s.fxUrl ?? s.videoUrl}
-                      onClick={() => setScenePreview(s.id)}
-                      className="h-24 w-full cursor-zoom-in rounded border border-[var(--ok)] object-cover"
-                    />
-                  )}
                   <CameraWorkEditor
                     cameraWork={s.cut?.cameraWork}
                     imageUrl={s.generatedImage ?? s.originalImage}
+                    videoUrl={s.videoUrl}
                     onChange={(cw) => updateCut(s.id, { cameraWork: cw })}
                     onApply={() => applyCameraFx(s.id)}
                     applying={fxPending.has(s.id)}
