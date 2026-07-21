@@ -2,7 +2,7 @@
 // aninews 와 달리 이 워커가 입력단 픽셀 연산까지 담당(Vercel 서버리스 60초·메모리 회피).
 // Render/Railway/Fly 등 상시 서버에서 `node index.mjs`.
 import { popJob, updateJob, failStep } from "./store.mjs";
-import { runCompose } from "./compose.mjs";
+import { runCompose, runJoin } from "./compose.mjs";
 
 // ★sharp(libvips) 격리 — jobs.mjs 는 로드 시 sharp 네이티브 라이브러리를 프로세스에 올린다.
 //   compose(ffmpeg)와 같은 프로세스에 sharp 가 상주하면 그 몫만큼 ffmpeg 여유가 줄어 OOM.
@@ -11,6 +11,7 @@ import { runCompose } from "./compose.mjs";
 let _jobs = null;
 async function jobFn(type) {
   if (type === "compose") return runCompose;
+  if (type === "join") return runJoin; // 섹션 합성본 이어붙이기(ffmpeg concat, sharp 무관 → jobs.mjs 로드 회피)
   _jobs ??= await import("./jobs.mjs");
   const map = {
     split: _jobs.runSplit,
@@ -44,7 +45,7 @@ process.on("uncaughtException", (e) => {
 const POLL_MS = 3000;
 const JOB_TIMEOUT_MS = 12 * 60 * 1000; // 12분(재생성 배치 여유)
 
-const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen", "video", "compose", "portrait", "dub", "postfx", "camerafx", "sequence"];
+const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen", "video", "compose", "join", "portrait", "dub", "postfx", "camerafx", "sequence"];
 const JOB_STEP = {
   split: "source",
   resplit: "source",
@@ -55,6 +56,7 @@ const JOB_STEP = {
   regen: "regen",
   video: "scene",
   compose: "compose",
+  join: "compose",
   portrait: "cast",
   dub: "scene",
   postfx: "scene",

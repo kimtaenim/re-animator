@@ -21,7 +21,8 @@ export type JobType =
   | "dub"
   | "postfx"
   | "camerafx"
-  | "sequence";
+  | "sequence"
+  | "join";
 export type JobStatus = "queued" | "running" | "done" | "error";
 
 export interface Job {

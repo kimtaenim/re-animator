@@ -309,6 +309,71 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       setError(e instanceof Error ? e.message : "시퀀스 나누기 실패");
     }
   }
+  // 방향 B — 섹션별 부분 합성(그 섹션 클립만 → sectionVideos[key]). 잡 폴링 후 프로젝트 재로드.
+  const [secComposePending, setSecComposePending] = useState<Set<string>>(new Set());
+  async function composeSection(startKey: string, sceneIds: string[]) {
+    if (!sceneIds.length) {
+      setError("이 섹션에 합성할 영상이 없어요 — 먼저 이 섹션 동영상을 생성하세요.");
+      return;
+    }
+    setError("");
+    setSecComposePending((p) => new Set([...p, startKey]));
+    const clear = () =>
+      setSecComposePending((p) => {
+        const n = new Set(p);
+        n.delete(startKey);
+        return n;
+      });
+    try {
+      const r = await fetch("/api/compose", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneIds, sectionKey: startKey }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "섹션 합성 실패");
+      const iv = setInterval(async () => {
+        try {
+          const jr = await fetch(`/api/job?id=${d.jobId}`, { cache: "no-store" });
+          const jd = await jr.json();
+          if (jd.ok && (jd.status === "done" || jd.status === "error")) {
+            clearInterval(iv);
+            clear();
+            if (jd.status === "error") {
+              setError(`섹션 합성 실패: ${jd.error ?? ""}`);
+              return;
+            }
+            const pr = await fetch(`/api/project/${project.id}`, { cache: "no-store" });
+            const pd = await pr.json();
+            if (pd.ok) setProject(pd.project);
+          }
+        } catch {}
+      }, 3000);
+      setTimeout(() => {
+        clearInterval(iv);
+        clear();
+      }, 10 * 60_000);
+    } catch (e) {
+      clear();
+      setError(e instanceof Error ? e.message : "섹션 합성 실패");
+    }
+  }
+  // 최종 이어붙이기 — 섹션 합성본들을 순서대로 concat → composedUrl. compose 스텝 폴링으로 추적.
+  async function joinSections() {
+    setError("");
+    try {
+      const r = await fetch("/api/compose", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, mode: "join" }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "이어붙이기 실패");
+      setProject((prev) => ({ ...prev, steps: { ...prev.steps, compose: { ...prev.steps.compose, status: "running" } } }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "이어붙이기 실패");
+    }
+  }
 
   // "삽입 대사 일괄 끄기"(§6·§9) — 모든 컷의 insert_line 오디오 제안을 enabled=false 로.
   function bulkDisableInsertLines() {
@@ -4181,6 +4246,45 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </div>
             );
           })()}
+
+          {/* 방향 B — 섹션이 있으면 섹션별 합성 후 최종 이어붙이기(한 잡=섹션치 → OOM·디스크 안전판, 실패 격리) */}
+          {sections.length > 0 && (
+            <div className="mb-4 rounded border border-[var(--accent)] bg-[var(--panel-2)] p-2 text-[11px]">
+              <div className="mb-1.5 font-semibold text-[var(--accent)]">📚 섹션별 합성 → 최종 이어붙이기 <span className="font-normal text-[var(--muted)]">(서버 부하↓·실패 격리·부분 검토)</span></div>
+              <div className="flex flex-col gap-1">
+                {sections.map((s) => {
+                  const secVidIds = orderedScenes.slice(s.start, s.end).filter((x) => x.videoUrl).map((x) => x.id);
+                  const key = String(s.start);
+                  const done = !!project.sectionVideos?.[key];
+                  const pending = secComposePending.has(key);
+                  return (
+                    <div key={s.i} className="flex flex-wrap items-center gap-2">
+                      <span className="w-24 shrink-0 font-medium">섹션 {s.i + 1} <span className="opacity-60">({s.start + 1}–{s.end})</span></span>
+                      <span className="text-[var(--muted)]">영상 {secVidIds.length}컷</span>
+                      {done && <span className="text-[var(--ok,#3a3)]">✓ 합성됨</span>}
+                      <button type="button" onClick={() => composeSection(key, secVidIds)} disabled={busy || pending || secVidIds.length === 0} className="rounded border border-[var(--border)] px-2 py-0.5 hover:border-[var(--accent)] disabled:opacity-40">
+                        {pending ? "합성 중…" : done ? "다시 합성" : "이 섹션 합성"}
+                      </button>
+                      {done && project.sectionVideos?.[key] && (
+                        <button type="button" onClick={() => setLightbox({ type: "video", src: project.sectionVideos![key] })} className="rounded border border-[var(--accent)] px-2 py-0.5 text-[var(--accent)] hover:bg-[var(--panel)]">▶ 보기</button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-2">
+                {(() => {
+                  const allDone = sections.length > 0 && sections.every((s) => project.sectionVideos?.[String(s.start)]);
+                  return (
+                    <button type="button" onClick={joinSections} disabled={busy || composeRunning || !allDone} title={allDone ? "섹션 합성본들을 순서대로 최종 이어붙이기" : "모든 섹션을 먼저 합성하세요"} className="rounded bg-[var(--accent)] px-3 py-1 font-medium text-white disabled:opacity-40">
+                      {composeRunning ? "이어붙이는 중…" : "🎬 최종 이어붙이기"}
+                    </button>
+                  );
+                })()}
+                <span className="text-[10px] text-[var(--muted)]">모든 섹션 합성 → 최종 이어붙이기 → 완성 영상(경계는 하드컷). 위 ‘영상 묶기’는 섹션 무시하고 통째 합성(무거움).</span>
+              </div>
+            </div>
+          )}
 
           {composeRunning && (
             <p className="mb-3 flex items-center gap-2 text-sm text-[var(--muted)]">

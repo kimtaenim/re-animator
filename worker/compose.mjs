@@ -175,9 +175,13 @@ function subtitleCenterX(cut, W) {
   return Math.round(W * 0.5);
 }
 
-export async function runCompose(projectId) {
+export async function runCompose(projectId, payload) {
   await resetProgress(projectId);
   await resolveFf();
+  // ★섹션 부분 합성(방향 B) — payload.sceneIds 면 그 컷들만, payload.sectionKey 면 결과를
+  //   sectionVideos[key] 로 저장(전체 composedUrl 안 건드림). 한 잡=섹션치 → 임시폴더 디스크 고정.
+  const onlyIds = Array.isArray(payload?.sceneIds) && payload.sceneIds.length ? new Set(payload.sceneIds) : null;
+  const sectionKey = payload?.sectionKey != null ? String(payload.sectionKey) : null;
   const log = async (m) => {
     console.error("[compose]", m);
     await logProgress(projectId, m);
@@ -191,8 +195,9 @@ export async function runCompose(projectId) {
   const scenes = (p.scenes ?? [])
     .slice()
     .sort((a, b) => a.order - b.order)
-    .filter((s) => s.videoUrl || isCardScene(s));
-  if (scenes.length === 0) throw new Error("묶을 영상이 없어요(먼저 동영상 생성)");
+    .filter((s) => s.videoUrl || isCardScene(s))
+    .filter((s) => !onlyIds || onlyIds.has(s.id)); // 섹션 부분 합성이면 그 섹션 컷만
+  if (scenes.length === 0) throw new Error(sectionKey ? "이 섹션에 묶을 영상이 없어요" : "묶을 영상이 없어요(먼저 동영상 생성)");
 
   const [W, H] = targetDims(p);
   const dir = await mkdtemp(join(tmpdir(), "recompose-"));
@@ -368,14 +373,72 @@ export async function runCompose(projectId) {
     });
 
     const pp = (await getProject(projectId)) ?? p;
+    if (sectionKey != null) {
+      // 섹션 부분 합성 — sectionVideos[key] 에만 저장(전체 composedUrl·compose 스텝 안 건드림).
+      pp.sectionVideos = { ...(pp.sectionVideos ?? {}), [sectionKey]: url };
+    } else {
+      pp.composedUrl = url;
+      pp.steps.compose = { ...pp.steps.compose, kind: "compose", status: "review", error: undefined, updatedAt: Date.now() };
+    }
+    await saveProject(pp);
+    try {
+      await recordCost({ projectId, vendor: "worker", model: "ffmpeg-compose", costUsd: 0, meta: { kind: sectionKey != null ? "compose-section" : "compose", clips: scenes.length } });
+    } catch {}
+    await log(`${sectionKey != null ? `섹션 합성 완료(컷 ${scenes.length}개)` : `합성 완료: 영상 ${scenes.length}개 → 1개`}`);
+    return scenes.length;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+// ── join(방향 B): 섹션별 합성본(sectionVideos)을 순서대로 이어붙여 최종 composedUrl. ──
+//   파일 몇 개만 concat(-c copy·무손실·무인코딩)이라 가볍다 — 섹션 부분 합성이 무거운 인코딩을
+//   섹션치로 이미 나눠 처리했으므로, 최종은 사실상 붙이기만. 경계 전환은 하드컷(페이드는 후속).
+export async function runJoin(projectId) {
+  await resetProgress(projectId);
+  await resolveFf();
+  const log = async (m) => {
+    console.error("[join]", m);
+    await logProgress(projectId, m);
+  };
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  const n = (p.scenes ?? []).length;
+  const raw = (p.sectionStarts ?? []).filter((s) => s > 0 && s < n);
+  const starts = [...new Set([0, ...raw])].sort((a, b) => a - b);
+  if (starts.length <= 1) throw new Error("섹션이 없어요 — 먼저 섹션으로 나누고 섹션별로 합성하세요");
+  const vids = p.sectionVideos ?? {};
+  const missing = starts.filter((st) => !vids[String(st)]);
+  if (missing.length) {
+    const nums = missing.map((s) => starts.indexOf(s) + 1).join(", ");
+    throw new Error(`아직 합성 안 된 섹션이 있어요(섹션 ${nums}) — 그 섹션부터 합성하세요`);
+  }
+  const dir = await mkdtemp(join(tmpdir(), "join-"));
+  try {
+    const files = [];
+    for (let i = 0; i < starts.length; i++) {
+      await log(`섹션 ${i + 1}/${starts.length} 다운로드…`);
+      const fp = join(dir, `sec-${i}.mp4`);
+      await download(vids[String(starts[i])], fp);
+      files.push(fp);
+    }
+    await log("최종 이어붙이는 중…");
+    const listFile = join(dir, "list.txt");
+    await writeFile(listFile, files.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"));
+    const finalPath = join(dir, "final.mp4");
+    await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", "-movflags", "+faststart", finalPath]);
+    await log("업로드 중…");
+    const { url } = await put(`project/${projectId}/composed-${Date.now()}.mp4`, createReadStream(finalPath), {
+      access: "public",
+      contentType: "video/mp4",
+      addRandomSuffix: false,
+    });
+    const pp = (await getProject(projectId)) ?? p;
     pp.composedUrl = url;
     pp.steps.compose = { ...pp.steps.compose, kind: "compose", status: "review", error: undefined, updatedAt: Date.now() };
     await saveProject(pp);
-    try {
-      await recordCost({ projectId, vendor: "worker", model: "ffmpeg-compose", costUsd: 0, meta: { kind: "compose", clips: scenes.length } });
-    } catch {}
-    await log(`합성 완료: 영상 ${scenes.length}개 → 1개`);
-    return scenes.length;
+    await log(`최종 완성: 섹션 ${starts.length}개 이어붙임`);
+    return starts.length;
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }

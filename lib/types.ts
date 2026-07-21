@@ -289,6 +289,9 @@ export interface Project {
   //   값 = 각 섹션이 '시작하는 컷 인덱스'(order 정렬 기준, 0-base). 항상 0 포함·정렬·중복제거.
   //   미설정/빈 배열 = 섹션 없음(전체 한 덩어리 — 기존 동작). 경계는 컷 경계에만 놓여 그림이 안 잘림.
   sectionStarts?: number[];
+  // ★섹션별 부분 합성본(방향 B) — 키=섹션 시작 컷 인덱스(String), 값=그 섹션만 이어붙인 중간 영상 URL.
+  //   최종 join 이 이 몇 개만 이어붙여 composedUrl 을 만든다(한 잡=섹션치 → 디스크·OOM 안전판).
+  sectionVideos?: Record<string, string>;
 
   steps: Record<StepKind, StepState>;
 
