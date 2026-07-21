@@ -20,7 +20,8 @@ export type JobType =
   | "portrait"
   | "dub"
   | "postfx"
-  | "camerafx";
+  | "camerafx"
+  | "sequence";
 export type JobStatus = "queued" | "running" | "done" | "error";
 
 export interface Job {

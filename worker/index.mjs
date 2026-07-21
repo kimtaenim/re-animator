@@ -25,6 +25,7 @@ async function jobFn(type) {
     dub: _jobs.runDub,
     postfx: _jobs.runPostfx,
     camerafx: _jobs.runCameraFx,
+    sequence: _jobs.runSequence,
   };
   return map[type] ?? _jobs.runSplit;
 }
@@ -43,7 +44,7 @@ process.on("uncaughtException", (e) => {
 const POLL_MS = 3000;
 const JOB_TIMEOUT_MS = 12 * 60 * 1000; // 12분(재생성 배치 여유)
 
-const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen", "video", "compose", "portrait", "dub", "postfx", "camerafx"];
+const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen", "video", "compose", "portrait", "dub", "postfx", "camerafx", "sequence"];
 const JOB_STEP = {
   split: "source",
   resplit: "source",
@@ -108,7 +109,7 @@ async function tick(types) {
     }
     // dub 은 단계 상태를 안 씀(비디오와 병렬) → scene 단계 건드리지 않는다.
     try {
-      if (type !== "dub" && type !== "postfx" && type !== "camerafx") await failStep(job.projectId, msg, JOB_STEP[type] ?? "source");
+      if (type !== "dub" && type !== "postfx" && type !== "camerafx" && type !== "sequence") await failStep(job.projectId, msg, JOB_STEP[type] ?? "source");
     } catch (e2) {
       console.error("[worker] failStep 실패:", e2?.message ?? e2);
     }

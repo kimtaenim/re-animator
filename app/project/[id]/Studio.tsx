@@ -266,6 +266,49 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     const mid = s.start + Math.floor((s.end - s.start) / 2);
     saveSectionStarts([...sections.map((x) => x.start), mid]);
   }
+  // 🤖 시퀀스 자동 나누기 — 워커가 Claude 로 컷들을 서사 시퀀스로 묶어 sectionStarts 산출.
+  const [seqBusy, setSeqBusy] = useState(false);
+  async function autoSequence() {
+    if (seqBusy) return;
+    setSeqBusy(true);
+    setError("");
+    try {
+      const r = await fetch("/api/sequence", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "시퀀스 나누기 실패");
+      const iv = setInterval(async () => {
+        try {
+          const jr = await fetch(`/api/job?id=${d.jobId}`, { cache: "no-store" });
+          const jd = await jr.json();
+          if (jd.ok && (jd.status === "done" || jd.status === "error")) {
+            clearInterval(iv);
+            setSeqBusy(false);
+            if (jd.status === "error") {
+              setError(`시퀀스 나누기 실패: ${jd.error ?? ""}`);
+              return;
+            }
+            const pr = await fetch(`/api/project/${project.id}`, { cache: "no-store" });
+            const pd = await pr.json();
+            if (pd.ok) {
+              setProject(pd.project);
+              setCurrentSection(0);
+            }
+          }
+        } catch {}
+      }, 3000);
+      setTimeout(() => {
+        clearInterval(iv);
+        setSeqBusy(false);
+      }, 3 * 60_000);
+    } catch (e) {
+      setSeqBusy(false);
+      setError(e instanceof Error ? e.message : "시퀀스 나누기 실패");
+    }
+  }
 
   // "삽입 대사 일괄 끄기"(§6·§9) — 모든 컷의 insert_line 오디오 제안을 enabled=false 로.
   function bulkDisableInsertLines() {
@@ -2409,11 +2452,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           {sections.length === 0 ? (
             <>
               <span className="text-[var(--muted)]">한 회분을 나눠 부분부분 작업 — 서버 부하↓·설정/캐릭터 계승·최종에 이어붙이기</span>
-              <span className="ml-auto flex items-center gap-1">
-                컷
-                <input type="number" min={2} value={divN} onChange={(e) => setDivN(Math.max(2, Number(e.target.value) || 15))} className="w-14 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5" />
-                개씩
-                <button type="button" onClick={() => divideBySize(divN)} className="rounded bg-[var(--accent)] px-2 py-0.5 font-medium text-white">나누기</button>
+              <span className="ml-auto flex items-center gap-2">
+                <button type="button" onClick={autoSequence} disabled={seqBusy} className="rounded bg-[var(--accent)] px-2 py-0.5 font-medium text-white disabled:opacity-50" title="컷들을 서사 시퀀스(장면·장소 전환 단위)로 자동으로 묶어 나눕니다. 나눈 뒤 손으로 조정 가능.">
+                  {seqBusy ? "나누는 중…" : "🤖 시퀀스로 자동 나누기"}
+                </button>
+                <span className="flex items-center gap-1 text-[var(--muted)]">
+                  또는 컷
+                  <input type="number" min={2} value={divN} onChange={(e) => setDivN(Math.max(2, Number(e.target.value) || 15))} className="w-12 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5" />
+                  개씩
+                  <button type="button" onClick={() => divideBySize(divN)} className="rounded border border-[var(--border)] px-2 py-0.5 hover:border-[var(--accent)]">나누기</button>
+                </span>
               </span>
             </>
           ) : (
@@ -2433,6 +2481,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <span className="ml-auto flex items-center gap-1 text-[10px] text-[var(--muted)]">
                 {sec && sec.end - sec.start >= 2 && <button type="button" onClick={() => splitSection(sec.i)} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]" title="이 섹션을 반으로 나눔">✂ 반으로</button>}
                 {sec && sections[sec.i + 1] && <button type="button" onClick={() => mergeSectionWithNext(sec.i)} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]" title="다음 섹션과 합침">⨝ 다음과 합치기</button>}
+                <button type="button" onClick={autoSequence} disabled={seqBusy} className="rounded border border-[var(--accent)] px-1.5 py-0.5 text-[var(--accent)] disabled:opacity-50 hover:bg-[var(--panel)]" title="AI로 서사 시퀀스에 맞춰 다시 나눔">{seqBusy ? "…" : "🤖 자동"}</button>
                 <input type="number" min={2} value={divN} onChange={(e) => setDivN(Math.max(2, Number(e.target.value) || 15))} className="w-12 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5" />
                 <button type="button" onClick={() => divideBySize(divN)} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]" title="이 컷 수로 다시 나눔">다시 나누기</button>
                 <button type="button" onClick={() => { if (window.confirm("섹션 나눔을 해제할까요? (전체 한 덩어리로)")) clearSections(); }} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--danger)]">해제</button>

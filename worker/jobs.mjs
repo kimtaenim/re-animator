@@ -37,6 +37,7 @@ import { klingVideoFromImage, KLING_VIDEO_COST } from "./kling.mjs";
 import { renderCameraFx } from "./cameraRender.mjs";
 import { readCutText, readCutTextTiled } from "./ocr.mjs";
 import { translateScenes, proofreadScenes, translateScenesMultilang } from "./translate.mjs";
+import { groupIntoSequences } from "./sequence.mjs";
 import { synthesize, synthSfx } from "./tts.mjs";
 
 // 만화 효과음(한글 의성어) → ElevenLabs Sound Effects 용 짧은 영어 사운드 묘사. 실패 시 원문.
@@ -669,6 +670,35 @@ export async function runSplit(projectId) {
   };
   await saveProject(p2);
   return scenes.length;
+}
+
+// ── sequence: 컷들을 서사 시퀀스로 자동 묶기 → project.sectionStarts(섹션 경계) ────
+//    텍스트만 Claude 에 주고 경계를 받는다(저렴·빠름). 결과는 fresh 재읽기 후 필드만 저장(저장 규약).
+export async function runSequence(projectId, payload) {
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  const scenes = (p.scenes ?? []).slice().sort((a, b) => a.order - b.order);
+  if (scenes.length < 4) throw new Error("컷이 적어 시퀀스로 나눌 필요가 없어요");
+  const items = scenes.map((s, i) => ({
+    i,
+    type: s.cut?.type ?? "",
+    setting: String(s.cut?.setting || "").slice(0, 80),
+    desc: String(s.cut?.description || s.cut?.dialogue || "").replace(/\s+/g, " ").slice(0, 120),
+  }));
+  const target = Number(payload?.targetCount) > 1 ? Number(payload.targetCount) : undefined;
+  await logProgress(projectId, `시퀀스 자동 나누기 — ${scenes.length}컷 분석 중…`);
+  const { starts, cost, error } = await groupIntoSequences(items, target);
+  if (error) throw new Error(`시퀀스 나누기 실패: ${error}`);
+  const norm = [...new Set([0, ...starts.filter((x) => x > 0 && x < scenes.length)])].sort((a, b) => a - b);
+  const p2 = await getProject(projectId);
+  if (!p2) throw new Error("프로젝트가 사라졌어요");
+  p2.sectionStarts = norm.length > 1 ? norm : undefined; // 경계 못 찾으면 해제(전체 한 덩어리)
+  await saveProject(p2);
+  try {
+    await recordCost({ projectId, vendor: "anthropic", model: "claude-sequence", costUsd: cost, meta: { kind: "sequence", cuts: scenes.length, sections: Math.max(1, norm.length) } });
+  } catch {}
+  await logProgress(projectId, `시퀀스 ${Math.max(1, norm.length)}개로 나눔(~$${cost.toFixed(4)})`);
+  return Math.max(1, norm.length);
 }
 
 // ── extract: G1 확정된 경계로 컷 이미지 추출 → Blob → Scene.originalImage ─────
