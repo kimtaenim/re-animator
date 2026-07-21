@@ -211,6 +211,62 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
     return m;
   }, [project.scenes]);
+  // ── 섹션(부분 작업) — 한 회분을 몇 개 섹션으로 나눠 부분부분 작업 후 최종 이어붙이기 ──
+  const [currentSection, setCurrentSection] = useState<number | null>(null); // null=전체
+  const [divN, setDivN] = useState(15); // 분량 기준: 섹션당 컷 수
+  const orderedScenes = useMemo(
+    () => [...(project.scenes ?? [])].sort((a, b) => a.order - b.order),
+    [project.scenes]
+  );
+  // sectionStarts(시작 컷 인덱스) → 섹션 목록. 항상 0 포함. 경계 없으면 [](=전체 한 덩어리).
+  const sections = useMemo(() => {
+    const n = orderedScenes.length;
+    const raw = (project.sectionStarts ?? []).filter((s) => s > 0 && s < n);
+    const norm = [...new Set([0, ...raw])].sort((a, b) => a - b);
+    if (norm.length <= 1) return [] as { i: number; start: number; end: number; ids: Set<string> }[];
+    return norm.map((st, i) => {
+      const end = i + 1 < norm.length ? norm[i + 1] : n;
+      return { i, start: st, end, ids: new Set(orderedScenes.slice(st, end).map((s) => s.id)) };
+    });
+  }, [project.sectionStarts, orderedScenes]);
+  // 현재 섹션 필터 — 섹션 없거나 '전체'면 모두 통과.
+  const sec = currentSection != null && sections[currentSection] ? sections[currentSection] : null;
+  const inSection = (s: Project["scenes"][number]) => !sec || sec.ids.has(s.id);
+  const scopeSectionIds = (ids: string[]) => (sec ? ids.filter((id) => sec.ids.has(id)) : ids);
+  async function saveSectionStarts(starts: number[]) {
+    const norm = [...new Set(starts.filter((s) => s >= 0).map((s) => Math.floor(s)))].sort((a, b) => a - b);
+    setProject((prev) => ({ ...prev, sectionStarts: norm.length ? norm : undefined }));
+    await fetch(`/api/project/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sectionStarts: norm }),
+    }).catch(() => {});
+  }
+  function divideBySize(n: number) {
+    const total = orderedScenes.length;
+    if (total === 0 || n < 1) return;
+    const starts: number[] = [];
+    for (let i = 0; i < total; i += n) starts.push(i);
+    setCurrentSection(0);
+    saveSectionStarts(starts);
+  }
+  function clearSections() {
+    setCurrentSection(null);
+    saveSectionStarts([]);
+  }
+  function mergeSectionWithNext(i: number) {
+    const boundary = sections[i + 1]?.start;
+    if (boundary == null) return;
+    if (currentSection != null && currentSection > i) setCurrentSection(currentSection - 1);
+    saveSectionStarts(sections.map((x) => x.start).filter((s) => s !== boundary));
+  }
+  function splitSection(i: number) {
+    const s = sections[i];
+    if (!s || s.end - s.start < 2) return;
+    const mid = s.start + Math.floor((s.end - s.start) / 2);
+    saveSectionStarts([...sections.map((x) => x.start), mid]);
+  }
+
   // "삽입 대사 일괄 끄기"(§6·§9) — 모든 컷의 insert_line 오디오 제안을 enabled=false 로.
   function bulkDisableInsertLines() {
     for (const s of project.scenes) {
@@ -700,12 +756,19 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   async function runRegenJob() {
     setBusy(true);
     setError("");
-    const pend = markRegenPending();
+    // 섹션 활성 시 그 섹션 컷만(부분 작업·서버 부하↓). 전체면 기존대로 서버가 전 컷 처리.
+    const secIds = sec
+      ? project.scenes.filter((s) => sec.ids.has(s.id) && s.originalImage && s.cut?.type !== "text").map((s) => s.id)
+      : null;
+    const pend = markRegenPending(secIds ?? undefined);
     try {
+      const body = secIds
+        ? { projectId: project.id, sceneIds: secIds, models: Object.fromEntries(secIds.map((id) => [id, modelFor(id)])) }
+        : { projectId: project.id, model: genModel };
       const r = await fetch("/api/regen", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, model: genModel }),
+        body: JSON.stringify(body),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "재생성 실패");
@@ -1608,11 +1671,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // Grok 영상(I2V) 잡 적재. sceneIds 없으면 재생성된 컷 전체.
   async function runVideoJob(sceneIds?: string[]) {
     setError("");
+    // 명시 sceneIds 없고 섹션 활성이면 그 섹션의 재생성 컷만(부분 작업).
+    const ids = sceneIds ?? (sec ? project.scenes.filter((s) => sec.ids.has(s.id) && s.generatedImage).map((s) => s.id) : undefined);
     try {
       const r = await fetch("/api/video", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, ...(sceneIds ? { sceneIds } : {}) }),
+        body: JSON.stringify({ projectId: project.id, ...(ids ? { sceneIds: ids } : {}) }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "영상 실패");
@@ -1621,11 +1686,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         steps: { ...prev.steps, scene: { ...prev.steps.scene, status: "running" } },
       }));
     } catch (e) {
-      // 적재 실패 시 '생성 중' 해제(안 그러면 스피너가 영영 돎). sceneIds 없으면(전체) 전부.
+      // 적재 실패 시 '생성 중' 해제(안 그러면 스피너가 영영 돎). ids 없으면(전체) 전부.
       setVidPending((prev) => {
-        if (!sceneIds) return new Set();
+        if (!ids) return new Set();
         const n = new Set(prev);
-        for (const id of sceneIds) n.delete(id);
+        for (const id of ids) n.delete(id);
         return n;
       });
       setError(e instanceof Error ? e.message : "영상 실패");
@@ -1645,9 +1710,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     });
   }
   function toggleSelectAllVideo() {
-    const ids = project.scenes.filter((s) => s.generatedImage).map((s) => s.id);
+    const ids = project.scenes.filter((s) => s.generatedImage && inSection(s)).map((s) => s.id);
     const all = ids.length > 0 && ids.every((id) => selForVideo.has(id));
-    setSelForVideo(all ? new Set() : new Set(ids));
+    setSelForVideo(all ? new Set(selForVideo.size ? [...selForVideo].filter((id) => !ids.includes(id)) : []) : new Set([...selForVideo, ...ids]));
   }
   function videoSelected() {
     if (selForVideo.size === 0) return;
@@ -1760,11 +1825,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   //   layer A 프리셋만(정지·orbit·계층B 는 굽기 대상 아님). 단일 applyCameraFx 와 같은 잡·폴링.
   async function bakeAllCamera() {
     const BAKEABLE = new Set(["push_in", "pull_out", "pan", "shake", "crash_zoom", "whip"]);
-    const ids = projectRef.current.scenes
-      .filter((s) => s.videoUrl && s.cut?.cameraWork && BAKEABLE.has(s.cut.cameraWork.preset))
-      .map((s) => s.id);
+    const ids = scopeSectionIds(
+      projectRef.current.scenes
+        .filter((s) => s.videoUrl && s.cut?.cameraWork && BAKEABLE.has(s.cut.cameraWork.preset))
+        .map((s) => s.id)
+    );
     if (!ids.length) {
-      setError("구울 카메라워크가 없어요 — 영상 생성된 컷에 카메라워크(정지 제외)를 먼저 정하세요.");
+      setError(sec ? "이 섹션에 구울 카메라워크가 없어요." : "구울 카메라워크가 없어요 — 영상 생성된 컷에 카메라워크(정지 제외)를 먼저 정하세요.");
       return;
     }
     setError("");
@@ -1812,11 +1879,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     dubStartingRef.current = true;
     setError("");
     setDubMsg(null);
+    // 명시 sceneIds 없고 섹션 활성이면 그 섹션 컷만 더빙(부분 작업).
+    const ids = sceneIds ?? (sec ? project.scenes.filter((s) => sec.ids.has(s.id)).map((s) => s.id) : undefined);
     try {
       const r = await fetch("/api/dub", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, ...(sceneIds ? { sceneIds } : {}) }),
+        body: JSON.stringify({ projectId: project.id, ...(ids ? { sceneIds: ids } : {}) }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "더빙 실패");
@@ -2333,6 +2402,47 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         })}
       </nav>
 
+      {/* 📚 섹션 바 — 한 회분을 나눠 부분부분 작업(3·4·카메라 단계). 목록·일괄작업이 선택 섹션만 대상. */}
+      {(activeStep === "regen" || activeStep === "scene" || activeStep === "camera") && approved && orderedScenes.length > 1 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1.5 text-[11px]">
+          <span className="font-semibold text-[var(--accent)]">📚 섹션</span>
+          {sections.length === 0 ? (
+            <>
+              <span className="text-[var(--muted)]">한 회분을 나눠 부분부분 작업 — 서버 부하↓·설정/캐릭터 계승·최종에 이어붙이기</span>
+              <span className="ml-auto flex items-center gap-1">
+                컷
+                <input type="number" min={2} value={divN} onChange={(e) => setDivN(Math.max(2, Number(e.target.value) || 15))} className="w-14 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5" />
+                개씩
+                <button type="button" onClick={() => divideBySize(divN)} className="rounded bg-[var(--accent)] px-2 py-0.5 font-medium text-white">나누기</button>
+              </span>
+            </>
+          ) : (
+            <>
+              <button type="button" onClick={() => setCurrentSection(null)} className={`rounded border px-2 py-0.5 ${sec == null ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)]"}`}>전체</button>
+              {sections.map((s) => (
+                <button
+                  key={s.i}
+                  type="button"
+                  onClick={() => setCurrentSection(s.i)}
+                  title={`컷 ${s.start + 1}–${s.end}`}
+                  className={`rounded border px-2 py-0.5 ${currentSection === s.i ? "border-[var(--accent)] bg-[var(--panel)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)]"}`}
+                >
+                  섹션 {s.i + 1} <span className="opacity-60">({s.start + 1}–{s.end})</span>
+                </button>
+              ))}
+              <span className="ml-auto flex items-center gap-1 text-[10px] text-[var(--muted)]">
+                {sec && sec.end - sec.start >= 2 && <button type="button" onClick={() => splitSection(sec.i)} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]" title="이 섹션을 반으로 나눔">✂ 반으로</button>}
+                {sec && sections[sec.i + 1] && <button type="button" onClick={() => mergeSectionWithNext(sec.i)} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]" title="다음 섹션과 합침">⨝ 다음과 합치기</button>}
+                <input type="number" min={2} value={divN} onChange={(e) => setDivN(Math.max(2, Number(e.target.value) || 15))} className="w-12 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5" />
+                <button type="button" onClick={() => divideBySize(divN)} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]" title="이 컷 수로 다시 나눔">다시 나누기</button>
+                <button type="button" onClick={() => { if (window.confirm("섹션 나눔을 해제할까요? (전체 한 덩어리로)")) clearSections(); }} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--danger)]">해제</button>
+              </span>
+            </>
+          )}
+          {sec && <span className="w-full text-[10px] text-[var(--accent)]">▶ ‘섹션 {sec.i + 1}’ 작업 중 — 아래 목록·일괄 작업이 이 섹션(컷 {sec.start + 1}–{sec.end})만 대상입니다.</span>}
+        </div>
+      )}
+
       {/* ★플로팅 리모컨 — 각 단계 주요 액션을 화면 하단 고정으로. 위로 스크롤 안 하고 바로 누른다. */}
       {(() => {
         const REMOTE =
@@ -2419,7 +2529,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           );
         }
         if (activeStep === "scene" && approved) {
-          const vids = project.scenes.filter((s) => s.generatedImage).map((s) => s.id);
+          const vids = project.scenes.filter((s) => s.generatedImage && inSection(s)).map((s) => s.id);
           const allSel = vids.length > 0 && vids.every((id) => selForVideo.has(id));
           return (
             <div className={REMOTE}>
@@ -2841,7 +2951,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           {regenOpen && project.scenes.some((s) => s.originalImage) && (
             <div className="space-y-2">
               {project.scenes
-                .filter((s) => s.originalImage && s.cut?.type !== "text")
+                .filter((s) => s.originalImage && s.cut?.type !== "text" && inSection(s))
                 .map((s) => {
                   const speaker = project.cast?.find((c) => c.id === s.cut?.speakerId)?.label;
                   return (
@@ -3056,14 +3166,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               — 재생성 컷 {project.scenes.filter((s) => s.generatedImage).length}개 · Grok I2V(초당 $0.05)
             </span>
             {(() => {
-              const ids = project.scenes.filter((s) => s.generatedImage).map((s) => s.id);
+              const ids = project.scenes.filter((s) => s.generatedImage && inSection(s)).map((s) => s.id);
               const all = ids.length > 0 && ids.every((id) => selForVideo.has(id));
               return (
                 <button
                   onClick={toggleSelectAllVideo}
                   className="ml-auto rounded border border-[var(--border)] px-2 py-2 text-sm"
                 >
-                  {all ? "선택 해제" : "전체 선택"}
+                  {all ? "선택 해제" : sec ? `섹션 ${sec.i + 1} 전체 선택` : "전체 선택"}
                 </button>
               );
             })()}
@@ -3078,14 +3188,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             )}
             <button
               onClick={() => {
-                const ids = project.scenes.filter((s) => s.generatedImage).map((s) => s.id);
+                const ids = project.scenes.filter((s) => s.generatedImage && inSection(s)).map((s) => s.id);
                 setVidPending((prev) => new Set([...prev, ...ids]));
                 runVideoJob();
               }}
               disabled={busy || sceneRunning}
               className="rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50"
             >
-              {sceneRunning ? "생성 중…" : "전체 동영상 생성"}
+              {sceneRunning ? "생성 중…" : sec ? `섹션 ${sec.i + 1} 동영상 생성` : "전체 동영상 생성"}
             </button>
             {/* 🧹 구운 후처리 카메라 전부 해제 → 원본(가장 최근 생성한) 영상 표시. 렌더·API 없음(토큰 0). */}
             {project.scenes.some((s) => s.fxUrl) && (
@@ -3277,6 +3387,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             {project.scenes
               .filter((s) => s.generatedImage || (s.cut?.type === "text" && (s.cut?.bubbles?.length ?? 0) > 0))
               .filter((s) => !onlyUnresolved || isUnresolvedScene(s))
+              .filter(inSection)
               .map((s) => {
                 const isCardScene = !s.generatedImage; // 무성영화 자막 씬(영상·이미지 불필요)
                 const bubs = s.cut?.bubbles ?? [];
@@ -3942,7 +4053,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           </div>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {project.scenes
-              .filter((s) => s.generatedImage)
+              .filter((s) => s.generatedImage && inSection(s))
               .slice()
               .sort((a, b) => a.order - b.order)
               .map((s) => (

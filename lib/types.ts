@@ -285,6 +285,10 @@ export interface Project {
   targetLanguages?: string[]; // ★번역·출력 대상 언어(스펙 §10, 예 ["ja","en"]). 없으면 레거시(단일 — 기존 동작). LANGUAGES 참조.
   videoEngine?: "grok" | "kling"; // I2V 엔진. 기본 kling(키 있으면; 스펙 §4 첫+끝 프레임 보간은 Kling만). 없으면 자동(키 유무).
   workingLanguage?: string; // ★작업 언어(스펙 §10). ""/미설정=원어(source), "ja"/"en"=그 언어 번역으로 표시·더빙·자막. tracks[lang] 사용.
+  // ★섹션(부분 작업) — 한 회분을 몇 개 섹션으로 나눠 부분부분 작업 후 최종에 이어붙이기.
+  //   값 = 각 섹션이 '시작하는 컷 인덱스'(order 정렬 기준, 0-base). 항상 0 포함·정렬·중복제거.
+  //   미설정/빈 배열 = 섹션 없음(전체 한 덩어리 — 기존 동작). 경계는 컷 경계에만 놓여 그림이 안 잘림.
+  sectionStarts?: number[];
 
   steps: Record<StepKind, StepState>;
 

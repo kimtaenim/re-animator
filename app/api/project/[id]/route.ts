@@ -80,6 +80,15 @@ export async function PATCH(
     project.workingLanguage = /^[a-z]{2,5}$/.test(body.workingLanguage) ? body.workingLanguage : undefined;
     changed = true;
   }
+  if (Array.isArray(body.sectionStarts)) {
+    // 섹션 시작 컷 인덱스 — 정수·0이상·정렬·중복제거. 빈 배열=섹션 해제(전체 한 덩어리).
+    const cut = (body.sectionStarts as unknown[])
+      .filter((n): n is number => typeof n === "number" && isFinite(n) && n >= 0)
+      .map((n) => Math.floor(n));
+    const norm = [...new Set(cut)].sort((a, b) => a - b).slice(0, 200);
+    project.sectionStarts = norm.length ? norm : undefined;
+    changed = true;
+  }
   if (changed) await saveProject(project);
   return NextResponse.json({ ok: true, name: project.name, aspectRatio: project.aspectRatio });
 }
