@@ -277,20 +277,32 @@ export async function splitTallRegions(canvas, fileBuffers, candidates, key, mod
   const median = hs[Math.floor(hs.length / 2)] || 500;
   const threshold = Math.max(900, Math.round(median * 1.5));
   const tallCount = candidates.filter((r) => r.yEnd - r.yStart > threshold).length;
-  const out = [];
   let cost = 0;
   let done = 0;
-  for (const r of candidates) {
-    if (r.yEnd - r.yStart > threshold) {
-      done++;
-      await log?.(`긴 구간 분할 검사 ${done}/${tallCount}…`);
-      const { subs, cost: c } = await vlmSplitCut(canvas, fileBuffers, r, key, model, log, splitPrompt);
-      cost += c;
-      for (const s of subs) out.push(s);
-    } else {
-      out.push(r);
+  // ★긴 구간 검사를 병렬화(순차면 구간마다 VLM 왕복이 누적돼 느림). 이미지 처리는 ANALYZE_H 로
+  //   바운드돼 있어 소수 동시 실행이 메모리 안전. 결과는 인덱스로 담아 '원래 순서' 유지.
+  const CONC = Number(process.env.SPLIT_TALL_CONCURRENCY || 3);
+  const results = new Array(candidates.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= candidates.length) return;
+      const r = candidates[i];
+      if (r.yEnd - r.yStart > threshold) {
+        const { subs, cost: c } = await vlmSplitCut(canvas, fileBuffers, r, key, model, log, splitPrompt);
+        cost += c; // 단일 스레드 — await 사이 원자적
+        results[i] = subs;
+        done++;
+        await log?.(`긴 구간 분할 검사 ${done}/${tallCount}…`);
+      } else {
+        results[i] = [r];
+      }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONC, candidates.length) }, worker));
+  const out = [];
+  for (const subs of results) for (const s of subs) out.push(s);
   try {
     await recordCost({
       projectId,
