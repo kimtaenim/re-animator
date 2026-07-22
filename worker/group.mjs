@@ -279,9 +279,9 @@ export async function splitTallRegions(canvas, fileBuffers, candidates, key, mod
   const tallCount = candidates.filter((r) => r.yEnd - r.yStart > threshold).length;
   let cost = 0;
   let done = 0;
-  // ★긴 구간 검사를 병렬화(순차면 구간마다 VLM 왕복이 누적돼 느림). 이미지 처리는 ANALYZE_H 로
-  //   바운드돼 있어 소수 동시 실행이 메모리 안전. 결과는 인덱스로 담아 '원래 순서' 유지.
-  const CONC = Number(process.env.SPLIT_TALL_CONCURRENCY || 3);
+  // ★동시성 기본 1(순차) — 병렬(3)로 하니 fileRawAt 의 full-file raw 디코딩(파일당 수십 MB)이 동시에
+  //   터져 메모리 빡빡한 Render 워커가 OOM(재시작)났다(사용자 보고). 인스턴스 상향 시 env 로 올릴 수 있게 둔다.
+  const CONC = Number(process.env.SPLIT_TALL_CONCURRENCY || 1);
   const results = new Array(candidates.length);
   let next = 0;
   const worker = async () => {
