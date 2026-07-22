@@ -141,9 +141,18 @@ export function snapStrict(bness, yPos, win, minB = 26) {
 }
 
 async function vlmSplitCut(canvas, fileBuffers, region, key, model, log, splitPrompt) {
+  const H = region.yEnd - region.yStart;
+  // ★워커 먹통 방지(사용자 보고: '긴 구간 분할 검사'에서 수십 분 먹통) — 아주 긴 구간(gutter-less 초장문)은
+  //   extractRegion(거대 버퍼 alloc+PNG 인코딩)과 computeBoundaryness(거대 raw+중첩 동기 루프)가 이벤트
+  //   루프를 막아, 12분 잡 캡 타이머조차 못 뜬다. 안전 상한을 넘으면 자동 분할을 건너뛰고 한 컷으로 둔다
+  //   (G1에서 확인·필요 시 수동 처리). 상한은 env(SPLIT_MAX_REGION_PX)로 조정.
+  const MAX_SPLIT_PX = Number(process.env.SPLIT_MAX_REGION_PX || 12000);
+  if (H > MAX_SPLIT_PX) {
+    await log?.(`긴 구간 ${H}px — 안전 상한(${MAX_SPLIT_PX}px) 초과로 자동 분할 스킵(한 컷 유지, 먹통 방지)`);
+    return { subs: [region], cost: 0 };
+  }
   const png = await extractRegion(canvas, fileBuffers, region.yStart, region.yEnd);
   const img = await sharp(png).resize({ width: 340 }).png().toBuffer();
-  const H = region.yEnd - region.yStart;
   const prompt = splitPrompt;
   try {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
