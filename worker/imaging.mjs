@@ -132,7 +132,10 @@ async function fileRawAt(canvas, fileBuffers, idx) {
 }
 
 // 전역 정규화 [yStart, yEnd) × [xStart, xEnd) 를 잘라 PNG 버퍼로. 걸친 소스 파일만 디코드.
-export async function extractRegion(canvas, fileBuffers, yStart, yEnd, xStart, xEnd) {
+// maxH(선택): 결과 세로 상한. 구간이 이보다 크면 세로로 정수 스텝 다운샘플해 버퍼·PNG·후속
+//   픽셀분석 메모리를 상한(먹통 방지). 미지정이면 기존과 동일(전 해상도). 반환 png 실제 높이는
+//   메타데이터로 확인 가능(호출측이 좌표 되돌릴 때 사용).
+export async function extractRegion(canvas, fileBuffers, yStart, yEnd, xStart, xEnd, maxH) {
   const { refWidth, totalHeight, offsets } = canvas;
   const y0 = Math.max(0, Math.min(totalHeight, Math.round(yStart)));
   const y1 = Math.max(y0 + 1, Math.min(totalHeight, Math.round(yEnd)));
@@ -143,8 +146,10 @@ export async function extractRegion(canvas, fileBuffers, yStart, yEnd, xStart, x
   const x1 = hasX ? Math.min(refWidth, Math.round(xEnd)) : refWidth;
   const w = Math.max(1, x1 - x0);
 
+  const step = maxH && h > maxH ? Math.ceil(h / maxH) : 1; // 세로 다운샘플 스텝(1=그대로)
+  const outH = Math.max(1, Math.ceil(h / step));
   const outRow = w * 3;
-  const out = Buffer.alloc(outRow * h, 255); // 파일 사이 빈 곳은 흰색
+  const out = Buffer.alloc(outRow * outH, 255); // 파일 사이 빈 곳은 흰색
   for (let i = 0; i < fileBuffers.length; i++) {
     const fStart = Math.round(offsets[i]);
     const fEnd = i + 1 < offsets.length ? Math.round(offsets[i + 1]) : totalHeight;
@@ -154,11 +159,15 @@ export async function extractRegion(canvas, fileBuffers, yStart, yEnd, xStart, x
     const gTop = Math.max(y0, fStart);
     const gBot = Math.min(y1, fStart + rec.height);
     for (let gy = gTop; gy < gBot; gy++) {
+      const rel = gy - y0;
+      if (step > 1 && rel % step !== 0) continue; // 다운샘플: step 마다 한 줄만
+      const outY = step > 1 ? rel / step : rel;
+      if (outY >= outH) continue;
       const srcOff = (gy - fStart) * srcRow + x0 * 3;
-      rec.data.copy(out, (gy - y0) * outRow, srcOff, srcOff + outRow);
+      rec.data.copy(out, outY * outRow, srcOff, srcOff + outRow);
     }
   }
-  return sharp(out, { raw: { width: w, height: h, channels: 3 } })
+  return sharp(out, { raw: { width: w, height: outH, channels: 3 } })
     .png()
     .toBuffer();
 }

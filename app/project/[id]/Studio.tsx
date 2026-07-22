@@ -105,7 +105,7 @@ function urlTimestamp(url?: string): number | null {
 function fmtClock(ts: number | null): string {
   if (!ts) return "";
   try {
-    return new Date(ts).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return new Date(ts).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Seoul" });
   } catch {
     return "";
   }

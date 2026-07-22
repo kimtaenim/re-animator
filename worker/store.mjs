@@ -41,7 +41,8 @@ export async function resetProgress(projectId) {
 }
 export async function logProgress(projectId, msg) {
   try {
-    const line = `${new Date().toISOString().slice(11, 23)} ${msg}`;
+    // 한국표준시(KST=UTC+9, DST 없음) — 워커 서버(UTC)라 +9h 시프트 후 HH:MM:SS.mmm.
+    const line = `${new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(11, 23)} ${msg}`;
     await redis.rpush(progKey(projectId), line);
     await redis.expire(progKey(projectId), 3600);
   } catch {}
