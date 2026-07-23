@@ -2648,8 +2648,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
 
       {/* 📚 섹션 바 — 한 회분을 나눠 부분부분 작업(3·4·카메라 단계). 목록·일괄작업이 선택 섹션만 대상. */}
       {(activeStep === "regen" || activeStep === "scene" || activeStep === "camera") && approved && orderedScenes.length > 1 && (
-        <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1.5 text-[11px]">
-          <span className="font-semibold text-[var(--accent)]">📚 섹션</span>
+        <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--accent)] bg-[var(--panel)] px-2.5 py-2 text-[11px] shadow-sm">
+          <span className="text-xs font-semibold text-[var(--accent)]">📚 섹션 (부분 작업)</span>
           {sections.length === 0 ? (
             <>
               <span className="text-[var(--muted)]">한 회분을 나눠 부분부분 작업 — 서버 부하↓·설정/캐릭터 계승·최종에 이어붙이기</span>
