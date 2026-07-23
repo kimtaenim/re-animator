@@ -452,6 +452,14 @@ export async function runSplit(projectId) {
     console.error("[split]", `+${el}s`, m);
     await logProgress(projectId, `[+${el}s] ${m}`);
   };
+  // ★단계별 소요 시간 측정 — "느리다"는 보고가 와도 '어디가' 느린지 몰라 추측 수정이 반복됐다.
+  //   한 번의 실행으로 병목 단계를 확정하려고 구간 시계만 둔다(동작 변경 없음).
+  const marks = [];
+  let tMark = Date.now();
+  const mark = (name) => {
+    marks.push(`${name} ${((Date.now() - tMark) / 1000).toFixed(0)}s`);
+    tMark = Date.now();
+  };
 
   const p = await getProject(projectId);
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
@@ -492,9 +500,11 @@ export async function runSplit(projectId) {
 
   // 1) 어디서 자를지 = 알고리즘. 실제 평탄 행(패널 사이 거터)에서만 자른다.
   //    → 인물 몸(평탄하지 않음)을 물리적으로 못 자르고, 거터 없는 패널을 못 쪼갠다.
+  mark("프로파일");
   await log("경계 검출(실제 거터)…");
   let regions = detectRegions(global, cfg).map((c) => ({ yStart: c.yStart, yEnd: c.yEnd }));
   await log(`거터 컷 ${regions.length}개`);
+  mark("거터검출");
 
   // 2) 무엇이 장면인지 = VLM. 거터 없는 '키 큰' 구간만 여러 장면인지 판정하고,
   //    그 위치도 실제 경계로 엄격 스냅 — 진짜 경계 없으면 안 자른다(연속 그림·몸 보호).
@@ -507,6 +517,7 @@ export async function runSplit(projectId) {
       await log(`분할 검사 실패(거터 컷 유지): ${e?.message ?? e}`);
     }
   }
+  mark("긴구간분할");
 
   // 3) 여백 트림: 각 박스를 그려진 내용에 4변으로 딱 조인다(검은/단색/그라데이션 여백 제거).
   regions = regions.map((r) => ({ yStart: r.yStart, yEnd: r.yEnd, xStart: 0, xEnd: refWidth }));
@@ -537,6 +548,7 @@ export async function runSplit(projectId) {
   const grown = extendRegionEdges(regions, global, canvas.totalHeight);
   if (grown) await log(`경계 확장: ${grown}개 컷 가장자리가 그림에 걸려 있어 내용 끝까지 늘림`);
   await log(`최종 장면 ${regions.length}개`);
+  mark("여백트림");
 
   // 4) 컷 온톨로지 분류 — 각 컷의 타입(중심)+내용. 사람이 G1 에서 확정.
   let cuts = regions.map(() => null);
@@ -547,6 +559,7 @@ export async function runSplit(projectId) {
       await log(`컷 분류 실패(미분류): ${e?.message ?? e}`);
     }
   }
+  mark("컷분류");
 
   const rawScenes = regions.map((r, idx) => ({
     id: randomUUID(),
@@ -654,6 +667,7 @@ export async function runSplit(projectId) {
     const withText = scenes.filter((s) => (s.cut?.bubbles ?? []).some((b) => (b.text || "").trim())).length;
     await log(`대사 읽기 완료 — ${withText}/${scenes.length}컷에서 글자 확보`);
   }
+  mark("대사읽기");
 
   // ★OCR 교정(보수적) — 컷마다 따로 읽어 생긴 고유명사 불일치(诺德/诸德/浩德)·오독을 전체 문맥으로
   //   바로잡는다. 번역 전에 원문을 고쳐야 번역도 일관됨. bubble.text 가 바뀌므로 cut.dialogue 재구성.
@@ -669,6 +683,7 @@ export async function runSplit(projectId) {
   } catch (e) {
     await log(`OCR 교정 건너뜀: ${String(e?.message ?? e).slice(0, 100)}`);
   }
+  mark("OCR교정");
 
   // ★번역(Claude) — G1 검수 화면에 대사·내레이션 뜻이 바로 보이게. 컷 대사 + 말풍선 전부 한 번에.
   try {
@@ -679,6 +694,8 @@ export async function runSplit(projectId) {
   } catch (e) {
     await log(`번역 실패(대사는 그대로): ${String(e?.message ?? e).slice(0, 120)}`);
   }
+  mark("번역");
+  await log(`⏱ 단계별 소요: ${marks.join(" · ")}`);
 
   // 최신 프로젝트를 다시 읽어 결과만 병합(중간에 다른 갱신 있었을 수 있음).
   const p2 = await getProject(projectId);
