@@ -1647,6 +1647,39 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
+  // 🌐/🗣 언어 바 — ★4단계 최상단에 독립 배치. 예전엔 '📖 스토리 맥락' 텍스트박스 '안'에
+  //   들어 있어서 뎁스가 너무 깊었다(사용자 지적). 작업 언어는 더빙·자막 출력이 통째로
+  //   바뀌는 스위치라, 다른 설정에 묻히면 안 된다.
+  function languageBar() {
+    return (
+      <div className="mb-2 rounded border border-[var(--accent)] bg-[var(--panel)] px-2 py-1.5">
+        {targetLangToggles()}
+        {(project.targetLanguages?.length ?? 0) > 0 && (
+          <div
+            className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-[var(--border)] pt-1.5 text-[11px]"
+            title="화면 대사·더빙·자막이 이 언어로 나갑니다. 원어=번역 전 원문. 언어를 고르면 그 번역문으로 더빙·자막(그 언어를 읽는 목소리 필요). 바꾼 뒤 더빙·합성 다시 하세요."
+          >
+            <span className="font-semibold text-[var(--accent)]">🗣 작업 언어</span>
+            {[{ id: "", label: "원어" }, ...(project.targetLanguages ?? []).map((id) => ({ id, label: LANGUAGES.find((l) => l.id === id)?.label ?? id }))].map((o) => {
+              const on = (project.workingLanguage ?? "") === o.id;
+              return (
+                <button
+                  key={o.id || "src"}
+                  type="button"
+                  onClick={() => setWorkingLanguage(o.id)}
+                  className={`rounded border px-2 py-0.5 ${on ? "border-[var(--accent)] bg-[var(--accent)] font-medium text-white" : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--panel-2)]"}`}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+            <span className="text-[var(--muted)]">— 더빙·자막이 이 언어로 나갑니다</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // 🌐 대상 언어 토글 — ★1단계와 4단계 양쪽에서 같은 컨트롤을 쓴다.
   //   다국어 번역은 '추출'(1단계 후반)에서 채워지는데, 예전엔 이 토글이 4단계 안에만 있었고
   //   그나마 재생성 이미지가 하나라도 있어야 보였다 → 효과가 나는 시점보다 한참 뒤에야 켤 수
@@ -3334,6 +3367,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       {/* ── 4단계: 동영상 생성(Grok I2V) + 더빙 정보 ── */}
       {activeStep === "scene" && approved && project.scenes.some((s) => s.generatedImage) && (
         <section className="mb-6">
+          {/* 🌐 대상 언어 · 🗣 작업 언어 — 이 단계의 더빙·자막 출력을 좌우하므로 최상단. */}
+          {languageBar()}
           {/* 🎭 목소리 캐스팅 — 더빙 단계에서도 지정 가능(캐스팅 화면과 같은 저장소 = 싱크). */}
           {(project.cast?.length ?? 0) > 0 && (
             <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-[var(--border)] bg-[var(--panel)] px-2 py-1.5 text-[11px]">
@@ -3463,30 +3498,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               placeholder="예: 비극. 주인공은 칼에 찔려 죽어가는 중 — 밝거나 활기찬 동작·미소 금지. 시종 어둡고 무거운 톤."
               className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-xs"
             />
-            {targetLangToggles()}
-            {/* 🗣 작업 언어(§10) — 화면 대사·더빙·자막이 이 언어로 나감. 원어 또는 켠 대상 언어 중 선택. */}
-            {(project.targetLanguages?.length ?? 0) > 0 && (
-              <div
-                className="mt-2 flex flex-wrap items-center gap-1.5 rounded border border-[var(--accent)] bg-[var(--panel-2)] px-2 py-1 text-[11px]"
-                title="화면 대사·더빙·자막이 이 언어로 나갑니다. 원어=번역 전 원문. 언어를 고르면 그 번역문으로 더빙·자막(그 언어를 읽는 목소리 필요). 바꾼 뒤 더빙·합성 다시 하세요."
-              >
-                <span className="font-semibold text-[var(--accent)]">🗣 작업 언어</span>
-                {[{ id: "", label: "원어" }, ...(project.targetLanguages ?? []).map((id) => ({ id, label: LANGUAGES.find((l) => l.id === id)?.label ?? id }))].map((o) => {
-                  const on = (project.workingLanguage ?? "") === o.id;
-                  return (
-                    <button
-                      key={o.id || "src"}
-                      type="button"
-                      onClick={() => setWorkingLanguage(o.id)}
-                      className={`rounded border px-2 py-0.5 ${on ? "border-[var(--accent)] bg-[var(--accent)] font-medium text-white" : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--panel)]"}`}
-                    >
-                      {o.label}
-                    </button>
-                  );
-                })}
-                <span className="text-[var(--muted)]">— 더빙·자막이 이 언어로</span>
-              </div>
-            )}
             {/* 🎬 영상 엔진(§4) — 자동(키 유무)/Kling/Grok. Kling 만 액션 첫+끝 프레임 보간 가능. */}
             <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]" title="I2V 엔진. Kling 은 첫+끝 프레임 보간(액션)·네이티브 품질. Grok 은 기존. 자동=키 있으면 Kling. Kling 은 워커에 KLING_ACCESS_KEY/SECRET_KEY 필요.">
               <span className="text-[var(--muted)]">🎬 영상 엔진</span>
