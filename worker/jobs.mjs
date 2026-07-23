@@ -16,6 +16,7 @@ import {
   resetProgress,
   saveRowProfile,
   recordCost,
+  enqueueJob,
 } from "./store.mjs";
 import sharp from "sharp";
 import { computeRowProfile, extractRegion, trimBox } from "./imaging.mjs";
@@ -1823,6 +1824,16 @@ export async function runVideo(projectId, payload) {
   const engine =
     p.videoEngine === "grok" ? "grok" : p.videoEngine === "kling" ? "kling" : hasKling ? "kling" : "grok";
   await log(`영상 생성 대상 ${cand.length}컷 · ${engine === "kling" ? "Kling" : "Grok"} · 동시 ${VIDEO_CONCURRENCY}`);
+  // ★이어달리기(soft deadline) — 잡 캡은 12분인데 Kling 은 컷당 2~4분이라, 동시 3이어도
+  //   12분에 대략 9~18컷이 한계다. 넘기면 잡은 '타임아웃 실패'로 찍히지만 Promise.race 는
+  //   실행 중인 잡을 취소하지 못해 백그라운드로 계속 돌고, 워커는 다음 잡을 집는다
+  //   → 두 잡의 메모리가 겹쳐 OOM. (동영상 생성 중 OOM 의 구조적 요인)
+  //   → 캡 전에 스스로 멈추고, 남은 컷을 새 video 잡으로 재적재해 이어서 돌린다.
+  //     사용자에겐 '계속 진행 중'으로 보이고, 잡은 항상 캡 안에서 끝나 겹침이 없다.
+  const vt0 = Date.now();
+  const VIDEO_SOFT_MS = Number(process.env.VIDEO_SOFT_MS || 9.5 * 60 * 1000);
+  const videoBudgetLeft = () => Date.now() - vt0 < VIDEO_SOFT_MS;
+  const leftover = [];
 
   const byId = new Map(); // sceneId → { url } | { error }
   let costTotal = 0;
@@ -1859,6 +1870,10 @@ export async function runVideo(projectId, payload) {
 
   for (let i = 0; i < cand.length; i += VIDEO_CONCURRENCY) {
     const chunk = cand.slice(i, i + VIDEO_CONCURRENCY);
+    if (!videoBudgetLeft()) {
+      leftover.push(...cand.slice(i).map((s) => s.id)); // 남은 컷은 다음 잡으로
+      break;
+    }
     await log(`영상 ${i + 1}~${i + chunk.length}/${cand.length}…`);
     await Promise.all(
       chunk.map(async (s) => {
@@ -1872,15 +1887,27 @@ export async function runVideo(projectId, payload) {
           //   구조 변경 없음 — 두 컷 다 씬으로 남고, 이 컷이 "이 이미지→다음 이미지"로 움직이는 클립이 된다.
           const nextScene = scenes.find((x) => x.order > s.order && x.generatedImage);
           const tailUrl = engine === "kling" && s.cut?.interpolationOn && nextScene ? nextScene.generatedImage : undefined;
+          // ★대기 로그는 '드물게·경과시간과 함께'. 엔진 폴링은 6초마다 tick 하는데 그때마다
+          //   찍으면 컷 3개 기준 분당 30줄이라, 진행 로그(120줄)가 몇 분이면 통째로 밀려
+          //   정작 필요한 [진단]·실패 사유가 사라진다. 또 같은 문구만 반복되면 진행 중인지
+          //   멈춘 건지 구분도 안 된다 → 30초마다, 경과 초를 붙여 남긴다.
+          const tickStart = Date.now();
+          let lastTick = 0;
+          const tick = (label) => async () => {
+            const el = Math.round((Date.now() - tickStart) / 1000);
+            if (el - lastTick < 30) return; // 30초 간격으로만
+            lastTick = el;
+            await log(`컷 ${s.order + 1} 생성 대기 ${el}s…(${label})`);
+          };
           const genVideo = (prompt) =>
             engine === "kling"
               ? klingVideoFromImage(
                   { imageUrl: s.generatedImage, imageTailUrl: tailUrl, prompt, duration: dur },
-                  () => log(`컷 ${s.order + 1} 생성 중…(Kling${tailUrl ? "·보간" : ""})`)
+                  tick(`Kling${tailUrl ? "·보간" : ""}`)
                 )
               : grokVideoFromImage(
                   { imageUrl: s.generatedImage, prompt, duration: grokDur },
-                  () => log(`컷 ${s.order + 1} 생성 중…(${grokDur}s)`)
+                  tick(`Grok ${grokDur}s`)
                 );
           // 이 컷에 '보이는' 캐릭터들(캐스팅 sceneIds 기준) — 화자가 이 중에 없으면 입 다뭄.
           const shownCharIds = (p.cast ?? []).filter((c) => (c.sceneIds ?? []).includes(s.id)).map((c) => c.id);
@@ -1935,6 +1962,20 @@ export async function runVideo(projectId, payload) {
       meta: { kind: "video", engine, clips: cand.length, ok },
     });
   } catch {}
+
+  // 남은 컷이 있으면 이어달리기 — 지금까지 결과는 저장하되 단계는 running 으로 두고
+  // 후속 잡을 적재한다. 사용자에겐 계속 진행 중으로 보이고, 잡은 캡 안에서 끝난다.
+  if (leftover.length) {
+    await flush(false);
+    try {
+      await enqueueJob("video", projectId, { sceneIds: leftover });
+      await log(`⏱ 잡 시간 한도 — 남은 ${leftover.length}컷은 이어서 자동 진행합니다(계속 대기하세요)`);
+    } catch (e) {
+      await flush(true);
+      await log(`남은 ${leftover.length}컷 이어달리기 적재 실패: ${String(e?.message ?? e).slice(0, 100)} — 다시 실행해 주세요`);
+    }
+    return ok;
+  }
 
   await flush(true);
   await log(`영상 완료: ${ok}/${cand.length} (~$${costTotal.toFixed(3)})`);

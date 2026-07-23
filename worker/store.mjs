@@ -1,5 +1,6 @@
 // Redis 접근 (앱과 같은 키 스킴). 워커는 project 상태 + 잡 큐 + 진행 로그를 본다.
 import { Redis } from "@upstash/redis";
+import { randomUUID } from "crypto";
 
 const url = process.env.UPSTASH_REDIS_REST_URL;
 const token = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -26,6 +27,25 @@ export async function popJob(type) {
   const job = await redis.get(`job:${id}`);
   return job ?? null;
 }
+// 워커가 스스로 후속 잡을 적재한다(앱과 같은 형식: set(job:id) + lpush(jobq:type)).
+// ★긴 작업을 12분 잡 캡 안에 쪼개 '이어달리기'시키는 데 쓴다 — 캡을 넘기면 잡은 실패로
+//   찍히는데 실제 작업은 계속 돌아 다음 잡과 겹치고, 메모리 빡빡한 워커가 OOM 난다.
+export async function enqueueJob(type, projectId, payload = {}) {
+  const id = randomUUID();
+  const now = Date.now();
+  await redis.set(`job:${id}`, {
+    id,
+    type,
+    projectId,
+    payload,
+    status: "queued",
+    createdAt: now,
+    updatedAt: now,
+  });
+  await redis.lpush(`jobq:${type}`, id);
+  return id;
+}
+
 export async function updateJob(id, patch) {
   const cur = await redis.get(`job:${id}`);
   if (!cur) return;
