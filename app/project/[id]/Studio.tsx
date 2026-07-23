@@ -167,6 +167,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
   const [progressLog, setProgressLog] = useState<string[]>([]);
+  const [logOpen, setLogOpen] = useState(false); // 📋 작업 로그 상시 패널(단계 무관·스크롤 무관)
   const [srcOpen, setSrcOpen] = useState<boolean | null>(null); // null=기본(승인되면 접힘)
   const [regenOpen, setRegenOpen] = useState(true); // 3단계 컷 목록 접기
   const [vidPending, setVidPending] = useState<Set<string>>(() => new Set()); // 영상 생성 중인 컷
@@ -4420,6 +4421,56 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           <span className="font-medium">{workLabel} 중</span>
           {miniBar()}
           {progress && <span className="truncate text-[var(--muted)]">· {progress}</span>}
+        </div>
+      )}
+
+      {/* 📋 작업 로그 — ★단계를 옮기든 스크롤을 하든 항상 열 수 있어야 한다.
+             예전엔 1단계 섹션 안에만 있어서 단계를 넘기면 사라졌다(사용자: "로그가 계속 보이게
+             해야 내가 수정을 하지"). 로그를 보면서 컷·대사를 고치는 게 실제 작업 방식이므로,
+             화면 전환과 무관한 플로팅 패널로 둔다. 분할·캐스팅·재생성 진행 로그가 모두 여기로 온다. */}
+      {progressLog.length > 0 && !logOpen && (
+        <button
+          onClick={() => setLogOpen(true)}
+          className={`fixed ${workLabel ? "bottom-16" : "bottom-4"} right-4 z-40 flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-xs shadow-lg hover:border-[var(--accent)]`}
+          title="워커 작업 로그 보기 — 단계별 소요·경고·실패 사유"
+        >
+          <span>📋</span>
+          <span className="text-[var(--muted)]">작업 로그</span>
+          <span className="font-semibold">{progressLog.length}</span>
+        </button>
+      )}
+      {logOpen && (
+        <div
+          className={`fixed ${workLabel ? "bottom-16" : "bottom-4"} right-4 z-40 flex max-h-[52vh] w-[min(92vw,44rem)] flex-col rounded-lg border border-[var(--border)] bg-[var(--panel)] shadow-2xl`}
+        >
+          <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-xs">
+            <span className="font-medium">📋 작업 로그</span>
+            <span className="text-[var(--muted)]">{progressLog.length}줄</span>
+            {running && <span className="text-[var(--accent)]">· 진행 중</span>}
+            <span className="ml-auto flex items-center gap-1">
+              <button
+                onClick={() => navigator.clipboard?.writeText(progressLog.join("\n"))}
+                className="rounded border border-[var(--border)] px-2 py-0.5 hover:border-[var(--accent)]"
+              >
+                복사
+              </button>
+              <button
+                onClick={() => setProgressLog([])}
+                className="rounded border border-[var(--border)] px-2 py-0.5 hover:border-[var(--accent)]"
+              >
+                지우기
+              </button>
+              <button
+                onClick={() => setLogOpen(false)}
+                className="rounded border border-[var(--border)] px-2 py-0.5 hover:border-[var(--accent)]"
+              >
+                닫기
+              </button>
+            </span>
+          </div>
+          <pre className="overflow-y-auto whitespace-pre-wrap p-3 text-[11px] leading-tight text-[var(--muted)]">
+            {progressLog.join("\n")}
+          </pre>
         </div>
       )}
 
