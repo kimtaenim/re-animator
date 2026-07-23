@@ -9,7 +9,7 @@
 // 저장 시 regions({yStart,yEnd,xStart?,xEnd?,cut?}[])를 상위(Studio)의 onSave 로.
 // ============================================================================
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { SourceFile, VirtualCanvas, Scene, CutOntology, CutType, TextKind } from "@/lib/types";
 import { CUT_TYPES, TEXT_KINDS, blankCut } from "@/lib/ontology";
 
@@ -124,13 +124,42 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
   const [drag, setDrag] = useState<{ index: number; edge: "top" | "bottom" } | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  // 편집 일련번호 — 저장 시작 시점의 번호와 끝난 시점의 번호가 같을 때만 dirty 를 내린다.
+  // (저장 중에 또 편집했는데 dirty 를 내리면 그 편집이 저장되지 않고 조용히 사라진다.)
+  const editSeq = useRef(0);
+  const [editTick, setEditTick] = useState(0); // 디바운스 재예약용(편집할 때마다 타이머 리셋)
+  const markDirty = () => {
+    editSeq.current++;
+    setEditTick((n) => n + 1);
+    setDirty(true);
+  };
+  const regionsRef = useRef(regions);
+  regionsRef.current = regions;
+
+  // 저장 실행 — 자동저장(디바운스)과 즉시저장이 공유한다.
+  const doSave = useCallback(async () => {
+    const seq = editSeq.current;
+    setSaving(true);
+    try {
+      await onSave(regionsRef.current.map((r) => ({ ...r })));
+      if (editSeq.current === seq) setDirty(false); // 그 사이 편집 없었으면 깨끗
+    } catch {
+      /* dirty 유지 → 다음 틱에 재시도 */
+    } finally {
+      setSaving(false);
+    }
+  }, [onSave]);
 
   // scenes prop 갱신 시(저장 후 서버 반영) 재동기화 — 렌더 중 조정 패턴.
+  // ★★저장 안 된 편집이 있으면 절대 덮어쓰지 않는다. 예전엔 배열 '동일성'만 보고 무조건
+  //   재동기화해서, 폴링이 2초마다 넣는 새 scenes 배열(내용은 같아도 다른 객체)이 들어오면
+  //   방금 한 분할·경계 편집이 되돌려지고 dirty=false 로 자동저장 예약까지 취소됐다.
+  //   → 서버엔 분할이 저장되지 않고, 추출·3단계는 안 나뉜 컷을 본다(사용자 보고한 결정적 오류).
+  //   dirty/saving 중이면 서버 스냅샷을 무시하고 내 편집을 지킨다.
   const [lastScenes, setLastScenes] = useState(scenes);
-  if (scenes !== lastScenes) {
+  if (scenes !== lastScenes && !dirty && !saving) {
     setLastScenes(scenes);
     setRegions(scenesToRegions(scenes));
-    setDirty(false);
   }
 
   useLayoutEffect(() => {
@@ -169,7 +198,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
         }
         return next;
       });
-      setDirty(true);
+      markDirty();
     };
     const onUp = () => setDrag(null);
     window.addEventListener("pointermove", onMove);
@@ -181,19 +210,18 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
   }, [drag, scale, minH, canvas.totalHeight]);
 
   // 자동 저장 — 변경(타입·내용·경계) 후 잠시 뒤 자동으로 저장. 드래그 중엔 재예약돼
-  // 손 뗀 900ms 뒤 한 번만 저장. 저장되면 scenes prop 갱신으로 dirty 가 풀린다.
+  // 손 뗀 900ms 뒤 한 번만 저장.
+  // ★deps 에서 regions 를 뺐다. 예전엔 regions·onSave 가 매 렌더 새 값이라 타이머가 렌더마다
+  //   리셋됐고(렌더가 잦으면 영영 저장 안 됨), 저장할 값은 regionsRef 로 항상 최신을 읽는다.
   useEffect(() => {
     if (!dirty || saving) return;
-    const t = setTimeout(() => {
-      setSaving(true);
-      onSave(regions.map((r) => ({ ...r }))).finally(() => setSaving(false));
-    }, 900);
+    const t = setTimeout(doSave, 900);
     return () => clearTimeout(t);
-  }, [regions, dirty, saving, onSave]);
+  }, [dirty, saving, doSave, editTick]);
 
   function deleteRegion(i: number) {
     setRegions((prev) => prev.filter((_, idx) => idx !== i));
-    setDirty(true);
+    markDirty();
   }
 
   // 빈 곳(거터·여백) 더블클릭 → 그 틈을 채우는 새 컷 추가.
@@ -216,7 +244,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
     setRegions((prev) =>
       [...prev, { yStart: lo, yEnd: hi, cut: blankCut() }].sort((a, b) => a.yStart - b.yStart)
     );
-    setDirty(true);
+    markDirty();
   }
 
   // 컷 타입(중심) 확정 — 사람이 드롭다운으로 선택. confirmed=true 로 표시.
@@ -230,7 +258,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
         return { ...r, cut };
       })
     );
-    setDirty(true);
+    markDirty();
   }
 
   function setTextKind(i: number, textKind: TextKind) {
@@ -239,7 +267,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
         idx === i ? { ...r, cut: { ...(r.cut ?? blankCut()), textKind, confirmed: true } } : r
       )
     );
-    setDirty(true);
+    markDirty();
   }
 
   // VLM 이 읽은 컷 내용(묘사·대사 등)을 사람이 편집. 자동 저장됨.
@@ -259,7 +287,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
         return { ...r, cut };
       })
     );
-    setDirty(true);
+    markDirty();
   }
 
   // 말풍선(정답)별 대사 편집 — 풍선 텍스트만 바꾸고 화자/박스/번역/감정은 보존. dialogue(표시용)도 동기화.
@@ -273,7 +301,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
         return { ...r, cut: { ...cur, bubbles, dialogue } };
       })
     );
-    setDirty(true);
+    markDirty();
   }
 
   // 인접 컷과 합병(dir -1=앞, +1=뒤). 합쳐진 컷은 내용이 바뀌므로 미분류로(재확정).
@@ -294,7 +322,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
       next.push(merged);
       return next.sort((x, y) => x.yStart - y.yStart);
     });
-    setDirty(true);
+    markDirty();
   }
 
   // 오른쪽 카드 클릭 → 왼쪽 스트립을 그 컷 위치로 스크롤.
@@ -337,8 +365,10 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
         (s: { yStart: number; yEnd: number; xStart?: number; xEnd?: number }) => ({
           yStart: s.yStart,
           yEnd: s.yEnd,
-          xStart: s.xStart,
-          xEnd: s.xEnd,
+          // ★resplit-local 은 y 만 돌려준다 — x 를 그대로 쓰면 undefined 가 되어 서브컷이
+          //   부모의 좌우 트림을 잃고 전폭으로 벌어진다. 부모 값을 물려받는다.
+          xStart: s.xStart ?? r.xStart,
+          xEnd: s.xEnd ?? r.xEnd,
           cut: {
             ...blankCut(),
             type: parent.type,
@@ -351,14 +381,17 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
         window.alert("나눌 경계를 못 찾았어요");
         return;
       }
-      setRegions((prev) =>
-        prev
-          .filter((_, idx) => idx !== i)
-          .concat(subs)
-          .sort((a, b) => a.yStart - b.yStart)
-      );
+      const next = regions
+        .filter((_, idx) => idx !== i)
+        .concat(subs)
+        .sort((a, b) => a.yStart - b.yStart);
+      setRegions(next);
+      regionsRef.current = next; // 아래 즉시 저장이 최신 값을 쓰도록
       setSelected(null);
-      setDirty(true);
+      markDirty();
+      // ★분할은 '구조 변경'이라 900ms 디바운스를 기다릴 이유가 없다. 기다리는 동안 폴링·
+      //   화면 전환이 끼면 분할이 유실될 여지가 생긴다(실제 사고). 즉시 서버에 못박는다.
+      await doSave();
     } catch {
       window.alert("분할 실패");
     } finally {
@@ -367,12 +400,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
   }
 
   async function save() {
-    setSaving(true);
-    try {
-      await onSave(regions.map((r) => ({ ...r })));
-    } finally {
-      setSaving(false);
-    }
+    await doSave(); // 수동 저장도 같은 경로(편집 일련번호로 dirty 정확히 해제)
   }
 
   // 컷 밖(거터·여백) = 어둡게. 정렬된 region 사이 계산.

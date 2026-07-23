@@ -847,7 +847,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
-  async function saveRegions(regions: SavedRegion[]) {
+  // ★useCallback 필수 — BoundaryEditor 의 자동저장 디바운스가 onSave 를 deps 로 쓴다.
+  //   매 렌더 새 함수면 타이머가 렌더마다 리셋돼 저장이 밀리거나 아예 안 된다.
+  const saveRegions = useCallback(async (regions: SavedRegion[]) => {
     const r = await fetch("/api/boundaries", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -856,7 +858,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     const d = await r.json();
     if (!d.ok) throw new Error(d.error ?? "저장 실패");
     setProject((prev) => ({ ...prev, scenes: d.scenes }));
-  }
+  }, [project.id]);
 
   // 재생성 요청 컷을 '생성 중'으로 표시(값=요청 시 옛 이미지 url → 새 url 로 바뀌면 해제).
   function markRegenPending(ids?: string[]): string[] {
