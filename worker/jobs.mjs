@@ -836,7 +836,7 @@ export async function runSequence(projectId, payload) {
 }
 
 // ── extract: G1 확정된 경계로 컷 이미지 추출 → Blob → Scene.originalImage ─────
-export async function runExtract(projectId) {
+export async function runExtract(projectId, payload) {
   const log = async (m) => {
     console.error("[extract]", m);
     await logProgress(projectId, m);
@@ -848,6 +848,14 @@ export async function runExtract(projectId) {
   const files = sortedFiles(p);
   const scenes = (p.scenes ?? []).slice().sort((a, b) => a.order - b.order);
   if (scenes.length === 0) throw new Error("추출할 컷이 없어요");
+  // ★섹션(시퀀스) 단위 작업 — payload.sceneIds 가 오면 그 컷들만 처리한다.
+  //   회분 전체를 한 잡에 몰아 넣으면 12분 잡 캡을 넘기고 메모리도 겹쳐 터진다.
+  //   내레이션 밴드 재예약(addGapTextRegions)은 경계 계산이라 전체 기준으로 그대로 두고,
+  //   무거운 작업(추출·업로드·OCR·연출·교정·번역)만 선택 범위로 좁힌다.
+  const selIds = Array.isArray(payload?.sceneIds) && payload.sceneIds.length ? new Set(payload.sceneIds) : null;
+  const work = selIds ? scenes.filter((s) => selIds.has(s.id)) : scenes;
+  if (work.length === 0) throw new Error("선택한 섹션에 컷이 없어요");
+  if (selIds) await log(`섹션 작업: 컷 ${work.length}개만 처리(회분 전체 ${scenes.length}개)`);
 
   await log(`소스 ${files.length}개 다운로드…`);
   const buffers = [];
@@ -876,8 +884,8 @@ export async function runExtract(projectId) {
   }
 
   // ★ 증분: 이미 추출된 컷(originalImage 있음 = 경계 안 바뀜)은 건너뛴다. 새/바뀐 컷만.
-  const todo = scenes.filter((s) => !s.originalImage);
-  await log(`추출 대상 ${todo.length}컷 (전체 ${scenes.length}, 기존 유지 ${scenes.length - todo.length})`);
+  const todo = work.filter((s) => !s.originalImage);
+  await log(`추출 대상 ${todo.length}컷 (범위 ${work.length}, 기존 유지 ${work.length - todo.length})`);
   for (const s of scenes) if (s.originalImage) s.status = "approved";
 
   // ★ 메모리: 추출 PNG 를 전부 들고 있지 않는다(예전 pngById 41장 누적 → raw 캔버스+소스와
@@ -909,7 +917,7 @@ export async function runExtract(projectId) {
   // 글씨 읽기(OCR) — ★ 증분 아님. 이미지 있는 '모든' 컷을 매번 다시 읽는다(예전엔 새 컷만
   // 읽어서, 재추출해도 옛 컷 대사가 안 갱신됐음). 메모리 위해 그 영역만 다시 추출해서 읽음.
   const key = process.env.OPENAI_API_KEY;
-  const ocrTodo = scenes.filter((s) => s.originalImage);
+  const ocrTodo = work.filter((s) => s.originalImage);
   if (key && ocrTodo.length > 0) {
     const OCR_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
     const C = Number(process.env.OCR_CONCURRENCY || 2); // 업스케일 이미지가 커서 동시성 낮게
@@ -1045,7 +1053,7 @@ export async function runExtract(projectId) {
   // ★OCR 교정(보수적) — 추출 단계에서도 오독·고유명사 불일치를 전체 문맥으로 잡는다(단계마다 검출).
   //   기존 프로젝트도 추출 재실행 때 교정됨. bubble.text 교정 → cut.dialogue 재구성 후 번역.
   try {
-    const { fixed, cost } = await proofreadScenes(scenes);
+    const { fixed, cost } = await proofreadScenes(work);
     if (fixed > 0) {
       for (const s of scenes)
         if (s.cut?.bubbles?.length)
@@ -1057,7 +1065,7 @@ export async function runExtract(projectId) {
   }
   // ★번역(Claude) — 추출된 말풍선 대사 전부 한국어로. 이후 모든 단계(캐스팅·편집기·미리보기)에 '역:' 표시.
   try {
-    const { translated, cost } = await translateScenes(scenes);
+    const { translated, cost } = await translateScenes(work);
     await log(`대사 번역(Claude) ${translated}줄 채움(~$${cost.toFixed(4)})`);
     if (!translated && !process.env.ANTHROPIC_API_KEY) await log("⚠ ANTHROPIC_API_KEY 없음 — 번역 스킵됨(워커 env 확인)");
   } catch (e) {
@@ -1068,7 +1076,7 @@ export async function runExtract(projectId) {
     const proj = await getProject(projectId);
     const langs = Array.isArray(proj?.targetLanguages) ? proj.targetLanguages : [];
     if (langs.length) {
-      const { translated: mt, cost: mc } = await translateScenesMultilang(scenes, langs);
+      const { translated: mt, cost: mc } = await translateScenesMultilang(work, langs);
       await log(`다국어 번역(${langs.join("·")}) ${mt}줄 tracks 채움(~$${mc.toFixed(4)})`);
     }
   } catch (e) {
@@ -1076,7 +1084,11 @@ export async function runExtract(projectId) {
   }
   const p2 = await getProject(projectId);
   if (!p2) throw new Error("프로젝트가 사라졌어요");
-  p2.scenes = scenes;
+  // ★저장 규약 — 통째 덮지 않고 '이번에 처리한 컷'만 머지한다.
+  //   섹션을 순차로 돌리면 앞 섹션에서 생성한 영상·더빙 결과가 이 잡 시작 시점 스냅샷으로
+  //   되돌아갈 수 있다(긴 잡 + 통째 저장 = 과거 사고 패턴).
+  const doneById = new Map(work.map((s) => [s.id, s]));
+  p2.scenes = (p2.scenes ?? []).map((fresh) => doneById.get(fresh.id) ?? fresh);
   p2.steps.source = {
     ...p2.steps.source,
     kind: "source",

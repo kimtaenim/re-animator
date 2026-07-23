@@ -2351,10 +2351,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setBusy(true);
     setError("");
     try {
+      // ★섹션이 선택돼 있으면 그 섹션만 추출한다 — 회분 전체를 한 번에 돌리면 워커가
+      //   12분 잡 캡을 넘기고 메모리도 겹쳐 터진다(사용자: 시퀀스별로 편집하게 해달라).
+      const secIds = sec ? orderedScenes.filter((s) => sec.ids.has(s.id)).map((s) => s.id) : null;
       const r = await fetch("/api/boundaries", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id }),
+        body: JSON.stringify({ projectId: project.id, ...(secIds ? { sceneIds: secIds } : {}) }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "확정 실패");
@@ -2646,8 +2649,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         })}
       </nav>
 
-      {/* 📚 섹션 바 — 한 회분을 나눠 부분부분 작업(3·4·카메라 단계). 목록·일괄작업이 선택 섹션만 대상. */}
-      {(activeStep === "regen" || activeStep === "scene" || activeStep === "camera") && approved && orderedScenes.length > 1 && (
+      {/* 📚 섹션 바 — ★기본 인터페이스. 한 회분을 섹션으로 나눠 부분부분 작업하는 게 이 툴의
+             기본 작업 방식이므로, 특정 단계의 보조 도구로 숨기지 않는다(사용자 지시).
+             컷이 생긴 뒤로는 모든 단계에서 항상 보이고, 선택한 섹션이 그 단계의 목록·일괄작업
+             대상을 좁힌다(3·4·카메라·합성). 승인 전에도 보인다 — 나누는 건 승인과 무관. */}
+      {orderedScenes.length > 1 && (
         <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--accent)] bg-[var(--panel)] px-2.5 py-2 text-[11px] shadow-sm">
           <span className="text-xs font-semibold text-[var(--accent)]">📚 섹션 (부분 작업)</span>
           {sections.length === 0 ? (
@@ -2689,7 +2695,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </span>
             </>
           )}
-          {sec && <span className="w-full text-[10px] text-[var(--accent)]">▶ ‘섹션 {sec.i + 1}’ 작업 중 — 아래 목록·일괄 작업이 이 섹션(컷 {sec.start + 1}–{sec.end})만 대상입니다.</span>}
+          {sec &&
+            (activeStep === "source" || activeStep === "cast" ? (
+              // ★1단계(G1)는 섹션으로 거르지 않는다 — /api/boundaries PUT 은 보낸 regions 로
+              //   씬을 통째 재구성하므로, 걸러진 목록을 저장하면 나머지 컷이 삭제된다(데이터 소실).
+              //   캐스팅도 회분 전체를 봐야 인물이 제대로 묶인다. 그래서 안내만 한다.
+              <span className="w-full text-[10px] text-[var(--muted)]">
+                ▶ ‘섹션 {sec.i + 1}’ 선택됨(컷 {sec.start + 1}–{sec.end}) — 이 단계는 회분 전체를 다룹니다.
+                섹션 범위는 3단계(재생성)부터 목록·일괄 작업에 적용됩니다.
+              </span>
+            ) : (
+              <span className="w-full text-[10px] text-[var(--accent)]">
+                ▶ ‘섹션 {sec.i + 1}’ 작업 중 — 아래 목록·일괄 작업이 이 섹션(컷 {sec.start + 1}–{sec.end})만 대상입니다.
+              </span>
+            ))}
         </div>
       )}
 
@@ -2960,7 +2979,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               disabled={busy || running}
               className="rounded-md bg-[var(--ok)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
-              경계 확정 · 컷 추출
+              {sec ? `경계 확정 · 섹션 ${sec.i + 1} 추출` : "경계 확정 · 컷 추출"}
             </button>
           </div>
           {/* 🌐 대상 언어 — 추출이 번역을 채우므로 '추출 버튼 바로 옆'이 켜야 할 자리다. */}

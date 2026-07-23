@@ -146,7 +146,7 @@ export async function PUT(req: NextRequest) {
 
 // POST — G1 확정. 경계로 컷 이미지 추출 잡을 워커에 적재.
 export async function POST(req: NextRequest) {
-  let body: { projectId?: string };
+  let body: { projectId?: string; sceneIds?: string[] };
   try {
     body = await req.json();
   } catch {
@@ -164,12 +164,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "확정할 컷이 없어요" }, { status: 409 });
   }
 
+  // ★섹션(시퀀스) 단위 추출 — 회분 전체를 한 잡에 몰면 12분 캡을 넘기고 메모리도 겹쳐 터진다.
+  //   선택 섹션의 컷 id 만 넘기면 워커가 그 범위만 추출·OCR·연출·번역한다.
+  const ids = Array.isArray(body.sceneIds)
+    ? body.sceneIds.filter((x): x is string => typeof x === "string" && project.scenes.some((s) => s.id === x))
+    : [];
+
   const now = Date.now();
   const job: Job = {
     id: randomUUID(),
     type: "extract",
     projectId,
-    payload: {},
+    payload: ids.length ? { sceneIds: ids } : {},
     status: "queued",
     createdAt: now,
     updatedAt: now,
