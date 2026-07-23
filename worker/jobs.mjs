@@ -376,6 +376,21 @@ async function ffprobePath() {
 
 // mp4 버퍼에서 오디오 트랙 제거(그록 I2V가 자동으로 넣는 소리 삭제). 실패하면 null → 원본 사용.
 // 재인코딩 없이 -c copy -an 이라 빠르다.
+// ── ffmpeg 직렬 게이트 ────────────────────────────────────────────────────────
+// 워커는 메모리가 빡빡하고(Render), ffmpeg 는 컨테이너 메모리를 프로세스째 먹는다.
+// 네트워크 대기(영상 생성 API, 컷당 수 분)는 병렬로 겹쳐야 빠르지만, 인코딩까지 같이
+// 병렬로 돌면 [입력 버퍼 + 출력 버퍼 + ffmpeg 프로세스] 가 동시성만큼 겹쳐 OOM 난다.
+// → 인코딩 구간만 한 줄로 세운다. 실패해도 큐가 막히지 않게 catch 로 체인을 잇는다.
+let _ffmpegGate = Promise.resolve();
+function withFfmpeg(fn) {
+  const run = _ffmpegGate.then(fn, fn);
+  _ffmpegGate = run.then(
+    () => {},
+    () => {}
+  );
+  return run;
+}
+
 async function stripAudio(buf) {
   let dir;
   try {
@@ -1824,15 +1839,22 @@ export async function runVideo(projectId, payload) {
               );
             } else throw e;
           }
-          const raw = await download(videoUrl);
+          let raw = await download(videoUrl);
           // ★지정 비율로 채워-크롭 + 오디오 제거. Grok 이 1:1 입력을 가로형으로 내도 여기서 프로젝트 비율로 바로잡음.
           //   실패 시 오디오만 제거(stripAudio), 그것도 실패면 원본.
-          const buf = (await conformVideo(raw, p)) ?? (await stripAudio(raw)) ?? raw;
+          // ★★ffmpeg 구간은 직렬(withFfmpeg) — 영상 생성(네트워크, 컷당 수 분)은 3개 병렬로 두되,
+          //   인코딩은 한 번에 하나만. 예전엔 3벌이 동시에 돌아 [원본 버퍼 + 결과 버퍼 + ffmpeg
+          //   프로세스] × 3 이 겹쳐 Render 워커가 메모리 초과 재시작했다(사용자 보고).
+          //   Render 는 컨테이너 전체를 재므로 ffmpeg 프로세스 메모리도 같이 계산된다.
+          let buf = await withFfmpeg(async () => (await conformVideo(raw, p)) ?? (await stripAudio(raw)) ?? raw);
+          if (buf !== raw) raw = null; // 인코딩됐으면 원본 버퍼는 즉시 반납(피크 절반)
           const { url } = await put(
             `project/${projectId}/vid-${s.order}-${Date.now()}.mp4`,
             buf,
             { access: "public", contentType: "video/mp4", addRandomSuffix: false }
           );
+          buf = null; // 업로드 끝나면 결과 버퍼도 반납
+
           byId.set(s.id, { url });
           costTotal += (engine === "kling" ? KLING_VIDEO_COST : GROK_VIDEO_COST) * dur; // 엔진별 초당 단가 × 길이
           ok++;
