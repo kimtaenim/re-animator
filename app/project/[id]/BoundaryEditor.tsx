@@ -26,6 +26,7 @@ interface Props {
   canvas: VirtualCanvas;
   scenes: Scene[];
   projectId: string;
+  targetLanguages?: string[]; // 🌐 대상 언어 — 켜져 있으면 말풍선 아래 ja/en 번역도 표시
   onSave: (regions: SavedRegion[]) => Promise<void>;
 }
 
@@ -111,7 +112,7 @@ function CutThumb({
   );
 }
 
-export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId, onSave }: Props) {
+export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId, targetLanguages, onSave }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const leftScrollRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
@@ -647,6 +648,19 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                             {(b.translation || "").trim() && (
                               <div className="text-[11px] leading-snug text-[var(--accent)]">{b.translation}</div>
                             )}
+                            {/* 대상 언어(ja/en) 번역 — 추출 잡에서 이미 채워지는 값이라 1단계에서
+                                바로 확인할 수 있어야 한다. 예전엔 3단계 이후에만 보여서 "번역이
+                                4단계 가서야 되냐"는 오해가 생겼다. 수정은 3단계 이후 편집기에서. */}
+                            {(targetLanguages ?? []).map((lang) => {
+                              const t = (b.tracks?.[lang]?.text ?? "").trim();
+                              if (!t) return null;
+                              return (
+                                <div key={lang} className="flex gap-1 text-[11px] leading-snug text-[var(--muted)]">
+                                  <span className="shrink-0 text-[9px] uppercase opacity-70">{lang}</span>
+                                  <span>{t}</span>
+                                </div>
+                              );
+                            })}
                           </div>
                         ))
                       ) : (

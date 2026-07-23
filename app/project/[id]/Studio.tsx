@@ -2939,6 +2939,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             canvas={canvas}
             scenes={project.scenes}
             projectId={project.id}
+            targetLanguages={project.targetLanguages}
             onSave={saveRegions}
           />
         </section>
