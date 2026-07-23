@@ -1460,6 +1460,14 @@ export async function runRegen(projectId, payload) {
                   if (refUrl) {
                     try {
                       refBufs.push(await download(refUrl));
+                      // ★진단: "엉뚱한 컷 그림으로 다시 그린다"의 유력 경로. 실사 초상(realImage)이
+                      //   없으면 대표 컷의 '패널 전체'가 레퍼런스로 들어간다 — 얼굴만이 아니라
+                      //   그 컷의 구도·내용까지 모델에 보이므로, 결과가 그 컷을 닮을 수 있다.
+                      await log(
+                        `[진단] 컷 ${s.order + 1} 참고이미지 ← ${c.name ?? c.id}: ${
+                          c.realImage ? "실사초상" : "대표컷 패널전체"
+                        } ${String(refUrl).split("/").pop()}`
+                      );
                     } catch {}
                   }
                 }

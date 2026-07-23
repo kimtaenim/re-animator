@@ -1609,6 +1609,35 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       body: JSON.stringify({ targetLanguages: next }),
     }).catch(() => {});
   }
+  // 🌐 대상 언어 토글 — ★1단계와 4단계 양쪽에서 같은 컨트롤을 쓴다.
+  //   다국어 번역은 '추출'(1단계 후반)에서 채워지는데, 예전엔 이 토글이 4단계 안에만 있었고
+  //   그나마 재생성 이미지가 하나라도 있어야 보였다 → 효과가 나는 시점보다 한참 뒤에야 켤 수
+  //   있어서 "일본어·영어 어디 갔냐"가 됐다. 켜야 할 시점(추출 전)에 보이게 1단계에도 둔다.
+  function targetLangToggles() {
+    return (
+      <div
+        className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]"
+        title="선택한 언어로 대사를 번역해 언어별 버전 출력에 사용(스펙 §10). ★추출 때 채워지므로 추출 전에 켜세요(이미 추출한 프로젝트는 재추출하면 반영)."
+      >
+        <span className="text-[var(--muted)]">🌐 대상 언어</span>
+        {LANGUAGES.map((l) => {
+          const on = (project.targetLanguages ?? []).includes(l.id);
+          return (
+            <button
+              key={l.id}
+              type="button"
+              onClick={() => toggleTargetLanguage(l.id)}
+              className={`rounded border px-1.5 py-0.5 ${on ? "border-[var(--accent)] font-medium text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--panel-2)]"}`}
+            >
+              {on ? "✓ " : ""}{l.label}
+            </button>
+          );
+        })}
+        <span className="text-[var(--muted)]">· 한국어는 항상 병기 · 추출 전에 켜야 반영</span>
+      </div>
+    );
+  }
+
   // 이 컷의 '자동 조립 프롬프트' 초안(영문) — 프롬프트 직접 편집 시작점. 워커 buildVideoPrompt 와 같은 취지.
   function composeVideoPromptDraft(s: Project["scenes"][number]): string {
     const cut = s.cut;
@@ -2850,6 +2879,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               경계 확정 · 컷 추출
             </button>
           </div>
+          {/* 🌐 대상 언어 — 추출이 번역을 채우므로 '추출 버튼 바로 옆'이 켜야 할 자리다. */}
+          <div className="mb-3 rounded border border-[var(--border)] bg-[var(--panel)] px-2 py-1">
+            {targetLangToggles()}
+          </div>
           <BoundaryEditor
             sourceFiles={project.sourceFiles}
             canvas={canvas}
@@ -3378,24 +3411,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               placeholder="예: 비극. 주인공은 칼에 찔려 죽어가는 중 — 밝거나 활기찬 동작·미소 금지. 시종 어둡고 무거운 톤."
               className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-xs"
             />
-            {/* 🌐 번역·출력 대상 언어(§10) — 켜면 이후 컷 추출 때 원어→언어별 tracks 채움. 한국어(역:)는 항상 병기. */}
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]" title="선택한 언어로 대사를 번역해 언어별 버전 출력에 사용(스펙 §10). 지금은 번역·데이터 채움까지 — 언어별 TTS·자막·합성은 후속.">
-              <span className="text-[var(--muted)]">🌐 대상 언어</span>
-              {LANGUAGES.map((l) => {
-                const on = (project.targetLanguages ?? []).includes(l.id);
-                return (
-                  <button
-                    key={l.id}
-                    type="button"
-                    onClick={() => toggleTargetLanguage(l.id)}
-                    className={`rounded border px-1.5 py-0.5 ${on ? "border-[var(--accent)] font-medium text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--panel-2)]"}`}
-                  >
-                    {on ? "✓ " : ""}{l.label}
-                  </button>
-                );
-              })}
-              <span className="text-[var(--muted)]">· 한국어는 항상 병기</span>
-            </div>
+            {targetLangToggles()}
             {/* 🗣 작업 언어(§10) — 화면 대사·더빙·자막이 이 언어로 나감. 원어 또는 켠 대상 언어 중 선택. */}
             {(project.targetLanguages?.length ?? 0) > 0 && (
               <div
