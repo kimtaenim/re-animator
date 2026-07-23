@@ -89,9 +89,22 @@ const PROMPT =
   "boxes = 마스크용 — 모든 글자(말풍선·자막·효과음)가 차지한 영역들을 0~1 박스로. 글자 없으면 빈 배열. " +
   "오직 JSON.";
 
+// ★OCR 이미지 준비(sharp 디코딩·리사이즈·인코딩 — 무겁다) 를 네트워크 호출과 분리해 내보낸다.
+//   호출측이 '준비는 순차 / 호출만 병렬' 로 돌릴 수 있게 하기 위함. 준비를 호출 안에 두면
+//   호출을 N개 병렬로 돌리는 순간 sharp 파이프라인도 N개가 동시에 떠서 워커가 OOM 난다
+//   (실제 사고: NET=8 로 올린 뒤 Render 메모리 초과 재시작).
+export async function prepareOcrImage(pngBuf) {
+  return upscaleForOcr(pngBuf);
+}
+
 // pngBuf(풀해상도 컷) → { dialogue, sfx, boxes, cost }. 실패 시 throw.
 export async function readCutText(pngBuf, key, model = "gpt-4o") {
-  const img = await upscaleForOcr(pngBuf);
+  const img = await prepareOcrImage(pngBuf);
+  return readCutTextPrepared(img, key, model);
+}
+
+// 준비된(업스케일 완료) 이미지로 네트워크 호출만 수행 — sharp 를 전혀 쓰지 않는다.
+export async function readCutTextPrepared(img, key, model = "gpt-4o") {
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },

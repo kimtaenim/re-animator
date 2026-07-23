@@ -35,7 +35,7 @@ import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { klingVideoFromImage, KLING_VIDEO_COST } from "./kling.mjs";
 import { renderCameraFx } from "./cameraRender.mjs";
-import { readCutText, readCutTextTiled } from "./ocr.mjs";
+import { readCutText, readCutTextTiled, prepareOcrImage, readCutTextPrepared } from "./ocr.mjs";
 import { translateScenes, proofreadScenes, translateScenesMultilang } from "./translate.mjs";
 import { groupIntoSequences } from "./sequence.mjs";
 import { synthesize, synthSfx } from "./tts.mjs";
@@ -598,39 +598,54 @@ export async function runSplit(projectId) {
   if (key) {
     const ocrTodo = scenes.filter((s) => s.sourceRegion);
     await log(`대사 읽기(풀해상도) ${ocrTodo.length}컷…`);
-    // ★속도·메모리 분리(사용자 지적: 인스턴스를 키워도 속도는 그대로다) —
-    //   예전엔 '이미지 준비(extractRegion=full-res 디코딩·메모리 무거움)'와 'VLM 호출(네트워크·메모리 쌈)'이
-    //   한 태스크에 묶여 있어, 메모리 때문에 동시성을 3으로 눌러야 했고 그만큼 네트워크 대기가 직렬화됐다.
-    //   → 준비는 '순차'(한 번에 디코딩 1개, 스파이크 없음), 호출만 '병렬'(NET개 동시)로 분리한다.
-    //     동시 디코딩이 3→1로 줄어 메모리는 오히려 감소하고, 대기시간은 겹쳐서 크게 단축된다.
-    const NET = Number(process.env.SPLIT_OCR_NET_CONCURRENCY || 8); // 동시 VLM 호출 수(네트워크)
+    // ★속도·메모리 분리 — 준비는 '순차'(한 번에 디코딩 1개), 호출만 '병렬'로 겹쳐 대기시간을 줄인다.
+    // ★★그런데 7a69579 에서 개수 캡(NET=8)만 두었다가 Render 워커 OOM 재발.
+    //   착오: 동시 '디코딩'은 3→1로 줄었지만, VLM 응답을 기다리는 동안 동시에 '붙들고 있는' 풀해상도
+    //   PNG 는 3→8로 늘었다. 디코딩은 순간이고 OOM 을 내는 건 보유량이다.
+    //   → 개수가 아니라 **바이트 예산**으로 상한한다. 컷 크기는 작품마다 10배씩 달라서 "N개"라는
+    //     캡은 애초에 메모리를 상한하지 못한다(작은 컷이면 8개도 여유, 큰 컷이면 3개도 초과).
+    //     보유 바이트가 예산을 넘으면 준비 루프가 스스로 멈춰 기다린다 → 작품 크기와 무관하게 상한.
+    const NET = Number(process.env.SPLIT_OCR_NET_CONCURRENCY || 4); // 동시 VLM 호출 수(상한, 보조)
+    const MEM_BUDGET = Number(process.env.SPLIT_OCR_MEM_MB || 48) * 1024 * 1024; // 동시 보유 이미지 총량
     const inflight = new Set();
+    let heldBytes = 0; // 현재 in-flight 태스크들이 붙들고 있는 이미지 바이트 합
     let done = 0;
     for (const s of ocrTodo) {
       if (!previewBudgetLeft()) {
         await log(`시간 예산 초과 — 남은 대사 읽기는 추출 단계에서(경계는 저장됨)`);
         break;
       }
+      // 0) 대기 — 이미 붙들고 있는 이미지가 예산을 넘으면, 새로 만들지 않고 먼저 비운다.
+      //    ★준비 '전에' 막아야 한다. 준비 후에 막으면 예산 초과분이 이미 할당된 뒤다(OOM 재발 지점).
+      while (inflight.size >= NET || heldBytes >= MEM_BUDGET) await Promise.race(inflight);
       // 1) 준비 — 이 컷 + 예약 내레이션 밴드 이미지를 순차 추출(디코딩 동시 실행 없음).
       let png = null;
       const bands = [];
       try {
-        png = await extractRegion(canvas, buffers, s.sourceRegion.yStart, s.sourceRegion.yEnd, s.sourceRegion.xStart, s.sourceRegion.xEnd);
+        // ★업스케일(prepareOcrImage)까지 여기서 끝낸다 — 아래 병렬 호출 안에 sharp 가 남아 있으면
+        //   호출 N개 병렬 = sharp N개 병렬이 되어 OOM(실제 사고). 병렬 구간은 네트워크 전용이어야 한다.
+        png = await prepareOcrImage(
+          await extractRegion(canvas, buffers, s.sourceRegion.yStart, s.sourceRegion.yEnd, s.sourceRegion.xStart, s.sourceRegion.xEnd)
+        );
         const trs = (s.cut?.textRegions ?? []).slice().sort((a, b) => a.yStart - b.yStart);
         for (const tr of trs) {
           try {
-            bands.push({ tr, png: await extractRegion(canvas, buffers, tr.yStart, tr.yEnd, tr.xStart, tr.xEnd) });
+            bands.push({
+              tr,
+              png: await prepareOcrImage(await extractRegion(canvas, buffers, tr.yStart, tr.yEnd, tr.xStart, tr.xEnd)),
+            });
           } catch {}
         }
       } catch {
         continue; // 준비 실패한 컷은 건너뜀(추출 2단계가 다시 읽음)
       }
-      // 2) 호출 — 준비된 이미지로 VLM 병렬 실행. in-flight 상한이 준비 루프도 자동 스로틀(메모리 상한).
-      while (inflight.size >= NET) await Promise.race(inflight);
+      // 2) 호출 — 준비된 이미지로 VLM 병렬 실행. 보유 바이트를 계상하고, 끝나면 반드시 반납한다.
+      const heldNow = png.length + bands.reduce((n, b) => n + b.png.length, 0);
+      heldBytes += heldNow;
       let p;
       p = (async () => {
         try {
-          const own = await readCutText(png, key, VLM_MODEL);
+          const own = await readCutTextPrepared(png, key, VLM_MODEL);
           if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
           // 내레이션 밴드(컷 위/아래)도 읽어 순서 보존해 합친다 — 위 밴드는 앞, 아래 밴드는 뒤.
           const above = [];
@@ -638,7 +653,7 @@ export async function runSplit(projectId) {
           let sfx = own.sfx || "";
           for (const b of bands) {
             try {
-              const t = await readCutText(b.png, key, VLM_MODEL);
+              const t = await readCutTextPrepared(b.png, key, VLM_MODEL);
               if (t.bubbles?.length) (b.tr.yStart < s.sourceRegion.yStart ? above : below).push(...t.bubbles);
               if (t.sfx) sfx = sfx ? `${sfx} ${t.sfx}` : t.sfx;
             } catch {}
@@ -656,7 +671,12 @@ export async function runSplit(projectId) {
         } catch {}
       })()
         .catch(() => {})
-        .finally(() => inflight.delete(p));
+        .finally(() => {
+          heldBytes -= heldNow; // 반납(성공·실패 무관) — 안 하면 예산이 새서 루프가 영구 정지
+          png = null;
+          bands.length = 0; // 참조 끊어 GC 가 즉시 회수하게(클로저가 붙들지 않도록)
+          inflight.delete(p);
+        });
       inflight.add(p);
       done++;
       if (done % 5 === 0 || done === ocrTodo.length) {

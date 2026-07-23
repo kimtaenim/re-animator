@@ -106,7 +106,10 @@ export async function trimBox(png) {
 // 단일 할당 → OOM). 대신 파일별 raw(refWidth 정규화)를 작은 LRU 캐시(기본 3장)에만 두고,
 // 컷 추출은 그 컷이 걸치는 파일만 디코드해서 잘라낸다 → 파일 수와 무관하게 메모리 상한.
 const _fileRawCache = new WeakMap(); // fileBuffers → Map<idx, {data,width,height}> (LRU)
-const RAW_CACHE_MAX = Number(process.env.RAW_FILE_CACHE || 3);
+// ★기본 2 — 파일당 raw(refWidth×height×3)는 수십 MB 라 3장이면 상주 메모리가 크다(OOM 기여).
+//   1 로 내리면 파일 경계를 걸친 컷마다 두 파일을 번갈아 evict/재디코드해 thrash 가 나므로,
+//   '경계를 걸친 컷 하나를 thrash 없이 처리하는 최소값'인 2 가 하한이다.
+const RAW_CACHE_MAX = Number(process.env.RAW_FILE_CACHE || 2);
 
 async function fileRawAt(canvas, fileBuffers, idx) {
   let cache = _fileRawCache.get(fileBuffers);
