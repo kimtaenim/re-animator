@@ -168,6 +168,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [progress, setProgress] = useState("");
   const [progressLog, setProgressLog] = useState<string[]>([]);
   const [logOpen, setLogOpen] = useState(false); // 📋 작업 로그 상시 패널(단계 무관·스크롤 무관)
+  const [translating, setTranslating] = useState(false); // 🌐 번역만 다시 실행 중
   const [srcOpen, setSrcOpen] = useState<boolean | null>(null); // null=기본(승인되면 접힘)
   const [regenOpen, setRegenOpen] = useState(true); // 3단계 컷 목록 접기
   const [vidPending, setVidPending] = useState<Set<string>>(() => new Set()); // 영상 생성 중인 컷
@@ -1609,6 +1610,43 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       body: JSON.stringify({ targetLanguages: next }),
     }).catch(() => {});
   }
+  // 🌐 번역만 다시 — 재추출 없이 대상 언어 번역을 채운다. 끝나면 프로젝트를 다시 읽어 반영.
+  async function runTranslateJob() {
+    setError("");
+    setTranslating(true);
+    try {
+      const r = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "번역 실패");
+      // 잡 완료까지 폴링(텍스트만이라 보통 수십 초). 로그는 상시 패널에 흐른다.
+      for (;;) {
+        await new Promise((res) => setTimeout(res, 3000));
+        const q = await fetch(`/api/translate?jobId=${d.jobId}&projectId=${project.id}`, { cache: "no-store" });
+        const s = await q.json();
+        if (s.ok) {
+          setProgress(s.progress ?? "");
+          setProgressLog(s.progressLog ?? []);
+          if (s.status === "error") throw new Error(s.error ?? "번역 실패");
+          if (s.status === "done") break;
+        }
+      }
+      // 번역 결과를 화면에 반영 — 씬만 다시 읽어 덮는다(편집 중 다른 필드 보호는 서버가 머지).
+      const pr = await fetch(`/api/project/${project.id}`, { cache: "no-store" });
+      const pd = await pr.json();
+      if (pd?.ok && pd.project?.scenes) {
+        setProject((prev) => ({ ...prev, scenes: pd.project.scenes }));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "번역 실패");
+    } finally {
+      setTranslating(false);
+    }
+  }
+
   // 🌐 대상 언어 토글 — ★1단계와 4단계 양쪽에서 같은 컨트롤을 쓴다.
   //   다국어 번역은 '추출'(1단계 후반)에서 채워지는데, 예전엔 이 토글이 4단계 안에만 있었고
   //   그나마 재생성 이미지가 하나라도 있어야 보였다 → 효과가 나는 시점보다 한참 뒤에야 켤 수
@@ -1633,7 +1671,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             </button>
           );
         })}
-        <span className="text-[var(--muted)]">· 한국어는 항상 병기 · 추출 전에 켜야 반영</span>
+        <span className="text-[var(--muted)]">· 한국어는 항상 병기</span>
+        {/* ★이미 추출을 끝낸 프로젝트를 위한 길 — 예전엔 다국어 번역이 '추출' 안에서만 돌아서,
+            켜도 tracks 가 영영 비어 있고 채우려면 전 컷 재추출(재OCR·재업로드)뿐이었다. */}
+        {(project.targetLanguages?.length ?? 0) > 0 && (
+          <button
+            type="button"
+            onClick={runTranslateJob}
+            disabled={translating}
+            className="rounded border border-[var(--accent)] px-2 py-0.5 text-[var(--accent)] hover:bg-[var(--panel-2)] disabled:opacity-50"
+            title="지금 있는 대사를 선택한 언어로 번역해 채웁니다. 텍스트만 다루므로 빠르고 쌉니다(재추출 불필요)."
+          >
+            {translating ? "번역 중…" : "🌐 지금 번역 채우기"}
+          </button>
+        )}
       </div>
     );
   }

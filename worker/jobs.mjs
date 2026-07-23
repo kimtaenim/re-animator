@@ -749,6 +749,62 @@ export async function runSplit(projectId) {
   return scenes.length;
 }
 
+// ── translate: 대상 언어 번역만 다시 돌린다(재추출 없이) ──────────────────────
+//    ★왜 필요한가: 다국어 번역은 지금까지 runExtract 안에서만 돌았다. 그래서 이미 추출을
+//    끝낸 프로젝트에서 🌐 대상 언어를 켜도 tracks 가 영원히 비어 있고, 채우려면 전 컷을
+//    재추출(재OCR·재업로드, 비싸고 느림)해야 했다 — 사용자: "일본어는 여전히 안 보인다".
+//    이 잡은 텍스트만 다룬다(이미지·OCR·업로드 없음) → 싸고 빠르고 메모리도 안 쓴다.
+export async function runTranslate(projectId) {
+  await resetProgress(projectId);
+  const log = async (m) => {
+    console.error("[translate]", m);
+    await logProgress(projectId, m);
+  };
+  const p = await getProject(projectId);
+  if (!p) throw new Error("프로젝트를 찾을 수 없어요");
+  const scenes = (p.scenes ?? []).slice().sort((a, b) => a.order - b.order);
+  if (!scenes.length) throw new Error("번역할 컷이 없어요(분할·추출 먼저)");
+  if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY 없음 — Render 워커 환경변수에 넣어주세요");
+
+  // 1) 한국어(역:) — 비어 있는 줄만 채운다(기존 동작과 동일한 함수).
+  try {
+    const { translated, cost } = await translateScenes(scenes);
+    await log(`한국어 번역 ${translated}줄(~$${cost.toFixed(4)})`);
+  } catch (e) {
+    await log(`한국어 번역 실패(계속): ${String(e?.message ?? e).slice(0, 120)}`);
+  }
+
+  // 2) 대상 언어(ja/en …) → bubble.tracks[lang].text
+  const langs = Array.isArray(p.targetLanguages) ? p.targetLanguages : [];
+  if (!langs.length) throw new Error("대상 언어가 꺼져 있어요 — 🌐 대상 언어에서 일본어·영어를 켜고 다시 실행하세요");
+  const { translated: mt, cost: mc } = await translateScenesMultilang(scenes, langs);
+  await log(`다국어 번역(${langs.join("·")}) ${mt}줄 tracks 채움(~$${mc.toFixed(4)})`);
+
+  // 저장 규약 — 긴 호출 뒤엔 fresh 재읽기 후 '번역 결과 필드만' 머지.
+  // 통째 저장하면 그 사이 워커/사용자가 쓴 오디오·영상 URL 을 덮는다(과거 사고).
+  const p2 = await getProject(projectId);
+  if (!p2) throw new Error("프로젝트가 사라졌어요");
+  const byId = new Map(scenes.map((s) => [s.id, s.cut]));
+  p2.scenes = (p2.scenes ?? []).map((fresh) => {
+    const cut = byId.get(fresh.id);
+    if (!cut || !fresh.cut) return fresh;
+    // 말풍선은 인덱스+원문 일치할 때만 번역 필드를 얹는다(그 사이 대사가 바뀌었으면 건드리지 않음).
+    const bubbles = (fresh.cut.bubbles ?? []).map((fb, i) => {
+      const nb = (cut.bubbles ?? [])[i];
+      if (!nb || (nb.text ?? "") !== (fb.text ?? "")) return fb;
+      return {
+        ...fb,
+        ...(nb.translation ? { translation: nb.translation } : {}),
+        ...(nb.tracks ? { tracks: { ...(fb.tracks || {}), ...nb.tracks } } : {}),
+      };
+    });
+    return { ...fresh, cut: { ...fresh.cut, bubbles } };
+  });
+  await saveProject(p2);
+  await log(`번역 반영 완료 — G1·씬 목록에서 확인하세요`);
+  return mt;
+}
+
 // ── sequence: 컷들을 서사 시퀀스로 자동 묶기 → project.sectionStarts(섹션 경계) ────
 //    텍스트만 Claude 에 주고 경계를 받는다(저렴·빠름). 결과는 fresh 재읽기 후 필드만 저장(저장 규약).
 export async function runSequence(projectId, payload) {

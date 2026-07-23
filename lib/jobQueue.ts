@@ -22,6 +22,7 @@ export type JobType =
   | "postfx"
   | "camerafx"
   | "sequence"
+  | "translate"
   | "join";
 export type JobStatus = "queued" | "running" | "done" | "error";
 
