@@ -511,6 +511,26 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     };
   }, [running, poll]);
 
+  // ★마운트 시 '직전 작업 로그' 1회 로드 — 작업이 끝난 뒤 새로고침하면 running=false 라
+  //   폴링이 한 번도 안 돌아 로그가 빈 채로 남는다. 진행 로그만 읽고 프로젝트 상태는
+  //   건드리지 않는다(마운트 시 scenes 를 덮어써 편집 상태를 흔드는 사고 방지).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/split?projectId=${project.id}`, { cache: "no-store" });
+        const d = await r.json();
+        if (!alive || !d.ok) return;
+        setProgressLog((prev) => (prev.length ? prev : (d.progressLog ?? [])));
+      } catch {
+        /* 로그는 있으면 좋은 것 — 실패해도 무시 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [project.id]);
+
   // ── 캐스팅(M2) 진행 폴링 ──────────────────────────────────────────────────
   const pollCast = useCallback(async () => {
     try {
@@ -2771,23 +2791,37 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         )}
       </section>
 
-      {/* 진행 표시 */}
-      {running && (
+      {/* 진행 표시 — ★작업이 끝나도 로그를 남긴다. 예전엔 블록 전체가 running 게이트라
+             잡이 끝나는 순간 로그가 통째로 사라졌다(사용자 지적: "다 돈 다음에 로그 목록이 안 보임").
+             단계별 소요·경고·실패 사유는 '끝난 뒤에' 읽어야 쓸모가 있다. */}
+      {(running || progressLog.length > 0) && (
         <div className="mb-6">
-          <p className="flex items-center gap-2 text-sm text-[var(--muted)]">
-            <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-            워커 작업 중… {progress && <span className="opacity-70">{progress}</span>}
-            <button
-              onClick={() => cancelJob("source")}
-              className="ml-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:border-[var(--danger)] hover:text-[var(--danger)]"
-            >
-              작업 중지
-            </button>
-          </p>
-          {progressBar()}
+          {running ? (
+            <p className="flex items-center gap-2 text-sm text-[var(--muted)]">
+              <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+              워커 작업 중… {progress && <span className="opacity-70">{progress}</span>}
+              <button
+                onClick={() => cancelJob("source")}
+                className="ml-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:border-[var(--danger)] hover:text-[var(--danger)]"
+              >
+                작업 중지
+              </button>
+            </p>
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-[var(--muted)]">
+              <span>📋 직전 작업 로그</span>
+              <button
+                onClick={() => setProgressLog([])}
+                className="rounded border border-[var(--border)] px-2 py-0.5 text-xs hover:border-[var(--accent)]"
+              >
+                지우기
+              </button>
+            </p>
+          )}
+          {running && progressBar()}
           {progressLog.length > 0 && (
             <pre className="mt-2 max-h-44 w-full max-w-2xl overflow-y-auto whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] p-2 text-[11px] leading-tight text-[var(--muted)]">
-              {progressLog.slice(-14).join("\n")}
+              {(running ? progressLog.slice(-14) : progressLog).join("\n")}
             </pre>
           )}
         </div>

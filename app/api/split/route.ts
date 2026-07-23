@@ -60,8 +60,10 @@ export async function GET(req: NextRequest) {
   let progress = "";
   let progressLog: string[] = [];
   try {
+    // ★끝난 뒤 '직전 작업 로그'로 읽는 용도라 30줄로는 단계 전환·경고가 잘려 나간다.
+    //   짧은 문자열이라 120줄이어도 응답 부담은 무시할 수준.
     progressLog =
-      (await getRedis().lrange<string>(`split:progress:${projectId}`, -30, -1)) ?? [];
+      (await getRedis().lrange<string>(`split:progress:${projectId}`, -120, -1)) ?? [];
     progress = progressLog[progressLog.length - 1] ?? "";
   } catch {
     /* best-effort */
