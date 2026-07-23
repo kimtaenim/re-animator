@@ -36,6 +36,7 @@ import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { klingVideoFromImage, KLING_VIDEO_COST } from "./kling.mjs";
 import { renderCameraFx } from "./cameraRender.mjs";
 import { readCutText, readCutTextTiled, prepareOcrImage, readCutTextPrepared } from "./ocr.mjs";
+import { detectRefBox, cropToBox } from "./refbox.mjs";
 import { translateScenes, proofreadScenes, translateScenesMultilang } from "./translate.mjs";
 import { groupIntoSequences } from "./sequence.mjs";
 import { synthesize, synthSfx } from "./tts.mjs";
@@ -1337,6 +1338,27 @@ export async function runCast(projectId) {
 // ── regen(M3): 각 컷을 이미지 모델(gpt-image-2 기본 · fal Flux)로 재생성 → 청크 병렬
 //    → Scene.generatedImage ─
 // payload.sceneIds 주면 그 컷들만(컷 하나씩 테스트/다시생성). 청크마다 저장 → 진행 표시.
+// 캐릭터의 refBox(대표 컷 안의 인물 영역)를 얻는다 — 캐시 우선, 없으면 VLM 1회 후 저장.
+// 저장은 프로젝트 저장 규약대로 fresh 재읽기 + 그 필드만 머지(긴 생성 호출 뒤 통째 저장 금지).
+async function refBoxFor(c, refBuf, key, model, projectId, log) {
+  if (c.refBox) return c.refBox;
+  const box = await detectRefBox(refBuf, c.description, key, model);
+  if (!box) return null;
+  c.refBox = box; // 이번 잡 안에서 재검출 방지
+  try {
+    const pp = await getProject(projectId);
+    if (pp) {
+      const target = (pp.cast ?? []).find((x) => x.id === c.id);
+      if (target && !target.refBox) {
+        target.refBox = box;
+        await saveProject(pp);
+        await log?.(`[진단] ${c.label ?? c.id} 인물 영역 산출·캐시(다음부턴 무료)`);
+      }
+    }
+  } catch {}
+  return box;
+}
+
 export async function runRegen(projectId, payload) {
   await resetProgress(projectId);
   const log = async (m) => {
@@ -1459,14 +1481,23 @@ export async function runRegen(projectId, payload) {
                   }
                   if (refUrl) {
                     try {
-                      refBufs.push(await download(refUrl));
-                      // ★진단: "엉뚱한 컷 그림으로 다시 그린다"의 유력 경로. 실사 초상(realImage)이
-                      //   없으면 대표 컷의 '패널 전체'가 레퍼런스로 들어간다 — 얼굴만이 아니라
-                      //   그 컷의 구도·내용까지 모델에 보이므로, 결과가 그 컷을 닮을 수 있다.
+                      let rb = await download(refUrl);
+                      // ★대표 컷을 통째로 넣으면 그 컷의 구도·내용까지 모델에 흘러들어, 다른 컷을
+                      //   재생성해도 대표 컷(대개 1~2번)을 닮은 그림이 나온다(확정된 사고 원인).
+                      //   실사 초상은 이미 얼굴 위주라 그대로, 대표 컷은 인물 영역만 크롭해 보낸다.
+                      let how = "실사초상";
+                      if (!c.realImage) {
+                        const box = await refBoxFor(c, rb, key, VLM_MODEL, projectId, log);
+                        if (box) {
+                          rb = await cropToBox(rb, box);
+                          how = "대표컷 인물크롭";
+                        } else {
+                          how = "대표컷 전체(크롭 실패)";
+                        }
+                      }
+                      refBufs.push(rb);
                       await log(
-                        `[진단] 컷 ${s.order + 1} 참고이미지 ← ${c.name ?? c.id}: ${
-                          c.realImage ? "실사초상" : "대표컷 패널전체"
-                        } ${String(refUrl).split("/").pop()}`
+                        `[진단] 컷 ${s.order + 1} 참고이미지 ← ${c.label ?? c.id}: ${how} ${String(refUrl).split("/").pop()}`
                       );
                     } catch {}
                   }

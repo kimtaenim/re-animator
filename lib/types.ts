@@ -260,6 +260,10 @@ export interface Character {
   voice?: string; // 더빙 목소리 voice_id(카탈로그 config/voices.json). M4 더빙에 사용.
   voiceProvider?: string; // 목소리 제공사: "eleven" | "typecast". 워커가 API 라우팅에 씀.
   voiceName?: string; // 표시용 목소리 이름(선택). 목록 재조회 없이 라벨 표시.
+  // 대표 컷에서 이 인물이 차지하는 영역(0~1 정규화). 레퍼런스를 '패널 전체'가 아니라 이 영역만
+  // 크롭해 보낸다 — 전체를 보내면 그 컷의 구도·내용까지 모델에 흘러들어 다른 컷을 재생성해도
+  // 대표 컷(대개 1~2번)을 닮은 그림이 나온다(실제 사고). 캐릭터당 VLM 1회로 구해 캐시.
+  refBox?: { left: number; top: number; right: number; bottom: number };
   realImage?: string; // 실사화 인물 초상 Blob URL — 실사화 재생성 시 얼굴 고정 레퍼런스.
   realPrompt?: string; // 실사 초상 디자인용 추가 지시(선택, 자유 텍스트).
   realEthnicity?: string; // 실사 초상 인종(영문 문구, 칩 선택). 프롬프트에 반영.

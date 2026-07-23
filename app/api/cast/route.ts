@@ -111,6 +111,17 @@ export async function PUT(req: NextRequest) {
       voice: typeof r.voice === "string" && r.voice ? r.voice.slice(0, 80) : undefined,
       voiceProvider: typeof r.voiceProvider === "string" ? r.voiceProvider.slice(0, 20) : undefined,
       voiceName: typeof r.voiceName === "string" ? r.voiceName.slice(0, 60) : undefined,
+      // refBox(얼굴 크롭 영역) — 워커가 캐릭터당 1회 구해 캐시한 값. 화이트리스트에서 빠지면
+      // 캐스팅 저장 때마다 지워져 매번 다시 VLM 을 부른다(비용·속도 손해).
+      refBox:
+        r.refBox && typeof r.refBox === "object"
+          ? (() => {
+              const b = r.refBox as Record<string, unknown>;
+              const n = (v: unknown) => Math.max(0, Math.min(1, Number(v)));
+              const box = { left: n(b.left), top: n(b.top), right: n(b.right), bottom: n(b.bottom) };
+              return box.right > box.left && box.bottom > box.top ? box : undefined;
+            })()
+          : undefined,
       realImage: typeof r.realImage === "string" && r.realImage ? r.realImage : undefined,
       realPrompt: typeof r.realPrompt === "string" ? r.realPrompt.slice(0, 400) : undefined,
       realEthnicity: typeof r.realEthnicity === "string" ? r.realEthnicity.slice(0, 60) : undefined,
