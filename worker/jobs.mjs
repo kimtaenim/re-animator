@@ -1364,6 +1364,14 @@ export async function runRegen(projectId, payload) {
   }
   await log(`재생성 대상 ${cand.length}컷 · 모델 ${models ? "컷별" : defModel} · 동시 ${REGEN_CONCURRENCY}`);
   if (cand.length === 0) throw new Error("재생성할 컷이 없어요(컷 추출 먼저)");
+  // ★진단: "12번을 시켰는데 1번 그림이 다시 그려진다"는 오배정 보고가 반복된다(사용자).
+  //   앱·워커 모두 scene id 기준이라 코드상 오배정 지점을 못 찾았다. 추측으로 고치지 않고,
+  //   '어떤 컷 번호가 어떤 원본 파일을 입력으로 받았는지'를 남겨 다음 발생 때 확정한다.
+  //   원본 파일명은 cut-<order>-<시각>.png 라, 컷 번호와 파일명의 order 가 어긋나면 그게 증거다.
+  for (const s of cand) {
+    const f = String(s.originalImage ?? "").split("/").pop() ?? "(없음)";
+    await log(`[진단] 컷 ${s.order + 1} (id ${String(s.id).slice(0, 8)}) ← 원본 ${f}`);
+  }
 
   const genById = new Map(); // sceneId → { url } | { error }
   let costTotal = 0;
