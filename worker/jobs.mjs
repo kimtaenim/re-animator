@@ -585,48 +585,72 @@ export async function runSplit(projectId) {
   if (key) {
     const ocrTodo = scenes.filter((s) => s.sourceRegion);
     await log(`대사 읽기(풀해상도) ${ocrTodo.length}컷…`);
-    const C = Number(process.env.SPLIT_OCR_CONCURRENCY || 3); // 업스케일 이미지가 커 동시성 낮게(OOM)
+    // ★속도·메모리 분리(사용자 지적: 인스턴스를 키워도 속도는 그대로다) —
+    //   예전엔 '이미지 준비(extractRegion=full-res 디코딩·메모리 무거움)'와 'VLM 호출(네트워크·메모리 쌈)'이
+    //   한 태스크에 묶여 있어, 메모리 때문에 동시성을 3으로 눌러야 했고 그만큼 네트워크 대기가 직렬화됐다.
+    //   → 준비는 '순차'(한 번에 디코딩 1개, 스파이크 없음), 호출만 '병렬'(NET개 동시)로 분리한다.
+    //     동시 디코딩이 3→1로 줄어 메모리는 오히려 감소하고, 대기시간은 겹쳐서 크게 단축된다.
+    const NET = Number(process.env.SPLIT_OCR_NET_CONCURRENCY || 8); // 동시 VLM 호출 수(네트워크)
+    const inflight = new Set();
     let done = 0;
-    for (let i = 0; i < ocrTodo.length; i += C) {
+    for (const s of ocrTodo) {
       if (!previewBudgetLeft()) {
-        await log(`시간 예산 초과 — 남은 ${ocrTodo.length - i}컷 대사 읽기는 추출 단계에서(경계는 저장됨)`);
+        await log(`시간 예산 초과 — 남은 대사 읽기는 추출 단계에서(경계는 저장됨)`);
         break;
       }
-      await Promise.all(
-        ocrTodo.slice(i, i + C).map(async (s) => {
+      // 1) 준비 — 이 컷 + 예약 내레이션 밴드 이미지를 순차 추출(디코딩 동시 실행 없음).
+      let png = null;
+      const bands = [];
+      try {
+        png = await extractRegion(canvas, buffers, s.sourceRegion.yStart, s.sourceRegion.yEnd, s.sourceRegion.xStart, s.sourceRegion.xEnd);
+        const trs = (s.cut?.textRegions ?? []).slice().sort((a, b) => a.yStart - b.yStart);
+        for (const tr of trs) {
           try {
-            const png = await extractRegion(canvas, buffers, s.sourceRegion.yStart, s.sourceRegion.yEnd, s.sourceRegion.xStart, s.sourceRegion.xEnd);
-            const own = await readCutText(png, key, VLM_MODEL);
-            if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
-            // 내레이션 밴드(컷 위/아래)도 읽어 순서 보존해 합친다 — 위 밴드는 앞, 아래 밴드는 뒤.
-            const above = [];
-            const below = [];
-            let sfx = own.sfx || "";
-            const trs = (s.cut.textRegions ?? []).slice().sort((a, b) => a.yStart - b.yStart);
-            for (const tr of trs) {
-              try {
-                const tpng = await extractRegion(canvas, buffers, tr.yStart, tr.yEnd, tr.xStart, tr.xEnd);
-                const t = await readCutText(tpng, key, VLM_MODEL);
-                if (t.bubbles?.length) (tr.yStart < s.sourceRegion.yStart ? above : below).push(...t.bubbles);
-                if (t.sfx) sfx = sfx ? `${sfx} ${t.sfx}` : t.sfx;
-              } catch {}
-            }
-            const allBubbles = mergeCutBubbles(above, own.bubbles, below).map((b) => ({
-              text: b.text,
-              ...(b.translation ? { translation: b.translation } : {}),
-            }));
-            if (allBubbles.length) {
-              s.cut.bubbles = allBubbles;
-              s.cut.dialogue = allBubbles.map((b) => (b.text || "").trim()).filter(Boolean).join("\n").slice(0, 500);
-            }
-            if (sfx) s.cut.sfx = sfx;
-            s.cut.textBoxes = own.boxes;
+            bands.push({ tr, png: await extractRegion(canvas, buffers, tr.yStart, tr.yEnd, tr.xStart, tr.xEnd) });
           } catch {}
-        })
-      );
-      done = Math.min(i + C, ocrTodo.length);
-      await log(`대사 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%)`);
+        }
+      } catch {
+        continue; // 준비 실패한 컷은 건너뜀(추출 2단계가 다시 읽음)
+      }
+      // 2) 호출 — 준비된 이미지로 VLM 병렬 실행. in-flight 상한이 준비 루프도 자동 스로틀(메모리 상한).
+      while (inflight.size >= NET) await Promise.race(inflight);
+      let p;
+      p = (async () => {
+        try {
+          const own = await readCutText(png, key, VLM_MODEL);
+          if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
+          // 내레이션 밴드(컷 위/아래)도 읽어 순서 보존해 합친다 — 위 밴드는 앞, 아래 밴드는 뒤.
+          const above = [];
+          const below = [];
+          let sfx = own.sfx || "";
+          for (const b of bands) {
+            try {
+              const t = await readCutText(b.png, key, VLM_MODEL);
+              if (t.bubbles?.length) (b.tr.yStart < s.sourceRegion.yStart ? above : below).push(...t.bubbles);
+              if (t.sfx) sfx = sfx ? `${sfx} ${t.sfx}` : t.sfx;
+            } catch {}
+          }
+          const allBubbles = mergeCutBubbles(above, own.bubbles, below).map((b) => ({
+            text: b.text,
+            ...(b.translation ? { translation: b.translation } : {}),
+          }));
+          if (allBubbles.length) {
+            s.cut.bubbles = allBubbles;
+            s.cut.dialogue = allBubbles.map((b) => (b.text || "").trim()).filter(Boolean).join("\n").slice(0, 500);
+          }
+          if (sfx) s.cut.sfx = sfx;
+          s.cut.textBoxes = own.boxes;
+        } catch {}
+      })()
+        .catch(() => {})
+        .finally(() => inflight.delete(p));
+      inflight.add(p);
+      done++;
+      if (done % 5 === 0 || done === ocrTodo.length) {
+        await log(`대사 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%)`);
+      }
     }
+    await Promise.all([...inflight]); // 남은 호출 마무리
     const withText = scenes.filter((s) => (s.cut?.bubbles ?? []).some((b) => (b.text || "").trim())).length;
     await log(`대사 읽기 완료 — ${withText}/${scenes.length}컷에서 글자 확보`);
   }
