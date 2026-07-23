@@ -4,7 +4,41 @@
 
 ---
 
-## ★★★ 최우선 — 지금 앱이 버그투성이다 (2026-07-20 후반, 이어받는 세션은 이걸 먼저 봐라)
+# ★★★★ 지금 상태 (2026-07-23) — 이어받는 세션은 이 블록만 먼저 읽어라
+
+**배포 HEAD = `7a69579`** (확인: `git log origin/main --oneline -1`). push = Vercel(앱)+Render(워커) 자동 배포.
+**★파일은 반드시 절대경로 `C:\myapps\re-animator\...` 로 확인하라.** (형제 프로젝트 `C:\myapps\aninews-maker21` 와 헷갈려 aninews 의 compose 라우트를 re-animator 것으로 착각한 사고가 있었다. aninews 롱폼(`format:"long"`·`sections[].segmentIds`)은 **re-animator 와 전혀 다른 모델**이다.)
+
+## 지금 최우선: 1단계(컷 분할) 성능/메모리 — 사용자 검증 대기 중
+첫 단계가 병목이면 툴을 못 쓴다며 사용자가 크게 분노한 상태. 경과:
+1. **먹통(hang)** — `긴 구간 분할 검사`(splitTallRegions→vlmSplitCut)에서 수십 분 정지. 원인: 초장문 구간을 `extractRegion`(거대 버퍼+PNG)·`computeBoundaryness`(거대 raw+동기 픽셀 루프)로 처리 → **이벤트 루프가 막혀 12분 잡 캡 타이머조차 못 뜸.**
+   → **해결 `5ff5816`**: `extractRegion(…, maxH)` 세로 다운샘플 옵션 추가 + `vlmSplitCut` 이 저해상도(`SPLIT_ANALYZE_H`, 기본 4000)로 분석하고 **분할 좌표를 분석높이→구간높이로 되돌림**. 긴 구간도 **스킵 없이 정상 자동 분할**. (그 전 `eae14e5` 의 "상한 초과 스킵"은 사용자가 "스킵은 해결이 아니다"라고 거부해 폐기.)
+2. **OOM** — 내가 넣은 tall-split 병렬화(동시 3)가 `fileRawAt` full-file raw 디코딩(파일당 수십 MB·LRU 3)을 동시에 터뜨려 Render 워커 메모리 초과 재시작. → **`71e7dd7` 로 동시성 1 복귀.**
+3. **속도** — 사용자: "인스턴스 상향해도 속도는 그대로 아니냐"(정확한 지적). 진짜 병목은 메모리가 아니라 **AI 호출 대기의 직렬화**.
+   → **`7a69579`**: OCR(대사 읽기)을 **준비(순차 디코딩 1개씩)/호출(VLM 병렬 8개)** 로 분리. 동시 디코딩 3→1(메모리↓) + 네트워크 대기 겹침(속도↑).
+
+**→ 사용자가 분할을 다시 돌려 결과를 알려주기로 함: "괜찮다 / 여전히 느리다 / 또 터졌다".**
+- **느리다** → `splitTallRegions` 에도 같은 준비/호출 분리 적용, `SPLIT_OCR_NET_CONCURRENCY` 상향.
+- **터졌다(OOM)** → `SPLIT_OCR_NET_CONCURRENCY=4`, `RAW_FILE_CACHE=1` 로 낮춤.
+- ★사용자는 **"인스턴스 계속 상향"을 거부**한다. 돈이 아니라 **구조로** 해결할 것.
+
+**튜닝 env(Render 워커, 코드 배포 없이 조정 가능):** `SPLIT_OCR_NET_CONCURRENCY`(8) · `SPLIT_TALL_CONCURRENCY`(1) · `RAW_FILE_CACHE`(3) · `SPLIT_ANALYZE_H`(4000) · `SPLIT_PREVIEW_SOFT_MS`(9.5분).
+
+## 이번 세션에 새로 만든 것 (전부 push, 배포 검증 대기)
+- **🎥 카메라 미리보기 탭**(`c5b4a5a`) — 4단계에서 카메라워크를 분리한 전용 탭(A안). `activeStep` 에 **UI 전용 'camera'** 만 추가(steps 레코드 무변경 → 옛 프로젝트 안전). 프리뷰 박스 **hover 시 실제 영상 위 실시간 카메라**(`70eb855`), 클릭=결과 모달. 오빗은 굽기가 아니라 **영상 생성 때** 적용 → "🎬 오빗으로 영상 재생성" 버튼(`1e4cc52`).
+- **카메라 톤**(`1e4cc52`→`a325a5f`) — 사용자 지정 "동작은 작게, 카메라워크는 **MV보다 더 거칠게**": 프리셋 대폭 상향(push_in 8%/s·pan 60px/s·crash 15·shake amp 24) + push/pan/crash 에 **핸드헬드 그레인**. 줌 슬라이더 ±15, 흔들 슬라이더 노출. **`lib/` 와 `worker/` 의 cameraKeyframes.mjs CAMERA_PRESETS 는 반드시 동일값 유지**(다르면 프리뷰≠굽기). 골든 테스트 103 pass·렌더 11 pass.
+- **📚 섹션(부분 작업)** — 사용자 아이디어. 데이터는 가산만: `Project.sectionStarts`(섹션 시작 컷 인덱스) + `Project.sectionVideos`(섹션별 합성본 URL).
+  - Phase 1(`629b12d`): 섹션 바(3·4·카메라 단계), 섹션 선택 시 **목록·일괄작업(재생성/영상/더빙/카메라굽기)이 그 섹션만** 대상. 섹션 없으면 기존 전체 동작 그대로.
+  - **🤖 시퀀스 자동 나누기**(`6fc6ea2`): 워커 잡 `sequence`(`worker/sequence.mjs`, Claude 텍스트만·90s 타임아웃·자기완결)가 컷 type/setting/description 으로 **서사 시퀀스 경계** 산출 → sectionStarts.
+  - **방향 B**(`1274c7d`): **섹션별 합성 잡 + 최종 join**. `runCompose(payload)` 가 sceneIds면 그 섹션만 합성→`sectionVideos[key]`, `runJoin` 이 섹션 합성본들을 concat(`-c copy`)→`composedUrl`. 한 잡=섹션치 → 디스크·OOM 안전판·실패 격리. 잡 타입 `join`(compose 처럼 sharp 무관 경로). **섹션 경계 전환은 현재 하드컷**(페이드는 후속).
+- **버그 수정**(리뷰 기반): `178b8e7` 이미지 생성 중 편집한 대사가 pollRegen 통째교체로 사라지던 것(필드 병합) · `6d588c7` /api/cut 통째 저장이 워커 오디오 URL 덮던 레이스(`preserveWorkerAudio`) · `da5a4e6` runSplit 경계 소실/Kling 비용 오귀속/ffmpeg 고아 프로세스 · `3e0052f` 언어 토글 stale · `d4a2d1b` 감정 select 접힘 밖 노출 · `ce02e50` "🎞 다음 컷 액션연결" 라벨 · KST 시간(`5ff5816`).
+
+## 배포 검증 안 된 것(로컬에 키·데이터 없어 빌드/로드만 검증)
+카메라 미리보기 탭·실시간 오버레이 · 섹션 Phase1/2 · 시퀀스 자동 나누기 · 섹션별 합성/최종 join. **사용자가 배포에서 확인해야 함.**
+
+---
+
+## ★★★ (이력) 2026-07-20 후반 — 앱이 버그투성이였던 시점
 
 이번 세션에 `re-animator-spec.md`(연출 레이어)를 통째로 구현하며 **너무 많이·너무 빨리 바꿔서 앱이 여러 곳 깨졌다.** 사용자가 크게 분노한 상태. **새 기능 추가 금지. 지금은 버그를 제대로 잡는 게 전부다.** 증상마다 찔러 고치지 말고, **바뀐 코드(`bb9adc9..HEAD`)를 체계적으로 리뷰해서 진짜 결함을 찾아 고쳐라.**
 
