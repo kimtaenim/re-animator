@@ -850,11 +850,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
 
   // ★useCallback 필수 — BoundaryEditor 의 자동저장 디바운스가 onSave 를 deps 로 쓴다.
   //   매 렌더 새 함수면 타이머가 렌더마다 리셋돼 저장이 밀리거나 아예 안 된다.
-  const saveRegions = useCallback(async (regions: SavedRegion[]) => {
+  const saveRegions = useCallback(async (regions: SavedRegion[], scopeIds?: string[]) => {
     const r = await fetch("/api/boundaries", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ projectId: project.id, regions }),
+      // scopeIds 가 있으면 그 컷들만 교체(섹션 편집) — 없으면 기존대로 전체 교체.
+      body: JSON.stringify({ projectId: project.id, regions, ...(scopeIds?.length ? { scopeIds } : {}) }),
     });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error ?? "저장 실패");
@@ -2696,13 +2697,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             </>
           )}
           {sec &&
-            (activeStep === "source" || activeStep === "cast" ? (
+            (activeStep === "cast" ? (
               // ★1단계(G1)는 섹션으로 거르지 않는다 — /api/boundaries PUT 은 보낸 regions 로
               //   씬을 통째 재구성하므로, 걸러진 목록을 저장하면 나머지 컷이 삭제된다(데이터 소실).
               //   캐스팅도 회분 전체를 봐야 인물이 제대로 묶인다. 그래서 안내만 한다.
               <span className="w-full text-[10px] text-[var(--muted)]">
-                ▶ ‘섹션 {sec.i + 1}’ 선택됨(컷 {sec.start + 1}–{sec.end}) — 이 단계는 회분 전체를 다룹니다.
-                섹션 범위는 3단계(재생성)부터 목록·일괄 작업에 적용됩니다.
+                ▶ ‘섹션 {sec.i + 1}’ 선택됨 — 캐스팅은 인물 동일성 때문에 회분 전체를 함께 봅니다.
               </span>
             ) : (
               <span className="w-full text-[10px] text-[var(--accent)]">
@@ -2992,6 +2992,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             scenes={project.scenes}
             projectId={project.id}
             targetLanguages={project.targetLanguages}
+            sectionIds={sec ? orderedScenes.filter((x) => sec.ids.has(x.id)).map((x) => x.id) : undefined}
             onSave={saveRegions}
           />
         </section>

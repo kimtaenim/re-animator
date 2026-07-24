@@ -64,6 +64,9 @@ export async function PUT(req: NextRequest) {
       xEnd?: number;
       cut?: unknown;
     }[];
+    // ★부분 저장(섹션 편집) — 이 id 집합에 해당하는 컷들만 regions 로 교체하고 나머지는 보존.
+    //   없으면 기존 동작(전체 교체). 이게 없으면 섹션만 편집해 저장할 때 나머지 컷이 삭제된다.
+    scopeIds?: string[];
   };
   try {
     body = await req.json();
@@ -117,8 +120,12 @@ export async function PUT(req: NextRequest) {
   // 재추출·재OCR 불필요(안 바뀐 컷은 건너뜀). 경계가 바뀐 컷만 새로 처리된다.
   const geoKey = (r: { yStart: number; yEnd: number; xStart?: number; xEnd?: number }) =>
     `${Math.round(r.yStart)}:${Math.round(r.yEnd)}:${Math.round(r.xStart ?? -1)}:${Math.round(r.xEnd ?? -1)}`;
-  const oldByGeo = new Map(project.scenes.map((s) => [geoKey(s.sourceRegion), s]));
-  const scenes: Scene[] = clean.map(({ cut, ...region }, i) => {
+  // 부분 저장이면 '교체 대상' 안에서만 지오 매칭한다 — 밖의 컷과 매칭되면 id 가 중복된다.
+  const scoped =
+    Array.isArray(body.scopeIds) && body.scopeIds.length ? new Set(body.scopeIds) : null;
+  const matchPool = scoped ? project.scenes.filter((s) => scoped.has(s.id)) : project.scenes;
+  const oldByGeo = new Map(matchPool.map((s) => [geoKey(s.sourceRegion), s]));
+  const rebuilt: Scene[] = clean.map(({ cut, ...region }, i) => {
     const old = oldByGeo.get(geoKey(region));
     return {
       id: old?.id ?? randomUUID(),
@@ -137,6 +144,29 @@ export async function PUT(req: NextRequest) {
       status: "review",
     };
   });
+  // 부분 저장이면 교체 대상 밖의 컷을 그대로 두고 합친 뒤 y 순으로 order 재부여.
+  const kept = scoped ? project.scenes.filter((s) => !scoped.has(s.id)) : [];
+  const scenes: Scene[] = [...kept, ...rebuilt]
+    .sort((a, b) => a.sourceRegion.yStart - b.sourceRegion.yStart)
+    .map((s, i) => ({ ...s, order: i }));
+
+  // ★섹션 경계(sectionStarts)는 '컷 인덱스'다. 부분 저장으로 컷 수가 바뀌면 뒤쪽 경계가
+  //   밀린다 — 안 맞추면 섹션이 엉뚱한 컷을 가리킨다(분할 한 번에 전체가 어긋남).
+  const delta = rebuilt.length - (scoped ? project.scenes.length - kept.length : 0);
+  if (scoped && delta !== 0 && (project.sectionStarts ?? []).length) {
+    // 교체 구간의 시작 인덱스(원래 위치) 뒤에 있는 경계만 delta 만큼 이동.
+    const firstScopedIdx = Math.min(
+      ...project.scenes.map((s, i) => (scoped.has(s.id) ? i : Number.POSITIVE_INFINITY))
+    );
+    project.sectionStarts = [
+      ...new Set(
+        (project.sectionStarts ?? [])
+          .map((v) => (v > firstScopedIdx ? v + delta : v))
+          .filter((v) => v > 0 && v < scenes.length)
+      ),
+    ].sort((a, b) => a - b);
+  }
+
   project.scenes = scenes;
   setStep(project, "source", { status: "review", error: undefined });
   await saveProject(project);

@@ -27,7 +27,10 @@ interface Props {
   scenes: Scene[];
   projectId: string;
   targetLanguages?: string[]; // 🌐 대상 언어 — 켜져 있으면 말풍선 아래 ja/en 번역도 표시
-  onSave: (regions: SavedRegion[]) => Promise<void>;
+  // ★섹션(시퀀스) 편집 — 주어지면 이 컷들만 편집·표시하고, 저장도 이 범위만 교체한다.
+  //   회분 전체 카드를 그리지 않으니 1단계 화면 자체도 빨라진다.
+  sectionIds?: string[];
+  onSave: (regions: SavedRegion[], scopeIds?: string[]) => Promise<void>;
 }
 
 type Region = SavedRegion;
@@ -112,7 +115,11 @@ function CutThumb({
   );
 }
 
-export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId, targetLanguages, onSave }: Props) {
+export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId, targetLanguages, sectionIds, onSave }: Props) {
+  // 이 편집기가 다루는 컷 = 섹션이 지정되면 그 컷들만, 아니면 전체.
+  const scopeSet = sectionIds && sectionIds.length ? new Set(sectionIds) : null;
+  const inScope = (s: Scene) => !scopeSet || scopeSet.has(s.id);
+  const scopedScenes = scenes.filter(inScope);
   const boxRef = useRef<HTMLDivElement>(null);
   const leftScrollRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
@@ -121,7 +128,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
   const [splitting, setSplitting] = useState<number | null>(null);
   const [zoom, setZoom] = useState<Region | null>(null);
   // regions 는 항상 yStart 오름차순 유지(렌더 인덱스=드래그 인덱스 일치).
-  const [regions, setRegions] = useState<Region[]>(() => scenesToRegions(scenes));
+  const [regions, setRegions] = useState<Region[]>(() => scenesToRegions(scopedScenes));
   const [drag, setDrag] = useState<{ index: number; edge: "top" | "bottom" } | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -136,13 +143,16 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
   };
   const regionsRef = useRef(regions);
   regionsRef.current = regions;
+  // 저장 시 '무엇을 교체할지'(원래 이 섹션에 속했던 컷 id)를 함께 보낸다.
+  const scopeRef = useRef<string[] | null>(null);
+  scopeRef.current = scopeSet ? scopedScenes.map((s) => s.id) : null;
 
   // 저장 실행 — 자동저장(디바운스)과 즉시저장이 공유한다.
   const doSave = useCallback(async () => {
     const seq = editSeq.current;
     setSaving(true);
     try {
-      await onSave(regionsRef.current.map((r) => ({ ...r })));
+      await onSave(regionsRef.current.map((r) => ({ ...r })), scopeRef.current ?? undefined);
       if (editSeq.current === seq) setDirty(false); // 그 사이 편집 없었으면 깨끗
     } catch {
       /* dirty 유지 → 다음 틱에 재시도 */
@@ -158,9 +168,12 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
   //   → 서버엔 분할이 저장되지 않고, 추출·3단계는 안 나뉜 컷을 본다(사용자 보고한 결정적 오류).
   //   dirty/saving 중이면 서버 스냅샷을 무시하고 내 편집을 지킨다.
   const [lastScenes, setLastScenes] = useState(scenes);
-  if (scenes !== lastScenes && !dirty && !saving) {
+  const [lastScopeKey, setLastScopeKey] = useState(() => (sectionIds ?? []).join(","));
+  const scopeKey = (sectionIds ?? []).join(",");
+  if ((scenes !== lastScenes || scopeKey !== lastScopeKey) && !dirty && !saving) {
     setLastScenes(scenes);
-    setRegions(scenesToRegions(scenes));
+    setLastScopeKey(scopeKey);
+    setRegions(scenesToRegions(scopedScenes));
   }
 
   useLayoutEffect(() => {
