@@ -1741,6 +1741,15 @@ const TIER_ACTION_LIFE =
   "This is an ACTION moment: allow ONE contained but energetic beat of movement — a quick, decisive motion or a short burst of dynamic energy, " +
   "stronger than a calm living photo but still controlled and believable. Keep each character's identity, face and the art style intact — " +
   "NO morphing, NO distortion, NO warping of faces or the composition, and NEVER add characters, people or objects not in the still. ";
+// ★★얼굴 정체성 고정 — 사용자: "한 컷 안에서도 인물 얼굴이 달라진다". I2V 는 프레임마다 얼굴을
+//   다시 생성하다시피 해서 조금씩 다른 사람이 된다(모든 I2V 공통 약점, Kling 만의 문제 아님).
+//   프롬프트로 '같은 사람 = 프레임마다 동일'을 강하게 못박아 표류를 억제한다. 완전 제거는 불가하나
+//   움직임을 줄이면(특히 고개 회전) 함께 줄어든다.
+const IDENTITY_LOCK =
+  "IDENTITY LOCK — every visible character must remain the EXACT SAME person for the entire clip: " +
+  "the same face, same facial features, same proportions, same hairstyle and hair color, same clothing, in every single frame. " +
+  "Do NOT let any face drift, morph, re-shape, swap, age, or turn into a different-looking person over time; " +
+  "do NOT regenerate or re-invent facial features between frames. Treat the drawn face as fixed identity that only moves as a rigid whole. ";
 // ★'그림 속 그림'의 인물은 정지 — 사진·초상·포스터·표지·그림·간판·화면 안에 그려진 사람은 움직이지 않는다.
 const PICTURE_STATIC =
   "Anyone or any face shown INSIDE a photograph, portrait, poster, painting, drawing, magazine or book cover, framed picture, " +
@@ -1820,8 +1829,11 @@ function buildVideoPrompt(cut, shownCharIds, storyContext) {
   //   camerafx(후처리)에서 스킵되므로 여기서 궤도 카메라를 지시(이중 무빙 방지). 그 외는 카메라 정지.
   const isOrbit = cut?.cameraWork?.preset === "orbit";
   const cameraClause = isOrbit ? ORBIT_CAMERA : CAMERA_STATIC;
+  // 인물이 있는 컷(person/action)엔 얼굴 정체성 고정을 붙인다 — 사물·배경 컷엔 불필요.
+  const hasPeople = cut?.type === "person" || cut?.type === "action";
+  const idClause = hasPeople ? IDENTITY_LOCK : "";
   // 기본: 사진·표지 속 인물 정지. 컷별 animatePicture 켜면(가끔 움직여야 할 때) 생략.
-  let base = `${cameraClause}${lifeClause}${cut?.animatePicture ? "" : PICTURE_STATIC}`;
+  let base = `${cameraClause}${lifeClause}${idClause}${cut?.animatePicture ? "" : PICTURE_STATIC}`;
   // ★스토리 맥락 — 모델이 상황·감정에 어긋나는 동작을 만들지 않게(죽어가는 인물이 웃으며 벌떡 일어나는 등 금지).
   if (story)
     base += `STORY CONTEXT (obey the mood and situation; the motion must NOT contradict it — e.g. do not make a dying, injured, sad or unconscious character suddenly cheer up, smile, or jump up): ${story}. `;
