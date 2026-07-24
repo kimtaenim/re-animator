@@ -426,7 +426,10 @@ function targetDims(project) {
 // Grok I2V 출력을 '지정 비율'로 채워-크롭(crop-to-fill) + 오디오 제거. Grok 이 입력(예: 1:1)과 무관하게
 // 가로형 등 기본 비율로 내는 걸 바로잡는다. force_original_aspect_ratio=increase → 중앙 crop = 검은 띠 없이
 // 프레임을 꽉 채움. (1:1 이미지가 가로 프레임에 필러박스로 들어온 경우, 중앙 crop 이 원래 1:1 내용을 정확히 복원)
-async function conformVideo(buf, project) {
+// maxSec(선택): 이 길이로 잘라낸다. ★Kling 은 최소 3초라 1~2초짜리 액션 컷도 3초로 받는데,
+//   모델이 남는 시간을 '동작 반복'으로 채운다(사용자: 발차기가 여러 번 나온다). 의도한 길이로
+//   자르면 반복 구간이 사라진다. 트림은 재인코딩 중 -t 라 추가 비용이 없다.
+async function conformVideo(buf, project, maxSec) {
   let dir;
   try {
     const ff = await ffmpegPath();
@@ -437,7 +440,10 @@ async function conformVideo(buf, project) {
     await writeFile(inp, buf);
     const vf = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1`;
     await new Promise((res, rej) => {
-      const pr = spawn(ff, ["-y", "-i", inp, "-vf", vf, "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", out]);
+      const args = ["-y", "-i", inp, "-vf", vf, "-an"];
+      if (maxSec && maxSec > 0) args.push("-t", Number(maxSec).toFixed(2));
+      args.push("-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", out);
+      const pr = spawn(ff, args);
       // ★매달림 방어: ffmpeg 가 멈추면 SIGKILL(고아 프로세스 누적→OOM 방지). 3분 캡(비율 맞춤은 짧은 작업).
       let timedOut = false;
       const kill = setTimeout(() => { timedOut = true; try { pr.kill("SIGKILL"); } catch {} }, 3 * 60 * 1000);
@@ -1740,6 +1746,20 @@ const PICTURE_STATIC =
   "Anyone or any face shown INSIDE a photograph, portrait, poster, painting, drawing, magazine or book cover, framed picture, " +
   "sign, billboard, or screen is a STATIC image — keep them completely still and unchanged. Do NOT animate, move, blink, or bring to life " +
   "any person depicted inside such a picture-within-the-picture; only the real, live subject(s) of the scene may move subtly. ";
+// ★★단발성 강제 — 사용자 지적의 핵심: "침을 뱉으면 한 번만 툭 떨어지고, 멱살을 잡으면 한 번만
+//   올라오고, 발차기는 한 번만 맞고 한 번만 날아가야 한다. 지금은 무의미한 동작이 반복된다."
+//   원인: I2V 는 요청 길이를 채우려고 동작을 루프시킨다. 특히 Kling 은 최소 3초인데 action 티어는
+//   1~2초를 요청하므로(TIER_SEC), 짧은 동작이 3초에 맞춰 2~3회 반복된다.
+//   → 프롬프트에서 '한 번만, 반복 금지, 끝나면 정지'를 명시하고 남는 시간은 정지로 채우게 한다.
+//   이 지시는 티어·명시동작 여부와 무관하게 '항상' 붙는다(예전엔 반복 금지 문구가 아예 없었다).
+const SINGLE_BEAT =
+  "CRITICAL — SINGLE TAKE, NO REPETITION: whatever motion happens must happen exactly ONCE. " +
+  "Do NOT loop, repeat, cycle, re-do, or replay any action, gesture or movement. " +
+  "If someone spits, the spit falls once and lands. If someone grabs a collar, the grab happens once and holds. " +
+  "If someone kicks, there is one kick, one impact, and the target is knocked back once — it does not reset and kick again. " +
+  "Once the action is complete, HOLD the resulting pose and let the shot settle into stillness for the remaining time. " +
+  "Filling the clip with repeated or idle busy-work motion is WRONG — a still, settled ending is correct. " +
+  "Never rewind, never return to the starting pose to do it over. ";
 // 명시적 동작(버튼·프롬프트)이 없을 때만 — 이미 있는 동작만 이어가고 새 동작 창작 금지.
 const CONTINUE_ONLY =
   "CONTINUE only the action already depicted in the still (someone drawn mid-walk keeps walking at the same pace); " +
@@ -1805,7 +1825,14 @@ function buildVideoPrompt(cut, shownCharIds, storyContext) {
   // ★스토리 맥락 — 모델이 상황·감정에 어긋나는 동작을 만들지 않게(죽어가는 인물이 웃으며 벌떡 일어나는 등 금지).
   if (story)
     base += `STORY CONTEXT (obey the mood and situation; the motion must NOT contradict it — e.g. do not make a dying, injured, sad or unconscious character suddenly cheer up, smile, or jump up): ${story}. `;
-  base += explicit.length ? explicit.join(" ") : CONTINUE_ONLY;
+  // ★명시 동작(버튼·AI 연출 hint·action)이 있어도 '그 동작 하나만' 이라는 제한은 유지한다.
+  //   예전엔 explicit 이 있으면 CONTINUE_ONLY 가 통째로 빠져서, AI 연출이 컷마다 동작을 채우는
+  //   지금 구조에선 '새 동작 창작 금지'가 사실상 한 번도 적용되지 않았다(무의미한 동작의 원인).
+  base += explicit.length
+    ? `${explicit.join(" ")} Perform ONLY that one motion — add no other actions, gestures or business. `
+    : CONTINUE_ONLY;
+  // 단발성·반복 금지는 항상 마지막에(가장 가까이 붙여 지시 강도를 유지).
+  base += SINGLE_BEAT;
   // ★보이는 인물이 직접 말하는 대사가 있을 때만 입 움직임. 그 외(대사 없음·내레이션·다른/화면밖 화자)는
   //   전부 입 다물기 강제 — 대사 없는 인물이 입 놀리는 것 방지.
   if (hasSpokenDialogue(cut, shownCharIds)) return `${base} ${SPEAKING_GUIDANCE}`;
@@ -1941,7 +1968,11 @@ export async function runVideo(projectId, payload) {
           //   인코딩은 한 번에 하나만. 예전엔 3벌이 동시에 돌아 [원본 버퍼 + 결과 버퍼 + ffmpeg
           //   프로세스] × 3 이 겹쳐 Render 워커가 메모리 초과 재시작했다(사용자 보고).
           //   Render 는 컨테이너 전체를 재므로 ffmpeg 프로세스 메모리도 같이 계산된다.
-          let buf = await withFfmpeg(async () => (await conformVideo(raw, p)) ?? (await stripAudio(raw)) ?? raw);
+          // ★길이 트림 — 엔진 최소 길이(Kling 3초)와 의도한 길이(dur)가 다르면 잘라낸다.
+          //   단 '동작 보간' 클립은 끝 프레임(다음 컷 이미지)에 도달하는 게 목적이라 자르면
+          //   도착 포즈가 사라진다 → 보간 컷은 트림하지 않는다.
+          const trimTo = !tailUrl && dur > 0 ? dur : undefined;
+          let buf = await withFfmpeg(async () => (await conformVideo(raw, p, trimTo)) ?? (await stripAudio(raw)) ?? raw);
           if (buf !== raw) raw = null; // 인코딩됐으면 원본 버퍼는 즉시 반납(피크 절반)
           const { url } = await put(
             `project/${projectId}/vid-${s.order}-${Date.now()}.mp4`,
