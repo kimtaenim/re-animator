@@ -4482,6 +4482,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           {project.composedUrl && (
             <div className="space-y-2">
               <video
+                key={project.composedUrl}
                 src={project.composedUrl}
                 controls
                 className="max-h-[60vh] w-auto rounded border border-[var(--ok)]"
@@ -4591,6 +4592,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             />
           ) : (
             <video
+              key={lightbox.src}
               src={lightbox.src}
               controls
               autoPlay

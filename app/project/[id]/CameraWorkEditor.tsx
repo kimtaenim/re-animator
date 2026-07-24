@@ -131,7 +131,7 @@ export default function CameraWorkEditor({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img ref={imgRef} src={imageUrl} alt="camera preview" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
           {liveVideo && (
-            <video ref={vidRef} src={videoUrl} muted loop playsInline preload="metadata" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
+            <video ref={vidRef} key={videoUrl} src={videoUrl} muted loop playsInline preload="metadata" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
           )}
           <span className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/55 px-1 text-[9px] text-white/85">
             {layer === "C" ? "orbit — 굽기/생성 후 확인" : videoUrl ? (hover ? "실영상 · 굽기 전 미리보기" : "▶ 올리면 실영상") : "정지 이미지 근사"}
