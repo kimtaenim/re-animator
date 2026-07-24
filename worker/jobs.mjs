@@ -1807,7 +1807,27 @@ function hasSpokenDialogue(cut, shownCharIds) {
     });
   return (cut.dialogue || "").trim() !== "";
 }
-function buildVideoPrompt(cut, shownCharIds, storyContext) {
+// 이 컷에 '무엇이·누가' 있는지 = 정체성/장면 앵커. Kling 에 '어떻게 움직여라'만 주면 인물이
+// 누군지 몰라 얼굴을 지킬 기준이 없다(사용자 제안: 내용을 프롬프트로 같이 주자). 캐스팅 외모
+// 서술 + 컷 장면 묘사를 '이미 화면에 있는 것 — 그대로 보존, 새로 추가 금지'로 못박아 준다.
+function buildContentClause(cut, shownCast) {
+  const parts = [];
+  const who = (shownCast || [])
+    .map((c) => (c.description || "").trim() || (c.label || "").trim())
+    .filter(Boolean);
+  if (who.length) parts.push(`The people in frame are: ${who.join("; ")}.`);
+  // 장면 묘사 — 영문 초안(promptDraft) 우선, 없으면 자유 서술(description).
+  const scene = (String(cut?.promptDraft || "").trim() || String(cut?.description || "").trim());
+  if (scene) parts.push(scene);
+  if (!parts.length) return "";
+  return (
+    "SCENE CONTENT (this describes what is ALREADY in the still — keep these exact same characters, faces, " +
+    "outfits and setting consistent throughout; do NOT add, remove, or replace anyone or anything): " +
+    parts.join(" ") +
+    " "
+  );
+}
+function buildVideoPrompt(cut, shownCharIds, storyContext, shownCast) {
   // ★사용자가 프롬프트를 직접 편집(고급)했으면 그대로 사용 — 전체 제어(자동 조립 무시).
   const override = String(cut?.videoPromptOverride || "").trim();
   if (override) return override;
@@ -1829,11 +1849,12 @@ function buildVideoPrompt(cut, shownCharIds, storyContext) {
   //   camerafx(후처리)에서 스킵되므로 여기서 궤도 카메라를 지시(이중 무빙 방지). 그 외는 카메라 정지.
   const isOrbit = cut?.cameraWork?.preset === "orbit";
   const cameraClause = isOrbit ? ORBIT_CAMERA : CAMERA_STATIC;
-  // 인물이 있는 컷(person/action)엔 얼굴 정체성 고정을 붙인다 — 사물·배경 컷엔 불필요.
+  // 인물이 있는 컷(person/action)엔 얼굴 정체성 고정 + 내용(누가·무엇) 앵커를 붙인다.
   const hasPeople = cut?.type === "person" || cut?.type === "action";
   const idClause = hasPeople ? IDENTITY_LOCK : "";
+  const contentClause = buildContentClause(cut, shownCast); // 캐스팅 외모 + 장면 묘사
   // 기본: 사진·표지 속 인물 정지. 컷별 animatePicture 켜면(가끔 움직여야 할 때) 생략.
-  let base = `${cameraClause}${lifeClause}${idClause}${cut?.animatePicture ? "" : PICTURE_STATIC}`;
+  let base = `${cameraClause}${lifeClause}${idClause}${contentClause}${cut?.animatePicture ? "" : PICTURE_STATIC}`;
   // ★스토리 맥락 — 모델이 상황·감정에 어긋나는 동작을 만들지 않게(죽어가는 인물이 웃으며 벌떡 일어나는 등 금지).
   if (story)
     base += `STORY CONTEXT (obey the mood and situation; the motion must NOT contradict it — e.g. do not make a dying, injured, sad or unconscious character suddenly cheer up, smile, or jump up): ${story}. `;
@@ -1961,10 +1982,11 @@ export async function runVideo(projectId, payload) {
                   tick(`Grok ${grokDur}s`)
                 );
           // 이 컷에 '보이는' 캐릭터들(캐스팅 sceneIds 기준) — 화자가 이 중에 없으면 입 다뭄.
-          const shownCharIds = (p.cast ?? []).filter((c) => (c.sceneIds ?? []).includes(s.id)).map((c) => c.id);
+          const shownCast = (p.cast ?? []).filter((c) => (c.sceneIds ?? []).includes(s.id));
+          const shownCharIds = shownCast.map((c) => c.id);
           let videoUrl;
           try {
-            videoUrl = await genVideo(buildVideoPrompt(s.cut, shownCharIds, p.storyContext));
+            videoUrl = await genVideo(buildVideoPrompt(s.cut, shownCharIds, p.storyContext, shownCast));
           } catch (e) {
             if (/콘텐츠 정책|content|policy|moderation|safety|flag/i.test(String(e?.message ?? e))) {
               await log(`컷 ${s.order + 1} 정책 거부 → 순화 프롬프트로 재시도`);
