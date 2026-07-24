@@ -2364,7 +2364,7 @@ export async function runDub(projectId, payload) {
             skipped++;
             return; // 목소리 미배정 → 스킵
           } else {
-            audio = await synthesize(u.voice.provider, u.voice.id, u.text, speed, u.emotion);
+            audio = await synthesize(u.voice.provider, u.voice.id, u.text, speed, u.emotion, u.lang || "");
           }
           const { buf, ext, contentType } = audio;
           const slot = u.idx ?? u.sugIdx;

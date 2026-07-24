@@ -1676,6 +1676,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               );
             })}
             <span className="text-[var(--muted)]">— 더빙·자막이 이 언어로 나갑니다</span>
+            {/* ★비원어(일본어·영어 등) 더빙은 ElevenLabs 권장 — 멀티링구얼이라 그 언어 발음이
+                제대로 난다. Typecast 목소리는 한국어 위주라 외국어 발음이 뭉개진다. */}
+            {(project.workingLanguage ?? "") !== "" && (
+              <span className="w-full rounded bg-[var(--panel-2)] px-2 py-1 text-[10px] text-[var(--accent)]">
+                💡 {LANGUAGES.find((l) => l.id === project.workingLanguage)?.label ?? project.workingLanguage} 더빙은
+                <b> ElevenLabs 목소리</b>를 권장합니다 — 멀티링구얼이라 발음이 자연스럽습니다.
+                배역 목소리를 ElevenLabs 로 지정한 뒤 더빙하세요.
+              </span>
+            )}
           </div>
         )}
       </div>
