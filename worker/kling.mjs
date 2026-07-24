@@ -21,7 +21,11 @@ const BASE = process.env.KLING_API_BASE || "https://api-singapore.klingai.com";
 const TIMEOUT_MS = 60_000;
 // 모델은 경로 세그먼트. 유효값(문서 사이드바): kling-3.0(HOT)·kling-3.0-turbo·kling-o1·kling-2.6·kling-2.5-turbo.
 const KLING_VIDEO_MODEL = process.env.KLING_VIDEO_MODEL || "kling-3.0";
-const KLING_RESOLUTION = process.env.KLING_VIDEO_RESOLUTION || "720p"; // 720p|1080p|4k. 합성서 프로젝트 비율로 재크롭.
+// ★기본 1080p — 사용자: 정적 컷에서도 얼굴이 깨진다. 720p 면 웹툰 컷 안 얼굴에 배정되는
+//   픽셀이 적어 I2V 가 프레임마다 얼굴을 다시 그릴 때 붙들 디테일이 부족해 표류한다.
+//   1080p 는 얼굴 픽셀이 배로 늘어 정체성 앵커가 강해진다(생성비는 오르지만 품질 우선).
+//   비용 되돌리려면 워커 env KLING_VIDEO_RESOLUTION=720p.
+const KLING_RESOLUTION = process.env.KLING_VIDEO_RESOLUTION || "1080p"; // 720p|1080p|4k. 합성서 프로젝트 비율로 재크롭.
 // 초당 단가(USD, 대략). 모델·해상도로 다름. env 로 조정.
 export const KLING_VIDEO_COST = Number(process.env.KLING_VIDEO_COST || 0.075);
 
