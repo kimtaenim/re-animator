@@ -143,6 +143,7 @@ function LazyVideo({ src, onClick, className }: { src: string; onClick?: () => v
       {on ? (
         <video
           ref={ref}
+          key={src}
           src={src}
           muted
           loop
@@ -4622,7 +4623,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <div onClick={(e) => e.stopPropagation()} className="flex max-h-[92vh] max-w-[92vw] flex-col items-center gap-3">
                 <div className="relative">
                   {s.videoUrl ? (
-                    <video src={s.fxUrl ?? s.videoUrl} autoPlay muted loop playsInline className="max-h-[70vh] max-w-[86vw] rounded" />
+                    // ★key=src — 재생성해 URL 이 바뀌어도 <video> 엘리먼트는 재사용되고 src 프로퍼티만
+                    //   갈리는데, 브라우저는 자동재생 중인 <video> 의 src 를 갱신해도 옛 소스를 계속 물고
+                    //   있어 새 영상이 안 떴다("계속 발생해온" 증상의 원인). key 로 강제 재마운트.
+                    <video key={s.fxUrl ?? s.videoUrl} src={s.fxUrl ?? s.videoUrl} autoPlay muted loop playsInline className="max-h-[70vh] max-w-[86vw] rounded" />
                   ) : s.generatedImage ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={s.generatedImage} alt="" className="max-h-[70vh] max-w-[86vw] rounded" />
