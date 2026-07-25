@@ -2248,10 +2248,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 자막 유닛 — { text, sx, sy }. sx/sy = 이 줄(말풍선)에 지정된 자막 위치(없으면 컷 기본).
   function subtitleUnits(cut?: Project["scenes"][number]["cut"]): { text: string; sx?: number; sy?: number; tr?: string }[] {
     const units: { text: string; sx?: number; sy?: number; tr?: string }[] = [];
+    // ★작업 언어(§10) 자막 — 미리보기도 최종 합성(compose.mjs)과 동일하게 그 언어 번역을 보여준다.
+    //   예전엔 미리보기가 항상 원문(b.text)만 써서 "일본어 자막이 안 나온다"(미리보기)가 됐다.
+    //   그 언어 번역이 아직 없으면 원문으로 폴백(빈 화면 방지).
+    const wl = (project.workingLanguage || "").trim();
     if (cut?.bubbles?.length)
       for (const b of cut.bubbles) {
         if (b.speakerId === SFX_SPEAKER || b.noSubtitle) continue;
-        const t = (b.text || "").trim();
+        const langText = wl ? (b.tracks?.[wl]?.text || "").trim() : "";
+        const t = langText || (b.text || "").trim();
         if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY, tr: (b.translation || "").trim() || undefined });
       }
     else if (cut?.dialogue?.trim())

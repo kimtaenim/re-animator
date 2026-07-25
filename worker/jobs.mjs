@@ -1909,6 +1909,13 @@ export async function runVideo(projectId, payload) {
     ? forced
     : `auto(액션=${hasKling ? "Kling" : hasMM ? "MiniMax" : "Grok"}·일반=${hasMM ? "MiniMax" : hasKling ? "Kling" : "Grok"})`;
   await log(`영상 생성 대상 ${cand.length}컷 · ${engLabel} · 동시 ${VIDEO_CONCURRENCY}`);
+  await log(`[진단] 엔진 키: MiniMax=${hasMM ? "있음" : "없음"} · Kling=${hasKling ? "있음" : "없음"}`);
+  // ★사용자가 MiniMax 를 골랐는데(강제) 키가 없으면, 조용히 Kling/Grok 로 폴백돼 "선택이 안
+  //   먹는다·미니맥스 맞냐"가 된다. 명시적으로 알린다.
+  if (forced === "minimax" && !hasMM)
+    await log(`⚠ MiniMax 선택했지만 MINIMAX_API_KEY 없음 — ${hasKling ? "Kling" : "Grok"} 으로 대체됩니다. Render 워커 env 에 키를 넣어주세요.`);
+  if (!forced && !hasMM)
+    await log(`⚠ MINIMAX_API_KEY 없음 — 일반 컷도 ${hasKling ? "Kling" : "Grok"} 으로 나갑니다(MiniMax 미적용).`);
   // ★이어달리기(soft deadline) — 잡 캡은 12분인데 Kling 은 컷당 2~4분이라, 동시 3이어도
   //   12분에 대략 9~18컷이 한계다. 넘기면 잡은 '타임아웃 실패'로 찍히지만 Promise.race 는
   //   실행 중인 잡을 취소하지 못해 백그라운드로 계속 돌고, 워커는 다음 잡을 집는다
@@ -2041,7 +2048,9 @@ export async function runVideo(projectId, payload) {
           costTotal += unitCost * dur;
           engCount[eng] = (engCount[eng] || 0) + 1;
           ok++;
-          await log(`컷 ${s.order + 1} 영상 완료 (${dur}s)`);
+          const engName = eng === "kling" ? "Kling" : eng === "minimax" ? "MiniMax" : "Grok";
+          await log(`컷 ${s.order + 1} 영상 완료 (${dur}s · ${engName})`); // ★실제 사용 엔진 표시
+
         } catch (e) {
           byId.set(s.id, { error: String(e?.message ?? e) });
           await log(`컷 ${s.order + 1} 영상 실패: ${String(e?.message ?? e).slice(0, 120)}`);
