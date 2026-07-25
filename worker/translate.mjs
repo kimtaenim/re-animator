@@ -53,24 +53,26 @@ export async function translateTexts(texts) {
   try {
     const res = await client.messages.create({
       model: MODEL,
-      max_tokens: 2000,
+      max_tokens: MAX_OUT, // ★2000 이면 60줄 요청 시 응답이 잘려 그 덩어리가 통째로 버려졌다
       messages: [{ role: "user", content: prompt }],
     });
-    if (res.stop_reason === "refusal") return { translations: out, cost: 0 };
-    let raw = res.content?.find((b) => b.type === "text")?.text ?? "{}";
-    const s = raw.indexOf("{");
-    const e = raw.lastIndexOf("}");
-    if (s >= 0 && e > s) raw = raw.slice(s, e + 1); // 앞뒤 잡소리 있어도 JSON 만 추림
-    const parsed = JSON.parse(raw);
-    for (const item of parsed.t ?? []) {
+    if (res.stop_reason === "refusal") return { translations: out, cost: 0, truncated: false };
+    const truncated = res.stop_reason === "max_tokens";
+    const raw = res.content?.find((b) => b.type === "text")?.text ?? "{}";
+    // 잘려도 완결된 항목까지는 건진다(예전엔 JSON.parse 실패로 전부 버림).
+    let got = 0;
+    for (const item of salvageItems(raw)) {
       const k = Number(item?.i);
       const kr = typeof item?.k === "string" ? item.k.trim() : "";
-      if (Number.isInteger(k) && k >= 0 && k < todo.length && kr) out[todo[k].i] = kr.slice(0, 400);
+      if (Number.isInteger(k) && k >= 0 && k < todo.length && kr) {
+        out[todo[k].i] = kr.slice(0, 400);
+        got++;
+      }
     }
     const cost = (res.usage?.input_tokens ?? 0) * IN_USD + (res.usage?.output_tokens ?? 0) * OUT_USD;
-    return { translations: out, cost };
-  } catch {
-    return { translations: out, cost: 0 };
+    return { translations: out, cost, truncated: truncated || got < todo.length };
+  } catch (e) {
+    return { translations: out, cost: 0, truncated: false, error: String(e?.message ?? e) };
   }
 }
 
@@ -120,15 +122,11 @@ export async function proofreadScenes(scenes) {
     numbered;
 
   try {
-    const res = await client.messages.create({ model: MODEL, max_tokens: 4000, messages: [{ role: "user", content: prompt }] });
+    const res = await client.messages.create({ model: MODEL, max_tokens: MAX_OUT, messages: [{ role: "user", content: prompt }] });
     if (res.stop_reason === "refusal") return { fixed: 0, cost: 0 };
-    let raw = res.content?.find((x) => x.type === "text")?.text ?? "{}";
-    const s = raw.indexOf("{");
-    const e = raw.lastIndexOf("}");
-    if (s >= 0 && e > s) raw = raw.slice(s, e + 1);
-    const parsed = JSON.parse(raw);
+    const raw = res.content?.find((x) => x.type === "text")?.text ?? "{}";
     let fixed = 0;
-    for (const c of parsed.c ?? []) {
+    for (const c of salvageItems(raw)) {
       const k = Number(c?.i);
       const nt = typeof c?.t === "string" ? c.t.trim() : "";
       if (!Number.isInteger(k) || k < 0 || k >= items.length || !nt) continue;
@@ -151,6 +149,39 @@ export async function proofreadScenes(scenes) {
 const LANG_NAMES = { ja: "일본어(Japanese)", en: "영어(English)", ko: "한국어(Korean)", zh: "중국어(Chinese)", es: "스페인어(Spanish)" };
 
 // texts → { result: { [lang]: (string|null)[] }, cost }. 인덱스 대응 유지. 빈 줄은 null.
+// ★번역이 "나오다 말다" 했던 진짜 원인 처리 —
+//   50줄 × 여러 언어를 max_tokens 4000 으로 요청하면 응답 JSON 이 중간에서 잘리고,
+//   JSON.parse 실패 → catch 가 그 덩어리(수십 줄)를 통째로 조용히 버렸다.
+//   잘린 덩어리는 번역이 아예 없고 안 잘린 덩어리는 채워져 들쭉날쭉해졌다.
+//   → (1) 잘림을 감지하고 (2) 잘려도 완성된 항목까지는 건져내고 (3) 호출측이 분할 재시도한다.
+const MAX_OUT = Number(process.env.TRANSLATE_MAX_TOKENS || 8000);
+
+// 잘린 JSON 에서 완성된 객체들만 건져 배열로. 실패하면 [].
+function salvageItems(raw) {
+  const out = [];
+  // {"i":..,..} 형태의 완결된 객체만 정규식 없이 괄호 균형으로 스캔.
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        const chunk = raw.slice(start, i + 1);
+        try {
+          const o = JSON.parse(chunk);
+          if (o && typeof o === "object" && !Array.isArray(o)) out.push(o);
+        } catch {}
+        start = -1;
+      }
+    }
+  }
+  return out;
+}
+
 export async function translateToLanguages(texts, langs) {
   const result = {};
   (langs || []).forEach((l) => (result[l] = new Array(texts.length).fill(null)));
@@ -173,25 +204,29 @@ export async function translateToLanguages(texts, langs) {
     numbered;
 
   try {
-    const res = await client.messages.create({ model: MODEL, max_tokens: 4000, messages: [{ role: "user", content: prompt }] });
-    if (res.stop_reason === "refusal") return { result, cost: 0 };
-    let raw = res.content?.find((b) => b.type === "text")?.text ?? "{}";
-    const s = raw.indexOf("{");
-    const e = raw.lastIndexOf("}");
-    if (s >= 0 && e > s) raw = raw.slice(s, e + 1);
-    const parsed = JSON.parse(raw);
-    for (const item of parsed.t ?? []) {
+    const res = await client.messages.create({ model: MODEL, max_tokens: MAX_OUT, messages: [{ role: "user", content: prompt }] });
+    if (res.stop_reason === "refusal") return { result, cost: 0, truncated: false };
+    const truncated = res.stop_reason === "max_tokens";
+    const raw = res.content?.find((b) => b.type === "text")?.text ?? "{}";
+    // ★잘렸든 아니든 '완결된 항목'만 골라 담는다 → 잘려도 앞부분은 살린다(예전엔 전부 버렸다).
+    const items = salvageItems(raw).filter((o) => o.i !== undefined);
+    let got = 0;
+    for (const item of items) {
       const k = Number(item?.i);
       if (!Number.isInteger(k) || k < 0 || k >= todo.length) continue;
       for (const l of langs) {
         const v = typeof item?.[l] === "string" ? item[l].trim() : "";
-        if (v) result[l][todo[k].i] = v.slice(0, 400);
+        if (v) {
+          result[l][todo[k].i] = v.slice(0, 400);
+          got++;
+        }
       }
     }
     const cost = (res.usage?.input_tokens ?? 0) * IN_USD + (res.usage?.output_tokens ?? 0) * OUT_USD;
-    return { result, cost };
-  } catch {
-    return { result, cost: 0 };
+    // 잘렸거나 받은 게 요청보다 적으면 호출측이 쪼개 재시도하도록 알린다.
+    return { result, cost, truncated: truncated || got < todo.length * langs.length };
+  } catch (e) {
+    return { result, cost: 0, truncated: false, error: String(e?.message ?? e) };
   }
 }
 
@@ -212,11 +247,12 @@ export async function translateScenesMultilang(scenes, langs) {
   if (!items.length) return { translated: 0, cost: 0 };
   let translated = 0;
   let cost = 0;
-  const CHUNK = 50;
-  for (let i = 0; i < items.length; i += CHUNK) {
-    const slice = items.slice(i, i + CHUNK);
-    const { result, cost: c } = await translateToLanguages(slice.map((it) => it.text), langs);
-    cost += c;
+  // ★덩어리 크기를 언어 수로 나눈다 — 50줄 × 2언어면 출력이 max_tokens 를 넘겨 잘렸다.
+  //   (잘리면 그 덩어리 전체가 버려져 번역이 들쭉날쭉해졌다 = 사용자 보고의 원인.)
+  const CHUNK = Math.max(6, Math.floor(Number(process.env.TRANSLATE_CHUNK || 40) / Math.max(1, langs.length)));
+
+  const apply = (slice, result) => {
+    let n = 0;
     slice.forEach((it, k) => {
       let any = false;
       it.b.tracks = it.b.tracks || {};
@@ -227,9 +263,27 @@ export async function translateScenesMultilang(scenes, langs) {
           any = true;
         }
       }
-      if (any) translated++;
+      if (any) n++;
     });
-  }
+    return n;
+  };
+
+  // 한 덩어리 처리 — 잘리거나 빠진 줄이 있으면 반으로 쪼개 재귀 재시도(끝까지 채운다).
+  const run = async (slice, depth = 0) => {
+    if (!slice.length) return;
+    const { result, cost: c, truncated } = await translateToLanguages(slice.map((it) => it.text), langs);
+    cost += c;
+    translated += apply(slice, result);
+    // 아직 안 채워진 줄만 모아 재시도. 쪼개면 출력이 짧아져 잘림이 해소된다.
+    const missing = slice.filter((it) => langs.some((l) => !(it.b.tracks?.[l]?.text)));
+    if (!missing.length || depth >= 4) return;
+    if (!truncated && missing.length === slice.length) return; // 진전이 전혀 없으면 무한재귀 방지
+    const half = Math.max(1, Math.ceil(missing.length / 2));
+    await run(missing.slice(0, half), depth + 1);
+    await run(missing.slice(half), depth + 1);
+  };
+
+  for (let i = 0; i < items.length; i += CHUNK) await run(items.slice(i, i + CHUNK));
   return { translated, cost };
 }
 
@@ -253,7 +307,7 @@ export async function translateScenes(scenes) {
   // 너무 많으면 400줄씩 쪼개 여러 콜(응답 잘림 방지).
   let translated = 0;
   let cost = 0;
-  const CHUNK = 60;
+  const CHUNK = Number(process.env.TRANSLATE_KO_CHUNK || 25); // ★60 은 응답이 잘렸다(들쭉날쭉의 원인)
   for (let i = 0; i < items.length; i += CHUNK) {
     const slice = items.slice(i, i + CHUNK);
     const { translations, cost: c } = await translateTexts(slice.map((it) => it.text));

@@ -1758,6 +1758,11 @@ const PICTURE_STATIC =
 const SINGLE_BEAT =
   "The motion happens exactly ONCE — never loop, repeat or replay it. When it completes, hold the resulting pose still " +
   "for the rest of the clip. "
+// ★구체 예시 — 액션 컷(Kling)에 특히 효과적이었다. 길이 예산이 허락할 때만 덧붙인다.
+//   압축 때 이걸 통째로 빼자 Kling(=액션 담당) 품질이 떨어졌다(사용자 보고).
+const SINGLE_BEAT_EXAMPLES =
+  "For example: a spit falls once and lands; a collar-grab happens once and holds; a kick lands once, the target is " +
+  "knocked back once, and it does not reset and kick again. Never rewind to the starting pose to redo it. "
 // 명시적 동작(버튼·프롬프트)이 없을 때만 — 이미 있는 동작만 이어가고 새 동작 창작 금지.
 const CONTINUE_ONLY =
   "Continue only the action already drawn (someone mid-walk keeps walking); start no new actions or gestures. ";
@@ -1813,7 +1818,7 @@ function buildContentClause(cut, shownCast) {
     " "
   );
 }
-export function buildVideoPrompt(cut, shownCharIds, storyContext, shownCast) {
+export function buildVideoPrompt(cut, shownCharIds, storyContext, shownCast, opts) {
   // ★사용자가 프롬프트를 직접 편집(고급)했으면 그대로 사용 — 전체 제어(자동 조립 무시).
   const override = String(cut?.videoPromptOverride || "").trim();
   if (override) return override;
@@ -1855,8 +1860,13 @@ export function buildVideoPrompt(cut, shownCharIds, storyContext, shownCast) {
   //   스토리 맥락·실제 동작 지시였다 → 내가 넣은 수정들이 전송 직전에 통째로 사라져 영상이 안
   //   바뀌었다(사용자: "고쳐도 그대로/반복된다"의 진짜 원인).
   //   → 가장 중요한 것부터 앞에 놓고, 잘려도 되는 것(그림 속 인물 정지 등)을 뒤로 보낸다.
+  // ★엔진별 길이 예산 — Kling 2500·MiniMax 2000자 상한. 예전엔 둘 다 1900 으로 깎아
+  //   Kling 이 쓸 수 있는 여유를 버렸고, 액션에 유효했던 구체 예시까지 빠져 품질이 떨어졌다.
+  const BUDGET = Number(opts?.budget || process.env.VIDEO_PROMPT_MAX || 1900);
   const parts = [
     SINGLE_BEAT,      // 1. 반복 금지 — 가장 큰 불만
+    SINGLE_BEAT_EXAMPLES, // 1b. 구체 예시 — ★반복이 최우선 불만이라 두 엔진 모두에 항상 넣는다.
+                          //     예산이 모자라면 아래 tail-drop 이 덜 중요한 뒤쪽(그림 속 인물 정지 등)을 버린다.
     idClause,         // 2. 얼굴 정체성 고정
     lifeClause,       // 3. 동작 크기 상한(티어별)
     cameraClause,     // 4. 카메라 정지
@@ -1870,7 +1880,6 @@ export function buildVideoPrompt(cut, shownCharIds, storyContext, shownCast) {
   // ★길이 예산 — 잘림을 API 에 맡기지 않는다. MiniMax 2000·Kling 2500자 상한이라, 넘치면
   //   API 가 문장 중간에서 뒤를 날려버린다(그게 내 수정들이 무력화된 원인).
   //   여기서 '뒤 조각부터' 통째로 빼서 예산에 맞춘다 → 앞의 중요한 지시는 항상 온전히 전달된다.
-  const BUDGET = Number(process.env.VIDEO_PROMPT_MAX || 1900);
   const glue = (a) => a.map((t) => t.trim()).filter(Boolean).join(" ").replace(/\.\.+/g, ".");
   while (parts.length > 1 && glue(parts).length > BUDGET) parts.pop();
   return glue(parts);
@@ -2043,9 +2052,17 @@ export async function runVideo(projectId, payload) {
           // ★엔진 failover — 한 엔진이 죽어도 컷을 잃지 않는다. 콘텐츠 정책 거부는 엔진을
           //   바꿔도 같으니 그대로 올려보내고(위에서 순화 재시도), 그 외 실패(연결·5xx·타임아웃)는
           //   다른 엔진으로 한 번 더 시도한다. 실제 사고: MiniMax "fetch failed" 로 컷 3개 통째 실패.
-          const genVideo = async (prompt) => {
+          // 이 컷에 '보이는' 캐릭터들(캐스팅 sceneIds 기준) — 화자가 이 중에 없으면 입 다뭄.
+          const shownCast = (p.cast ?? []).filter((c) => (c.sceneIds ?? []).includes(s.id));
+          const shownCharIds = shownCast.map((c) => c.id);
+          // ★엔진별 프롬프트 예산 — Kling 2500·MiniMax 2000자 상한(초과분은 API 가 뒤를 자른다).
+          //   둘 다 1900 으로 깎았더니 Kling 이 쓸 수 있는 여유를 버려 품질이 떨어졌다(사용자 보고).
+          const budgetFor = (e) => (e === "kling" ? 2400 : e === "minimax" ? 1900 : 1800);
+          const promptFor = (e) =>
+            buildVideoPrompt(s.cut, shownCharIds, p.storyContext, shownCast, { budget: budgetFor(e) });
+          const genVideo = async (override) => {
             try {
-              return await genOn(eng, prompt);
+              return await genOn(eng, override ?? promptFor(eng));
             } catch (e) {
               const msg = String(e?.message ?? e);
               if (/콘텐츠 정책|content|policy|moderation|safety|flag/i.test(msg)) throw e;
@@ -2053,20 +2070,17 @@ export async function runVideo(projectId, payload) {
               if (alt === eng) throw e;
               await log(`컷 ${s.order + 1} ${eng} 실패(${msg.slice(0, 80)}) → ${alt} 로 재시도`);
               eng = alt; // 비용·배지도 실제 사용 엔진으로 기록되게
-              return await genOn(alt, prompt);
+              return await genOn(alt, override ?? promptFor(alt)); // ★엔진 바뀌면 그 엔진 예산으로 재조립
             }
           };
-          // 이 컷에 '보이는' 캐릭터들(캐스팅 sceneIds 기준) — 화자가 이 중에 없으면 입 다뭄.
-          const shownCast = (p.cast ?? []).filter((c) => (c.sceneIds ?? []).includes(s.id));
-          const shownCharIds = shownCast.map((c) => c.id);
           let videoUrl;
           try {
-            videoUrl = await genVideo(buildVideoPrompt(s.cut, shownCharIds, p.storyContext, shownCast));
+            videoUrl = await genVideo();
           } catch (e) {
             if (/콘텐츠 정책|content|policy|moderation|safety|flag/i.test(String(e?.message ?? e))) {
               await log(`컷 ${s.order + 1} 정책 거부 → 순화 프롬프트로 재시도`);
               videoUrl = await genVideo(
-                "Subtle, gentle, calm cinematic camera movement only. Do not add, change, or emphasize anything in the scene."
+                "Subtle, gentle, calm cinematic camera movement only. The motion happens exactly ONCE — never loop or repeat it. Do not add, change, or emphasize anything in the scene."
               );
             } else throw e;
           }
@@ -2377,6 +2391,7 @@ export async function runDub(projectId, payload) {
   // 합성 유닛 수집: 말풍선 + 내레이션.
   const units = [];
   let alreadyDone = 0; // 이미 더빙돼 스킵한 줄 수(전체 더빙 증분)
+  let missingLang = 0; // 작업 언어 번역이 없어 원문으로 더빙한 줄 수
   for (const s of scenes) {
     const cut = s.cut;
     if (!cut) continue;
@@ -2396,6 +2411,8 @@ export async function runDub(projectId, payload) {
       //   효과음(__sfx__)은 언어 무관. 미설정·번역 없으면 기존대로 원문(b.text) → b.audioUrl.
       const langText = workingLang && b.speakerId !== "__sfx__" ? (b.tracks?.[workingLang]?.text || "").trim() : "";
       const useLang = !!langText;
+      // 번역이 없으면 원문을 더빙한다(줄을 잃지 않는 게 우선). 누락 수는 아래 로그로 알린다.
+      if (workingLang && b.speakerId !== "__sfx__" && !useLang) missingLang++;
       const text = useLang ? langText : (b.text || "").trim();
       if (!text) continue;
       const existing = useLang ? (b.tracks?.[workingLang]?.audioUrl || "") : (b.audioUrl || "");
@@ -2494,7 +2511,10 @@ export async function runDub(projectId, payload) {
   try {
     await recordCost({ projectId, vendor: "tts", model: "dub", costUsd: 0, meta: { kind: "dub", ok, skipped } });
   } catch {}
-  await log(`더빙 완료: 생성 ${ok}개${skipped ? `, 목소리 미배정 스킵 ${skipped}개` : ""}`);
+  await log(
+    `더빙 완료: 생성 ${ok}개${skipped ? `, 목소리 미배정 스킵 ${skipped}개` : ""}` +
+      (missingLang ? `, ${workingLang} 번역 없어 원문으로 더빙 ${missingLang}줄 — 🌐 지금 번역 채우기 후 다시 더빙하면 그 언어로 바뀝니다` : "")
+  );
   return ok;
 }
 

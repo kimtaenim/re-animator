@@ -110,12 +110,15 @@ function audioUnits(cut, workingLang) {
   const units = [];
   for (const b of cut?.bubbles ?? []) {
     // ★작업 언어(§10): 그 언어 트랙의 오디오·텍스트 우선(원문 대신). 효과음은 언어 무관.
-    const tr = workingLang && b.speakerId !== "__sfx__" ? b.tracks?.[workingLang] : null;
+    const isSfx = b.speakerId === "__sfx__";
+    const tr = workingLang && !isSfx ? b.tracks?.[workingLang] : null;
+    // 번역이 없는 줄은 원문으로 폴백한다(줄을 잃지 않는 게 우선 — 사용자 지시).
+    //   언어가 섞이는 건 번역 누락 자체를 고쳐서 해결한다(translate.mjs 잘림 버그 수정).
     const audioUrl = tr?.audioUrl || b.audioUrl;
     if (audioUrl)
       units.push({
         audioUrl,
-        subText: b.speakerId === "__sfx__" || b.noSubtitle ? "" : ((tr?.text || b.text || "").trim()), // 효과음·자막제외 줄은 캡션 없음(소리만)
+        subText: isSfx || b.noSubtitle ? "" : ((tr?.text || b.text || "").trim()), // 효과음·자막제외 줄은 캡션 없음(소리만)
         sx: b.subtitleX,
         sy: b.subtitleY,
         vol: b.volume,
