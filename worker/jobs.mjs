@@ -1733,6 +1733,28 @@ const SUBTLE_LIFE =
   "MOTION: small, slow, restrained — a living photograph. No large or fast movement; err toward too little. Only " +
   "breathing, slow blinks, slight hair/cloth sway, small head move. Keep each face's expression as drawn. Never add " +
   "people or objects not in the still. Keep the art style; no text; no morphing faces or composition. "
+// ★자세한 판(verbose) — 압축 전 원문. Kling 은 상한 2500자로 여유가 있어 이쪽을 쓴다.
+//   압축판만 주자 Kling 품질이 떨어졌다(사용자 보고): 압축 전에는 잘린 프롬프트였어도
+//   동작·정체성 설명의 '자세한 원문'이 앞부분에 들어 있었고 그걸 Kling 이 잘 쓰고 있었다.
+//   MiniMax(2000자)는 자리가 없어 압축판을 그대로 쓴다.
+const SUBTLE_LIFE_FULL =
+  "MOTION: keep it SMALL, slow, calm and RESTRAINED — like a subtle living photograph, not an action scene. " +
+  "Absolutely avoid large, fast, sweeping or exaggerated movement; err on the side of too little motion. " +
+  "Bring the still to life only with gentle breathing, slow blinking, small hair and cloth sway, a slight weight shift, " +
+  "a very small 3D head movement. Keep each character's facial EXPRESSION exactly as drawn — do not change the emotion. " +
+  "NEVER add characters, people or objects not in the still. Keep the art style and colors; no text; " +
+  "do not distort or morph faces or the composition. "
+const TIER_ACTION_LIFE_FULL =
+  "MOTION: this is an ACTION moment — allow ONE contained but energetic beat of movement, a quick decisive motion or a " +
+  "short burst of dynamic energy, stronger than a calm living photo but still controlled and believable. " +
+  "Keep each character's identity, face and the art style intact — NO morphing, NO distortion, NO warping of faces or " +
+  "the composition, and NEVER add characters, people or objects not in the still. "
+const IDENTITY_LOCK_FULL =
+  "IDENTITY LOCK — every visible character must remain the EXACT SAME person for the entire clip: the same face, same " +
+  "facial features, same proportions, same hairstyle and hair color, same clothing, in every single frame. Do NOT let any " +
+  "face drift, morph, re-shape, swap, age, or turn into a different-looking person over time; do NOT regenerate or " +
+  "re-invent facial features between frames. Treat the drawn face as fixed identity that only moves as a rigid whole. "
+
 // ★action 티어(스펙 §3·§4) — 절제 완화: 담긴 강한 한 박자는 허용하되 얼굴·화풍·구도는 보존(모프·왜곡·신규요소 금지).
 const TIER_ACTION_LIFE =
   "MOTION: an ACTION beat — ONE quick, decisive, energetic movement, controlled and believable. Keep every character's " +
@@ -1834,15 +1856,20 @@ export function buildVideoPrompt(cut, shownCharIds, storyContext, shownCast, opt
   else if (action) explicit.push(`Subject action (keep it small and slow): ${action}`);
   else if (hint) explicit.push(`Motion (${cut?.motionTier || "auto"} tier): ${hint}`); // 명시 동작 없을 때 티어 힌트
   if (desc) explicit.push(`What happens in this shot: ${desc}`);
-  // ★모션 티어(§3): action 이면 절제 완화(강한 한 박자), 그 외(talk/idle/emote)는 절제 유지(SUBTLE_LIFE).
-  const lifeClause = cut?.motionTier === "action" ? TIER_ACTION_LIFE : SUBTLE_LIFE;
+  // ★엔진별 길이 예산 — Kling 2500·MiniMax 2000자 상한(초과분은 API 가 뒤를 자른다).
+  const BUDGET = Number(opts?.budget || process.env.VIDEO_PROMPT_MAX || 1900);
+  // 예산 여유가 있는 엔진(Kling 2400)엔 '자세한 판', 좁은 엔진(MiniMax 1900)엔 압축판.
+  const RICH = BUDGET >= 2200;
+  // ★모션 티어(§3): action 이면 절제 완화(강한 한 박자), 그 외(talk/idle/emote)는 절제 유지.
+  const isAction = cut?.motionTier === "action";
   // ★orbit(스펙 §2 계층 C): 유일하게 I2V 에 카메라를 맡긴다(2D 후처리로 시점 회전 불가). 이 컷은
   //   camerafx(후처리)에서 스킵되므로 여기서 궤도 카메라를 지시(이중 무빙 방지). 그 외는 카메라 정지.
   const isOrbit = cut?.cameraWork?.preset === "orbit";
   const cameraClause = isOrbit ? ORBIT_CAMERA : CAMERA_STATIC;
   // 인물이 있는 컷(person/action)엔 얼굴 정체성 고정 + 내용(누가·무엇) 앵커를 붙인다.
   const hasPeople = cut?.type === "person" || cut?.type === "action";
-  const idClause = hasPeople ? IDENTITY_LOCK : "";
+  const idClause = hasPeople ? (RICH ? IDENTITY_LOCK_FULL : IDENTITY_LOCK) : "";
+  const lifeClause = isAction ? (RICH ? TIER_ACTION_LIFE_FULL : TIER_ACTION_LIFE) : RICH ? SUBTLE_LIFE_FULL : SUBTLE_LIFE;
   const contentClause = buildContentClause(cut, shownCast); // 캐스팅 외모 + 장면 묘사
   const storyClause = story
     ? `STORY (motion must not contradict this — e.g. a dying, injured or unconscious character never cheers up or jumps up): ${story}. `
@@ -1860,9 +1887,6 @@ export function buildVideoPrompt(cut, shownCharIds, storyContext, shownCast, opt
   //   스토리 맥락·실제 동작 지시였다 → 내가 넣은 수정들이 전송 직전에 통째로 사라져 영상이 안
   //   바뀌었다(사용자: "고쳐도 그대로/반복된다"의 진짜 원인).
   //   → 가장 중요한 것부터 앞에 놓고, 잘려도 되는 것(그림 속 인물 정지 등)을 뒤로 보낸다.
-  // ★엔진별 길이 예산 — Kling 2500·MiniMax 2000자 상한. 예전엔 둘 다 1900 으로 깎아
-  //   Kling 이 쓸 수 있는 여유를 버렸고, 액션에 유효했던 구체 예시까지 빠져 품질이 떨어졌다.
-  const BUDGET = Number(opts?.budget || process.env.VIDEO_PROMPT_MAX || 1900);
   const parts = [
     SINGLE_BEAT,      // 1. 반복 금지 — 가장 큰 불만
     SINGLE_BEAT_EXAMPLES, // 1b. 구체 예시 — ★반복이 최우선 불만이라 두 엔진 모두에 항상 넣는다.
