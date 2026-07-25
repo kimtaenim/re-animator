@@ -1580,7 +1580,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }).catch(() => {});
   }
   // I2V 영상 엔진(§4) — 자동(키 유무)/Kling/Grok. Kling 만 첫+끝 프레임 보간(액션) 가능.
-  async function setVideoEngine(v: "grok" | "kling" | "auto") {
+  async function setVideoEngine(v: "grok" | "kling" | "minimax" | "auto") {
     setProject((prev) => ({ ...prev, videoEngine: v === "auto" ? undefined : v }));
     await fetch(`/api/project/${project.id}`, {
       method: "PATCH",
@@ -3528,13 +3528,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               placeholder="예: 비극. 주인공은 칼에 찔려 죽어가는 중 — 밝거나 활기찬 동작·미소 금지. 시종 어둡고 무거운 톤."
               className="w-full resize-none rounded border border-[var(--border)] bg-[var(--panel-2)] px-2 py-1 text-xs"
             />
-            {/* 🎬 영상 엔진(§4) — 자동(키 유무)/Kling/Grok. Kling 만 액션 첫+끝 프레임 보간 가능. */}
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]" title="I2V 엔진. Kling 은 첫+끝 프레임 보간(액션)·네이티브 품질. Grok 은 기존. 자동=키 있으면 Kling. Kling 은 워커에 KLING_ACCESS_KEY/SECRET_KEY 필요.">
+            {/* 🎬 영상 엔진(§4) — 자동=티어 배분(액션 Kling·일반 MiniMax), 또는 한 엔진 강제. */}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]" title="자동=티어별 배분(액션 컷은 Kling 의 첫+끝 프레임 보간, 일반 컷은 MiniMax). 특정 엔진을 고르면 전 컷 그 엔진으로 강제. MiniMax 는 워커 env MINIMAX_API_KEY, Kling 은 KLING_API_KEY 필요.">
               <span className="text-[var(--muted)]">🎬 영상 엔진</span>
-              {(["auto", "kling", "grok"] as const).map((v) => {
+              {(["auto", "kling", "minimax", "grok"] as const).map((v) => {
                 const cur = project.videoEngine ?? "auto";
                 const on = cur === v;
-                const label = v === "auto" ? "자동" : v === "kling" ? "Kling(보간)" : "Grok";
+                const label = v === "auto" ? "자동(티어배분)" : v === "kling" ? "Kling(보간)" : v === "minimax" ? "MiniMax" : "Grok";
                 return (
                   <button
                     key={v}
@@ -3546,6 +3546,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   </button>
                 );
               })}
+              <span className="w-full text-[10px] text-[var(--muted)]">자동: 액션 컷=Kling(보간), 일반 컷=MiniMax. 키 없으면 있는 엔진으로 폴백.</span>
             </div>
           </div>
 

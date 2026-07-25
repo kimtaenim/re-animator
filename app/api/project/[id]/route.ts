@@ -68,8 +68,8 @@ export async function PATCH(
       .slice(0, 6);
     changed = true;
   }
-  if (body.videoEngine === "grok" || body.videoEngine === "kling") {
-    project.videoEngine = body.videoEngine; // I2V 엔진(§4). 기본 kling(키 있으면).
+  if (body.videoEngine === "grok" || body.videoEngine === "kling" || body.videoEngine === "minimax") {
+    project.videoEngine = body.videoEngine; // I2V 엔진 강제. 기본(null)=자동 티어 배분.
     changed = true;
   } else if (body.videoEngine === null) {
     project.videoEngine = undefined; // 자동(키 유무로 결정)

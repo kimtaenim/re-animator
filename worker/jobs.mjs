@@ -35,6 +35,7 @@ import {
 import { regenSceneFal, regenSceneMaskedFal } from "./fal.mjs";
 import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { klingVideoFromImage, KLING_VIDEO_COST } from "./kling.mjs";
+import { minimaxVideoFromImage, MINIMAX_VIDEO_COST, hasMinimax } from "./minimax.mjs";
 import { renderCameraFx } from "./cameraRender.mjs";
 import { readCutText, readCutTextTiled, prepareOcrImage, readCutTextPrepared } from "./ocr.mjs";
 import { detectRefBox, cropToBox } from "./refbox.mjs";
@@ -1890,12 +1891,24 @@ export async function runVideo(projectId, payload) {
     cand = cand.filter((s) => set.has(s.id));
   }
   if (cand.length === 0) throw new Error("영상 만들 컷이 없어요(먼저 3단계 재생성)");
-  // ★기본 엔진 = Kling(스펙 §4: 액션=첫+끝 프레임 보간은 Kling 만 가능). 단 키 없으면 Grok 폴백(생성 안 끊김).
-  //   project.videoEngine 로 명시 지정 가능("grok"|"kling"). 명시 kling 인데 키 없으면 Kling 이 명확히 에러냄.
+  // ★엔진 선택 — 이제 '컷별'로 결정한다(사용자: 액션=Kling, 일반=MiniMax).
+  //   - project.videoEngine 이 grok/kling/minimax 로 '명시'되면 전 컷 그 엔진(강제).
+  //   - 기본(auto): action 티어 → Kling(첫+끝 프레임 보간 가능), 나머지 → MiniMax.
+  //     키 없으면 순차 폴백(minimax→kling→grok), 생성이 끊기지 않게.
   const hasKling = !!(process.env.KLING_API_KEY || (process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY));
-  const engine =
-    p.videoEngine === "grok" ? "grok" : p.videoEngine === "kling" ? "kling" : hasKling ? "kling" : "grok";
-  await log(`영상 생성 대상 ${cand.length}컷 · ${engine === "kling" ? "Kling" : "Grok"} · 동시 ${VIDEO_CONCURRENCY}`);
+  const hasMM = hasMinimax();
+  const forced = p.videoEngine === "grok" || p.videoEngine === "kling" || p.videoEngine === "minimax" ? p.videoEngine : null;
+  // 이 컷에 실제로 쓸 엔진. 없는 키는 건너뛰고 있는 것으로 폴백.
+  const engineFor = (cut) => {
+    let want = forced || (cut?.motionTier === "action" ? "kling" : "minimax");
+    if (want === "minimax" && !hasMM) want = hasKling ? "kling" : "grok";
+    if (want === "kling" && !hasKling) want = hasMM ? "minimax" : "grok";
+    return want;
+  };
+  const engLabel = forced
+    ? forced
+    : `auto(액션=${hasKling ? "Kling" : hasMM ? "MiniMax" : "Grok"}·일반=${hasMM ? "MiniMax" : hasKling ? "Kling" : "Grok"})`;
+  await log(`영상 생성 대상 ${cand.length}컷 · ${engLabel} · 동시 ${VIDEO_CONCURRENCY}`);
   // ★이어달리기(soft deadline) — 잡 캡은 12분인데 Kling 은 컷당 2~4분이라, 동시 3이어도
   //   12분에 대략 9~18컷이 한계다. 넘기면 잡은 '타임아웃 실패'로 찍히지만 Promise.race 는
   //   실행 중인 잡을 취소하지 못해 백그라운드로 계속 돌고, 워커는 다음 잡을 집는다
@@ -1910,6 +1923,7 @@ export async function runVideo(projectId, payload) {
   const byId = new Map(); // sceneId → { url } | { error }
   let costTotal = 0;
   let ok = 0;
+  const engCount = {}; // 엔진별 사용 컷 수(비용 집계·표시용)
 
   const flush = async (finalStep) => {
     const pp = await getProject(projectId);
@@ -1957,8 +1971,9 @@ export async function runVideo(projectId, payload) {
           // ★엔진 분기: kling(첫+끝 프레임 보간 가능·품질) 또는 grok. 프롬프트는 공통(buildVideoPrompt).
           //   동작 보간(스펙 §4): 이 컷 interpolationOn 이면 끝 프레임 = 바로 다음(연속) 컷의 이미지.
           //   구조 변경 없음 — 두 컷 다 씬으로 남고, 이 컷이 "이 이미지→다음 이미지"로 움직이는 클립이 된다.
+          const eng = engineFor(s.cut); // ★컷별 엔진(action=Kling, 일반=MiniMax, 폴백 포함)
           const nextScene = scenes.find((x) => x.order > s.order && x.generatedImage);
-          const tailUrl = engine === "kling" && s.cut?.interpolationOn && nextScene ? nextScene.generatedImage : undefined;
+          const tailUrl = eng === "kling" && s.cut?.interpolationOn && nextScene ? nextScene.generatedImage : undefined;
           // ★대기 로그는 '드물게·경과시간과 함께'. 엔진 폴링은 6초마다 tick 하는데 그때마다
           //   찍으면 컷 3개 기준 분당 30줄이라, 진행 로그(120줄)가 몇 분이면 통째로 밀려
           //   정작 필요한 [진단]·실패 사유가 사라진다. 또 같은 문구만 반복되면 진행 중인지
@@ -1972,10 +1987,15 @@ export async function runVideo(projectId, payload) {
             await log(`컷 ${s.order + 1} 생성 대기 ${el}s…(${label})`);
           };
           const genVideo = (prompt) =>
-            engine === "kling"
+            eng === "kling"
               ? klingVideoFromImage(
                   { imageUrl: s.generatedImage, imageTailUrl: tailUrl, prompt, duration: dur },
                   tick(`Kling${tailUrl ? "·보간" : ""}`)
+                )
+              : eng === "minimax"
+              ? minimaxVideoFromImage(
+                  { imageUrl: s.generatedImage, prompt, duration: dur },
+                  tick("MiniMax")
                 )
               : grokVideoFromImage(
                   { imageUrl: s.generatedImage, prompt, duration: grokDur },
@@ -2016,7 +2036,10 @@ export async function runVideo(projectId, payload) {
           buf = null; // 업로드 끝나면 결과 버퍼도 반납
 
           byId.set(s.id, { url });
-          costTotal += (engine === "kling" ? KLING_VIDEO_COST : GROK_VIDEO_COST) * dur; // 엔진별 초당 단가 × 길이
+          // 엔진별 초당 단가 × 길이.
+          const unitCost = eng === "kling" ? KLING_VIDEO_COST : eng === "minimax" ? MINIMAX_VIDEO_COST : GROK_VIDEO_COST;
+          costTotal += unitCost * dur;
+          engCount[eng] = (engCount[eng] || 0) + 1;
           ok++;
           await log(`컷 ${s.order + 1} 영상 완료 (${dur}s)`);
         } catch (e) {
@@ -2031,12 +2054,14 @@ export async function runVideo(projectId, payload) {
   }
 
   try {
+    // 컷별로 엔진이 섞일 수 있어 vendor 는 가장 많이 쓴 엔진 기준(집계는 meta.engines 에).
+    const topEng = Object.entries(engCount).sort((a, b) => b[1] - a[1])[0]?.[0] || "kling";
     await recordCost({
       projectId,
-      vendor: engine === "kling" ? "kling" : "xai",
-      model: engine === "kling" ? "kling-i2v" : "grok-imagine-video",
+      vendor: topEng === "kling" ? "kling" : topEng === "minimax" ? "minimax" : "xai",
+      model: topEng === "kling" ? "kling-i2v" : topEng === "minimax" ? "minimax-hailuo" : "grok-imagine-video",
       costUsd: costTotal,
-      meta: { kind: "video", engine, clips: cand.length, ok },
+      meta: { kind: "video", engines: engCount, clips: cand.length, ok },
     });
   } catch {}
 

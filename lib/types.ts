@@ -287,7 +287,7 @@ export interface Project {
   dubSpeed?: number; // 더빙 말 속도 배수(1=기본, 1.2=조금 빠르게). Typecast tempo / ElevenLabs speed.
   storyContext?: string; // ★스토리 맥락/톤(사용자 작성) — 모든 영상 생성 프롬프트에 주입해 맥락 어긋난 동작(예: 죽어가는데 벌떡 일어남) 방지.
   targetLanguages?: string[]; // ★번역·출력 대상 언어(스펙 §10, 예 ["ja","en"]). 없으면 레거시(단일 — 기존 동작). LANGUAGES 참조.
-  videoEngine?: "grok" | "kling"; // I2V 엔진. 기본 kling(키 있으면; 스펙 §4 첫+끝 프레임 보간은 Kling만). 없으면 자동(키 유무).
+  videoEngine?: "grok" | "kling" | "minimax"; // I2V 엔진 강제. 없으면 자동(티어 배분: 액션=Kling·일반=MiniMax).
   workingLanguage?: string; // ★작업 언어(스펙 §10). ""/미설정=원어(source), "ja"/"en"=그 언어 번역으로 표시·더빙·자막. tracks[lang] 사용.
   // ★섹션(부분 작업) — 한 회분을 몇 개 섹션으로 나눠 부분부분 작업 후 최종에 이어붙이기.
   //   값 = 각 섹션이 '시작하는 컷 인덱스'(order 정렬 기준, 0-base). 항상 0 포함·정렬·중복제거.
