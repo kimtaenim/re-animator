@@ -24,12 +24,30 @@ const MINIMAX_RESOLUTION = process.env.MINIMAX_VIDEO_RESOLUTION || "1080P"; // 7
 // 초당 단가(USD, 대략). env 로 조정.
 export const MINIMAX_VIDEO_COST = Number(process.env.MINIMAX_VIDEO_COST || 0.045);
 
+// ★env 이름 흔들림 흡수 — 키를 넣었는데도 '없음'으로 잡혀 Kling 으로 폴백되는 사고를 막는다.
+//   MINIMAX_API_KEY 를 표준으로 두고, 흔한 변형들도 인정한다(대시보드에서 이름이 조금 달라도 동작).
+const MM_KEY_NAMES = [
+  "MINIMAX_API_KEY",
+  "MINIMAX_KEY",
+  "MINIMAX_API_TOKEN",
+  "MINIMAX_TOKEN",
+  "MINIMAXI_API_KEY",
+  "MINI_MAX_API_KEY",
+];
+function findKey() {
+  for (const n of MM_KEY_NAMES) {
+    const v = (process.env[n] || "").trim();
+    if (v) return v;
+  }
+  return "";
+}
+
 export function hasMinimax() {
-  return !!process.env.MINIMAX_API_KEY;
+  return !!findKey();
 }
 
 function apiKey() {
-  const k = process.env.MINIMAX_API_KEY;
+  const k = findKey();
   if (!k) throw new Error("MINIMAX_API_KEY 없음(Render 워커 환경변수에 넣어주세요)");
   return k;
 }

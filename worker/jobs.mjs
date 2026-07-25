@@ -1897,7 +1897,14 @@ export async function runVideo(projectId, payload) {
   //     키 없으면 순차 폴백(minimax→kling→grok), 생성이 끊기지 않게.
   const hasKling = !!(process.env.KLING_API_KEY || (process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY));
   const hasMM = hasMinimax();
-  const forced = p.videoEngine === "grok" || p.videoEngine === "kling" || p.videoEngine === "minimax" ? p.videoEngine : null;
+  // ★"자동"은 버튼을 눌러야 켜지는 게 아니라 '기본'이어야 한다(사용자 지시).
+  //   문제: videoEngine="kling" 은 MiniMax 도입 전 시대의 기본값이라 옛 프로젝트에 그대로 남아
+  //   있고, 그걸 '강제'로 해석하면 티어 배분이 통째로 죽어 전 컷 Kling 이 된다(왜 다 클링이냐).
+  //   → kling 저장값은 '강제'로 보지 않는다(레거시 기본값과 구분 불가). 티어 배분이 그대로 돈다.
+  //   액션 컷은 어차피 티어 배분에서 Kling 이라 Kling 을 못 쓰게 되는 것도 아니다.
+  //   grok·minimax 는 MiniMax 도입 후에만 저장되므로 명시 선택으로 존중한다.
+  const forced = p.videoEngine === "grok" || p.videoEngine === "minimax" ? p.videoEngine : null;
+  const legacyKling = p.videoEngine === "kling";
   // 이 컷에 실제로 쓸 엔진. 없는 키는 건너뛰고 있는 것으로 폴백.
   const engineFor = (cut) => {
     let want = forced || (cut?.motionTier === "action" ? "kling" : "minimax");
@@ -1910,10 +1917,8 @@ export async function runVideo(projectId, payload) {
     : `auto(액션=${hasKling ? "Kling" : hasMM ? "MiniMax" : "Grok"}·일반=${hasMM ? "MiniMax" : hasKling ? "Kling" : "Grok"})`;
   await log(`영상 생성 대상 ${cand.length}컷 · ${engLabel} · 동시 ${VIDEO_CONCURRENCY}`);
   await log(`[진단] 엔진 키: MiniMax=${hasMM ? "있음" : "없음"} · Kling=${hasKling ? "있음" : "없음"} · 강제=${forced ?? "없음(자동)"}`);
-  // ★"왜 다 Kling?" 의 흔한 원인 = 프로젝트에 videoEngine="kling" 이 저장돼 있어 강제 모드.
-  //   예전에 Kling 토글을 눌렀으면 그 값이 남아 티어 배분을 통째로 무시한다. 명시해준다.
-  if (forced && forced !== "minimax")
-    await log(`⚠ 엔진이 '${forced}' 로 고정돼 있어 티어 배분(액션=Kling·일반=MiniMax)이 무시됩니다 — 4단계 🎬 영상 엔진에서 '자동(티어배분)' 을 선택하세요.`);
+  if (legacyKling)
+    await log(`(옛 설정 videoEngine="kling" 무시 — 티어 배분 자동 적용: 액션=Kling·나머지=MiniMax)`);
   // 대상 컷의 티어 분포 + 배분 결과를 한 줄로 — 왜 그 엔진이 뽑혔는지 즉시 보인다.
   {
     const dist = {};

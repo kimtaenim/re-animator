@@ -3538,10 +3538,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             {/* 🎬 영상 엔진(§4) — 자동=티어 배분(액션 Kling·일반 MiniMax), 또는 한 엔진 강제. */}
             <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]" title="자동=티어별 배분(액션 컷은 Kling 의 첫+끝 프레임 보간, 일반 컷은 MiniMax). 특정 엔진을 고르면 전 컷 그 엔진으로 강제. MiniMax 는 워커 env MINIMAX_API_KEY, Kling 은 KLING_API_KEY 필요.">
               <span className="text-[var(--muted)]">🎬 영상 엔진</span>
-              {(["auto", "kling", "minimax", "grok"] as const).map((v) => {
-                const cur = project.videoEngine ?? "auto";
+              {(["auto", "minimax", "grok"] as const).map((v) => {
+                // ★"kling" 저장값은 MiniMax 도입 전 기본값이라 워커가 '자동'으로 취급한다.
+                //   화면도 같게 보여야 한다(안 그러면 자동인데 Kling 이 켜진 것처럼 보임).
+                const raw = project.videoEngine ?? "auto";
+                const cur = raw === "kling" ? "auto" : raw;
                 const on = cur === v;
-                const label = v === "auto" ? "자동(티어배분)" : v === "kling" ? "Kling(보간)" : v === "minimax" ? "MiniMax" : "Grok";
+                const label = v === "auto" ? "자동(액션=Kling·나머지=MiniMax)" : v === "minimax" ? "MiniMax 전체" : "Grok 전체";
                 return (
                   <button
                     key={v}

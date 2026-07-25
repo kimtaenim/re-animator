@@ -123,7 +123,7 @@ async function tick(types) {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log("[worker] BUILD = minimax-v1 (엔진 티어배분: 액션=Kling·일반=MiniMax + 실사용 엔진/키 진단 로그)");
+console.log("[worker] BUILD = minimax-v2 (자동이 기본 — 옛 kling 저장값 무시, 액션만 Kling·나머지 MiniMax)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);
