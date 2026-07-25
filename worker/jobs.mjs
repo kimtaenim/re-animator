@@ -1909,7 +1909,20 @@ export async function runVideo(projectId, payload) {
     ? forced
     : `auto(액션=${hasKling ? "Kling" : hasMM ? "MiniMax" : "Grok"}·일반=${hasMM ? "MiniMax" : hasKling ? "Kling" : "Grok"})`;
   await log(`영상 생성 대상 ${cand.length}컷 · ${engLabel} · 동시 ${VIDEO_CONCURRENCY}`);
-  await log(`[진단] 엔진 키: MiniMax=${hasMM ? "있음" : "없음"} · Kling=${hasKling ? "있음" : "없음"}`);
+  await log(`[진단] 엔진 키: MiniMax=${hasMM ? "있음" : "없음"} · Kling=${hasKling ? "있음" : "없음"} · 강제=${forced ?? "없음(자동)"}`);
+  // ★"왜 다 Kling?" 의 흔한 원인 = 프로젝트에 videoEngine="kling" 이 저장돼 있어 강제 모드.
+  //   예전에 Kling 토글을 눌렀으면 그 값이 남아 티어 배분을 통째로 무시한다. 명시해준다.
+  if (forced && forced !== "minimax")
+    await log(`⚠ 엔진이 '${forced}' 로 고정돼 있어 티어 배분(액션=Kling·일반=MiniMax)이 무시됩니다 — 4단계 🎬 영상 엔진에서 '자동(티어배분)' 을 선택하세요.`);
+  // 대상 컷의 티어 분포 + 배분 결과를 한 줄로 — 왜 그 엔진이 뽑혔는지 즉시 보인다.
+  {
+    const dist = {};
+    for (const s of cand) {
+      const k = `${s.cut?.motionTier || "미분류"}→${engineFor(s.cut)}`;
+      dist[k] = (dist[k] || 0) + 1;
+    }
+    await log(`[진단] 티어→엔진 배분: ${Object.entries(dist).map(([k, v]) => `${k}×${v}`).join(", ")}`);
+  }
   // ★사용자가 MiniMax 를 골랐는데(강제) 키가 없으면, 조용히 Kling/Grok 로 폴백돼 "선택이 안
   //   먹는다·미니맥스 맞냐"가 된다. 명시적으로 알린다.
   if (forced === "minimax" && !hasMM)
@@ -1927,7 +1940,17 @@ export async function runVideo(projectId, payload) {
   const videoBudgetLeft = () => Date.now() - vt0 < VIDEO_SOFT_MS;
   const leftover = [];
 
-  const byId = new Map(); // sceneId → { url } | { error }
+  // ★엔진·키 상태를 '프로젝트'에 기록 → 앱이 화면에 배너로 보여준다(사용자가 로그를 뒤질
+  //   필요 없게). 워커(Render) env 는 앱(Vercel)에서 못 읽으므로 워커가 여기 적어 전달한다.
+  try {
+    const pk = await getProject(projectId);
+    if (pk) {
+      pk.workerEngines = { minimax: hasMM, kling: hasKling, at: Date.now() };
+      await saveProject(pk);
+    }
+  } catch {}
+
+  const byId = new Map(); // sceneId → { url, engine } | { error }
   let costTotal = 0;
   let ok = 0;
   const engCount = {}; // 엔진별 사용 컷 수(비용 집계·표시용)
@@ -1941,6 +1964,7 @@ export async function runVideo(projectId, payload) {
       if (g.url) {
         s.videoUrl = g.url;
         s.videoError = undefined;
+        if (g.engine) s.videoEngineUsed = g.engine; // ★실제 사용 엔진 — 컷 카드에 배지로 표시
         // ★새 영상 생성 → 옛 영상 기준으로 구운 후처리(fxUrl/fx) 무효화. 안 지우면 카드·미리보기가
         //   fxUrl 을 우선 보여줘서 "다시 생성해도 똑같다"(옛 영상)가 됨. 카메라워크는 새 영상에 다시 구우면 됨.
         delete s.fxUrl;
@@ -2042,7 +2066,7 @@ export async function runVideo(projectId, payload) {
           );
           buf = null; // 업로드 끝나면 결과 버퍼도 반납
 
-          byId.set(s.id, { url });
+          byId.set(s.id, { url, engine: eng });
           // 엔진별 초당 단가 × 길이.
           const unitCost = eng === "kling" ? KLING_VIDEO_COST : eng === "minimax" ? MINIMAX_VIDEO_COST : GROK_VIDEO_COST;
           costTotal += unitCost * dur;

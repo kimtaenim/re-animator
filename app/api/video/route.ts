@@ -62,6 +62,7 @@ export async function GET(req: NextRequest) {
     status: project.steps.scene.status,
     error: project.steps.scene.error,
     scenes: project.scenes,
+    workerEngines: project.workerEngines, // 워커 엔진 키 유무(앱이 배너로 표시)
     progress,
     progressLog,
   });

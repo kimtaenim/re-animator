@@ -627,20 +627,22 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       // ★ 영상 결과(videoUrl/videoError)만 병합 — 씬 전체를 덮어쓰면 그 사이 사용자가
       // 편집 중인 대사·모션·길이 등이 되돌려져 타이핑이 씹힌다. 그래서 필드 단위 병합.
       const vmap = new Map(
-        (d.scenes ?? []).map((x: { id: string; videoUrl?: string; videoError?: string; fxUrl?: string; fx?: unknown }) => [
+        (d.scenes ?? []).map((x: { id: string; videoUrl?: string; videoError?: string; fxUrl?: string; fx?: unknown; videoEngineUsed?: string }) => [
           x.id,
           x,
         ])
       );
       setProject((prev) => ({
         ...prev,
+        // ★워커가 기록한 엔진 키 유무 — 로그 없이 배너로 보여주려고 받아온다.
+        workerEngines: d.workerEngines ?? prev.workerEngines,
         scenes: prev.scenes.map((ps) => {
           const ss = vmap.get(ps.id) as
-            | { videoUrl?: string; videoError?: string; fxUrl?: string; fx?: Project["scenes"][number]["fx"] }
+            | { videoUrl?: string; videoError?: string; fxUrl?: string; fx?: Project["scenes"][number]["fx"]; videoEngineUsed?: Project["scenes"][number]["videoEngineUsed"] }
             | undefined;
           // ★fxUrl/fx 도 병합 — 영상 재생성 시 워커가 낡은 fxUrl 을 지우는데, 이걸 안 받아오면
           //   화면이 계속 옛 구운영상(fxUrl)을 보여줘 "다시 생성해도 안 바뀜"이 된다.
-          return ss ? { ...ps, videoUrl: ss.videoUrl, videoError: ss.videoError, fxUrl: ss.fxUrl, fx: ss.fx } : ps;
+          return ss ? { ...ps, videoUrl: ss.videoUrl, videoError: ss.videoError, fxUrl: ss.fxUrl, fx: ss.fx, videoEngineUsed: ss.videoEngineUsed } : ps;
         }),
         steps: { ...prev.steps, scene: { ...prev.steps.scene, status: d.status, error: d.error } },
       }));
@@ -3552,6 +3554,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 );
               })}
               <span className="w-full text-[10px] text-[var(--muted)]">자동: 액션 컷=Kling(보간), 일반 컷=MiniMax. 키 없으면 있는 엔진으로 폴백.</span>
+              {/* ★워커 엔진 키 상태 — 로그 없이 화면에서 바로 확인. 영상 한 번 돌리면 채워진다. */}
+              {project.workerEngines && (
+                <div className={`w-full rounded px-2 py-1 text-[10px] ${project.workerEngines.minimax ? "bg-[var(--panel-2)] text-[var(--muted)]" : "bg-[var(--danger)]/15 text-[var(--danger)]"}`}>
+                  워커 키 상태: MiniMax <b>{project.workerEngines.minimax ? "있음 ✓" : "없음 ✗"}</b> · Kling <b>{project.workerEngines.kling ? "있음 ✓" : "없음 ✗"}</b>
+                  {!project.workerEngines.minimax && " — MINIMAX_API_KEY 가 Render 워커에 안 잡혔습니다(변수명·서비스 확인). 그래서 일반 컷도 Kling 으로 나갑니다."}
+                </div>
+              )}
+              {!project.workerEngines && (
+                <span className="w-full text-[10px] text-[var(--muted)]">워커 키 상태는 영상을 한 번 생성하면 여기 표시됩니다.</span>
+              )}
             </div>
           </div>
 
@@ -3852,7 +3864,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       {!isCardScene && (s.videoUrl || s.videoError) && (
                         <span className="text-[10px] text-[var(--muted)]" title="이 영상이 생성된 시각 — 다시 생성 후 바뀌면 새 영상이 만들어진 것, 안 바뀌면 생성/갱신 안 됨">
                           {s.videoUrl ? (
-                            <>🕐 영상 {fmtClock(urlTimestamp(s.videoUrl))}{s.fxUrl ? ` · 효과 ${fmtClock(urlTimestamp(s.fxUrl))}` : ""}</>
+                            <>🕐 영상 {fmtClock(urlTimestamp(s.videoUrl))}{s.fxUrl ? ` · 효과 ${fmtClock(urlTimestamp(s.fxUrl))}` : ""}
+                              {s.videoEngineUsed && (
+                                <b className="ml-1 text-[var(--accent)]">· {s.videoEngineUsed === "kling" ? "Kling" : s.videoEngineUsed === "minimax" ? "MiniMax" : "Grok"}</b>
+                              )}
+                            </>
                           ) : (
                             <span className="text-[var(--danger)]">생성 실패</span>
                           )}

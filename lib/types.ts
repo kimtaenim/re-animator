@@ -244,6 +244,7 @@ export interface Scene {
   regenError?: string; // 재생성 실패 사유(있으면)
   videoUrl?: string; // M4 I2V 영상 Blob URL (Grok image-to-video)
   videoError?: string; // 영상 생성 실패 사유(있으면)
+  videoEngineUsed?: "kling" | "minimax" | "grok"; // 이 영상이 실제로 어떤 엔진으로 생성됐는지(카드 배지)
   fxUrl?: string; // 후처리(줌 커브) 구운 영상 Blob URL — 있으면 미리보기·합성이 이걸 사용
   fx?: { effect: string; strength: number }; // 적용된 후처리(크래시인/아웃·램프·펀치)와 강도
   status: StepStatus; // M1 에선 경계 확정 여부 관리에만 사용
@@ -288,6 +289,9 @@ export interface Project {
   storyContext?: string; // ★스토리 맥락/톤(사용자 작성) — 모든 영상 생성 프롬프트에 주입해 맥락 어긋난 동작(예: 죽어가는데 벌떡 일어남) 방지.
   targetLanguages?: string[]; // ★번역·출력 대상 언어(스펙 §10, 예 ["ja","en"]). 없으면 레거시(단일 — 기존 동작). LANGUAGES 참조.
   videoEngine?: "grok" | "kling" | "minimax"; // I2V 엔진 강제. 없으면 자동(티어 배분: 액션=Kling·일반=MiniMax).
+  // ★워커가 마지막 영상 잡 시작 시 기록하는 키 유무(앱은 Render env 를 못 읽으므로 워커가 전달).
+  //   앱이 "MiniMax 키 없음 → Kling 대체" 같은 배너를 로그 없이 화면에 띄우는 데 쓴다.
+  workerEngines?: { minimax: boolean; kling: boolean; at: number };
   workingLanguage?: string; // ★작업 언어(스펙 §10). ""/미설정=원어(source), "ja"/"en"=그 언어 번역으로 표시·더빙·자막. tracks[lang] 사용.
   // ★섹션(부분 작업) — 한 회분을 몇 개 섹션으로 나눠 부분부분 작업 후 최종에 이어붙이기.
   //   값 = 각 섹션이 '시작하는 컷 인덱스'(order 정렬 기준, 0-base). 항상 0 포함·정렬·중복제거.
