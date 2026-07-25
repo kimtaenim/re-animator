@@ -1723,39 +1723,32 @@ function estimateVideoSeconds(cut) {
 //   수준의 미세한 생동감만 요청하고, 카메라 이동은 절대 시키지 않는다.
 // 카메라는 항상 정지(카메라워크는 후처리). 항상 붙는다.
 const CAMERA_STATIC =
-  "Keep the CAMERA completely STATIC — a locked, fixed frame. NO camera movement of any kind: no pan, no tilt, no zoom, " +
-  "no push-in, no dolly, no shake, no rotation. (Camera work is added afterward, so the base clip must stay perfectly stable.) ";
+  "CAMERA: completely static, locked frame — no pan/tilt/zoom/dolly/shake/rotation. "
 // ★orbit(계층 C) 전용 — I2V 에 맡기는 유일한 카메라. 피사체 주위를 천천히 도는 궤도 카메라.
 const ORBIT_CAMERA =
   "Slowly ORBIT the camera around the main subject in a smooth, gentle circular arc, keeping the subject centered and in focus. " +
   "Move the CAMERA only — the subject holds its pose. Keep it slow and cinematic; no fast spinning, no warping, no distortion. ";
 // ★동작 크기 상한 — 사용자가 "동작이 너무 크다"고 지적. 모든 움직임을 작고 절제되게, 과장·빠른 동작 금지.
 const SUBTLE_LIFE =
-  "Keep ALL motion SMALL, slow, calm and RESTRAINED — like a subtle living photograph, not an action scene. " +
-  "Absolutely avoid large, fast, sweeping or exaggerated movement; err on the side of too little motion. " +
-  "Bring the still to life only with gentle breathing, slow blinking, small hair and cloth sway, a slight weight shift, " +
-  "a very small 3D head movement. Keep each character's facial EXPRESSION exactly as drawn — do not change the emotion. " +
-  "NEVER add characters, people or objects not in the still. Keep the art style and colors; no text; " +
-  "do not distort or morph faces or the composition. ";
+  "MOTION: small, slow, restrained — a living photograph. No large or fast movement; err toward too little. Only " +
+  "breathing, slow blinks, slight hair/cloth sway, small head move. Keep each face's expression as drawn. Never add " +
+  "people or objects not in the still. Keep the art style; no text; no morphing faces or composition. "
 // ★action 티어(스펙 §3·§4) — 절제 완화: 담긴 강한 한 박자는 허용하되 얼굴·화풍·구도는 보존(모프·왜곡·신규요소 금지).
 const TIER_ACTION_LIFE =
-  "This is an ACTION moment: allow ONE contained but energetic beat of movement — a quick, decisive motion or a short burst of dynamic energy, " +
-  "stronger than a calm living photo but still controlled and believable. Keep each character's identity, face and the art style intact — " +
-  "NO morphing, NO distortion, NO warping of faces or the composition, and NEVER add characters, people or objects not in the still. ";
+  "MOTION: an ACTION beat — ONE quick, decisive, energetic movement, controlled and believable. Keep every character's " +
+  "identity, face and the art style intact: no morphing, no distortion, no warping, and never add people or objects " +
+  "not in the still. "
 // ★★얼굴 정체성 고정 — 사용자: "한 컷 안에서도 인물 얼굴이 달라진다". I2V 는 프레임마다 얼굴을
 //   다시 생성하다시피 해서 조금씩 다른 사람이 된다(모든 I2V 공통 약점, Kling 만의 문제 아님).
 //   프롬프트로 '같은 사람 = 프레임마다 동일'을 강하게 못박아 표류를 억제한다. 완전 제거는 불가하나
 //   움직임을 줄이면(특히 고개 회전) 함께 줄어든다.
 const IDENTITY_LOCK =
-  "IDENTITY LOCK — every visible character must remain the EXACT SAME person for the entire clip: " +
-  "the same face, same facial features, same proportions, same hairstyle and hair color, same clothing, in every single frame. " +
-  "Do NOT let any face drift, morph, re-shape, swap, age, or turn into a different-looking person over time; " +
-  "do NOT regenerate or re-invent facial features between frames. Treat the drawn face as fixed identity that only moves as a rigid whole. ";
+  "IDENTITY LOCK: every character stays the EXACT SAME person in every frame — same face, features, proportions, hair, " +
+  "clothing. No face drift, morphing, reshaping, swapping or aging; never re-invent facial features between frames. "
 // ★'그림 속 그림'의 인물은 정지 — 사진·초상·포스터·표지·그림·간판·화면 안에 그려진 사람은 움직이지 않는다.
 const PICTURE_STATIC =
-  "Anyone or any face shown INSIDE a photograph, portrait, poster, painting, drawing, magazine or book cover, framed picture, " +
-  "sign, billboard, or screen is a STATIC image — keep them completely still and unchanged. Do NOT animate, move, blink, or bring to life " +
-  "any person depicted inside such a picture-within-the-picture; only the real, live subject(s) of the scene may move subtly. ";
+  "Any person shown inside a photo, portrait, poster, painting, cover, sign or screen is a STATIC image — keep them " +
+  "perfectly still; only the real, live subject(s) may move. "
 // ★★단발성 강제 — 사용자 지적의 핵심: "침을 뱉으면 한 번만 툭 떨어지고, 멱살을 잡으면 한 번만
 //   올라오고, 발차기는 한 번만 맞고 한 번만 날아가야 한다. 지금은 무의미한 동작이 반복된다."
 //   원인: I2V 는 요청 길이를 채우려고 동작을 루프시킨다. 특히 Kling 은 최소 3초인데 action 티어는
@@ -1763,17 +1756,11 @@ const PICTURE_STATIC =
 //   → 프롬프트에서 '한 번만, 반복 금지, 끝나면 정지'를 명시하고 남는 시간은 정지로 채우게 한다.
 //   이 지시는 티어·명시동작 여부와 무관하게 '항상' 붙는다(예전엔 반복 금지 문구가 아예 없었다).
 const SINGLE_BEAT =
-  "CRITICAL — SINGLE TAKE, NO REPETITION: whatever motion happens must happen exactly ONCE. " +
-  "Do NOT loop, repeat, cycle, re-do, or replay any action, gesture or movement. " +
-  "If someone spits, the spit falls once and lands. If someone grabs a collar, the grab happens once and holds. " +
-  "If someone kicks, there is one kick, one impact, and the target is knocked back once — it does not reset and kick again. " +
-  "Once the action is complete, HOLD the resulting pose and let the shot settle into stillness for the remaining time. " +
-  "Filling the clip with repeated or idle busy-work motion is WRONG — a still, settled ending is correct. " +
-  "Never rewind, never return to the starting pose to do it over. ";
+  "The motion happens exactly ONCE — never loop, repeat or replay it. When it completes, hold the resulting pose still " +
+  "for the rest of the clip. "
 // 명시적 동작(버튼·프롬프트)이 없을 때만 — 이미 있는 동작만 이어가고 새 동작 창작 금지.
 const CONTINUE_ONLY =
-  "CONTINUE only the action already depicted in the still (someone drawn mid-walk keeps walking at the same pace); " +
-  "do not START new actions or gestures not already happening. ";
+  "Continue only the action already drawn (someone mid-walk keeps walking); start no new actions or gestures. ";
 // 인물 몸동작 프리셋(버튼) id → 영어 지시. 모두 '작고 절제되게'로 상한을 건다(사용자: 동작이 너무 큼).
 const BODY_MOTION_PROMPTS = {
   still: "The body stays still and grounded; only the faintest signs of life (soft breathing, a slow blink). No stepping, no walking, no gestures.",
@@ -1790,9 +1777,7 @@ const SPEAKING_GUIDANCE =
   "lively facial expression. Keep the same identity and pose; do not add text or captions.";
 // ★이 컷의 보이는 인물이 지금 말하는 게 아니면(대사 없음 or 다른/화면 밖 화자) → 입 다물기 강제.
 const MOUTH_CLOSED_GUIDANCE =
-  "None of the visible characters are speaking in this shot. " +
-  "Keep every visible character's mouth firmly CLOSED and still, with a calm, natural expression. " +
-  "Do NOT add any lip movement, mouth opening, jaw motion, or talking/mouthing motion to anyone on screen.";
+  "Nobody speaks in this shot: keep every mouth firmly CLOSED and still, calm expression. No lip, mouth or jaw movement."
 
 // 이 컷에 '보이는 인물이 직접 하는 대사'가 있나 — 인물/액션 컷 + 화자(charId)가 ★이 컷에 등장하는 인물★일 때만.
 // 내레이션(speakerId=null)·효과음·★다른/화면 밖 인물★이 말하면 false = 이 컷 인물은 입이 안 움직인다.
@@ -1828,7 +1813,7 @@ function buildContentClause(cut, shownCast) {
     " "
   );
 }
-function buildVideoPrompt(cut, shownCharIds, storyContext, shownCast) {
+export function buildVideoPrompt(cut, shownCharIds, storyContext, shownCast) {
   // ★사용자가 프롬프트를 직접 편집(고급)했으면 그대로 사용 — 전체 제어(자동 조립 무시).
   const override = String(cut?.videoPromptOverride || "").trim();
   if (override) return override;
@@ -1854,23 +1839,41 @@ function buildVideoPrompt(cut, shownCharIds, storyContext, shownCast) {
   const hasPeople = cut?.type === "person" || cut?.type === "action";
   const idClause = hasPeople ? IDENTITY_LOCK : "";
   const contentClause = buildContentClause(cut, shownCast); // 캐스팅 외모 + 장면 묘사
-  // 기본: 사진·표지 속 인물 정지. 컷별 animatePicture 켜면(가끔 움직여야 할 때) 생략.
-  let base = `${cameraClause}${lifeClause}${idClause}${contentClause}${cut?.animatePicture ? "" : PICTURE_STATIC}`;
-  // ★스토리 맥락 — 모델이 상황·감정에 어긋나는 동작을 만들지 않게(죽어가는 인물이 웃으며 벌떡 일어나는 등 금지).
-  if (story)
-    base += `STORY CONTEXT (obey the mood and situation; the motion must NOT contradict it — e.g. do not make a dying, injured, sad or unconscious character suddenly cheer up, smile, or jump up): ${story}. `;
+  const storyClause = story
+    ? `STORY (motion must not contradict this — e.g. a dying, injured or unconscious character never cheers up or jumps up): ${story}. `
+    : "";
   // ★명시 동작(버튼·AI 연출 hint·action)이 있어도 '그 동작 하나만' 이라는 제한은 유지한다.
   //   예전엔 explicit 이 있으면 CONTINUE_ONLY 가 통째로 빠져서, AI 연출이 컷마다 동작을 채우는
   //   지금 구조에선 '새 동작 창작 금지'가 사실상 한 번도 적용되지 않았다(무의미한 동작의 원인).
-  base += explicit.length
-    ? `${explicit.join(" ")} Perform ONLY that one motion — add no other actions, gestures or business. `
+  const motionClause = explicit.length
+    ? `${explicit.join(". ")}. Perform ONLY that one motion — no other actions or gestures. `
     : CONTINUE_ONLY;
-  // 단발성·반복 금지는 항상 마지막에(가장 가까이 붙여 지시 강도를 유지).
-  base += SINGLE_BEAT;
-  // ★보이는 인물이 직접 말하는 대사가 있을 때만 입 움직임. 그 외(대사 없음·내레이션·다른/화면밖 화자)는
-  //   전부 입 다물기 강제 — 대사 없는 인물이 입 놀리는 것 방지.
-  if (hasSpokenDialogue(cut, shownCharIds)) return `${base} ${SPEAKING_GUIDANCE}`;
-  return `${base} ${MOUTH_CLOSED_GUIDANCE}`;
+  const mouthClause = hasSpokenDialogue(cut, shownCharIds) ? SPEAKING_GUIDANCE : MOUTH_CLOSED_GUIDANCE;
+
+  // ★★조립 순서 = 중요도 순. 이유: I2V API 는 프롬프트 길이 상한이 있고(MiniMax 2000·Kling 2500자)
+  //   넘으면 '뒤가 잘린다'. 예전 순서에서는 잘리는 뒷부분이 하필 단발성(SINGLE_BEAT)·입 다물기·
+  //   스토리 맥락·실제 동작 지시였다 → 내가 넣은 수정들이 전송 직전에 통째로 사라져 영상이 안
+  //   바뀌었다(사용자: "고쳐도 그대로/반복된다"의 진짜 원인).
+  //   → 가장 중요한 것부터 앞에 놓고, 잘려도 되는 것(그림 속 인물 정지 등)을 뒤로 보낸다.
+  const parts = [
+    SINGLE_BEAT,      // 1. 반복 금지 — 가장 큰 불만
+    idClause,         // 2. 얼굴 정체성 고정
+    lifeClause,       // 3. 동작 크기 상한(티어별)
+    cameraClause,     // 4. 카메라 정지
+    motionClause,     // 5. 이 컷에서 실제로 할 동작
+    mouthClause,      // 6. 입 움직임 규칙
+    contentClause,    // 7. 누가·무엇(앵커)
+    storyClause,      // 8. 스토리 맥락
+    cut?.animatePicture ? "" : PICTURE_STATIC, // 9. 그림 속 인물 정지(가장 뒤 = 잘려도 피해 최소)
+  ].filter(Boolean);
+
+  // ★길이 예산 — 잘림을 API 에 맡기지 않는다. MiniMax 2000·Kling 2500자 상한이라, 넘치면
+  //   API 가 문장 중간에서 뒤를 날려버린다(그게 내 수정들이 무력화된 원인).
+  //   여기서 '뒤 조각부터' 통째로 빼서 예산에 맞춘다 → 앞의 중요한 지시는 항상 온전히 전달된다.
+  const BUDGET = Number(process.env.VIDEO_PROMPT_MAX || 1900);
+  const glue = (a) => a.map((t) => t.trim()).filter(Boolean).join(" ").replace(/\.\.+/g, ".");
+  while (parts.length > 1 && glue(parts).length > BUDGET) parts.pop();
+  return glue(parts);
 }
 
 // ── video(M4): 재생성 컷(generatedImage)을 Grok I2V 로 영상화 → Scene.videoUrl ─
