@@ -2010,7 +2010,7 @@ export async function runVideo(projectId, payload) {
           // ★엔진 분기: kling(첫+끝 프레임 보간 가능·품질) 또는 grok. 프롬프트는 공통(buildVideoPrompt).
           //   동작 보간(스펙 §4): 이 컷 interpolationOn 이면 끝 프레임 = 바로 다음(연속) 컷의 이미지.
           //   구조 변경 없음 — 두 컷 다 씬으로 남고, 이 컷이 "이 이미지→다음 이미지"로 움직이는 클립이 된다.
-          const eng = engineFor(s.cut); // ★컷별 엔진(action=Kling, 일반=MiniMax, 폴백 포함)
+          let eng = engineFor(s.cut); // ★컷별 엔진(action=Kling, 일반=MiniMax, 폴백 포함)
           const nextScene = scenes.find((x) => x.order > s.order && x.generatedImage);
           const tailUrl = eng === "kling" && s.cut?.interpolationOn && nextScene ? nextScene.generatedImage : undefined;
           // ★대기 로그는 '드물게·경과시간과 함께'. 엔진 폴링은 6초마다 tick 하는데 그때마다
@@ -2025,13 +2025,13 @@ export async function runVideo(projectId, payload) {
             lastTick = el;
             await log(`컷 ${s.order + 1} 생성 대기 ${el}s…(${label})`);
           };
-          const genVideo = (prompt) =>
-            eng === "kling"
+          const genOn = (e, prompt) =>
+            e === "kling"
               ? klingVideoFromImage(
                   { imageUrl: s.generatedImage, imageTailUrl: tailUrl, prompt, duration: dur },
                   tick(`Kling${tailUrl ? "·보간" : ""}`)
                 )
-              : eng === "minimax"
+              : e === "minimax"
               ? minimaxVideoFromImage(
                   { imageUrl: s.generatedImage, prompt, duration: dur },
                   tick("MiniMax")
@@ -2040,6 +2040,22 @@ export async function runVideo(projectId, payload) {
                   { imageUrl: s.generatedImage, prompt, duration: grokDur },
                   tick(`Grok ${grokDur}s`)
                 );
+          // ★엔진 failover — 한 엔진이 죽어도 컷을 잃지 않는다. 콘텐츠 정책 거부는 엔진을
+          //   바꿔도 같으니 그대로 올려보내고(위에서 순화 재시도), 그 외 실패(연결·5xx·타임아웃)는
+          //   다른 엔진으로 한 번 더 시도한다. 실제 사고: MiniMax "fetch failed" 로 컷 3개 통째 실패.
+          const genVideo = async (prompt) => {
+            try {
+              return await genOn(eng, prompt);
+            } catch (e) {
+              const msg = String(e?.message ?? e);
+              if (/콘텐츠 정책|content|policy|moderation|safety|flag/i.test(msg)) throw e;
+              const alt = eng === "minimax" ? (hasKling ? "kling" : "grok") : hasMM ? "minimax" : "grok";
+              if (alt === eng) throw e;
+              await log(`컷 ${s.order + 1} ${eng} 실패(${msg.slice(0, 80)}) → ${alt} 로 재시도`);
+              eng = alt; // 비용·배지도 실제 사용 엔진으로 기록되게
+              return await genOn(alt, prompt);
+            }
+          };
           // 이 컷에 '보이는' 캐릭터들(캐스팅 sceneIds 기준) — 화자가 이 중에 없으면 입 다뭄.
           const shownCast = (p.cast ?? []).filter((c) => (c.sceneIds ?? []).includes(s.id));
           const shownCharIds = shownCast.map((c) => c.id);

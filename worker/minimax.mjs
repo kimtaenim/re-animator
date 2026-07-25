@@ -17,7 +17,16 @@
 // ★워커 자기완결 — ../lib import 금지.
 // ============================================================================
 
-const BASE = process.env.MINIMAX_API_BASE || "https://api.minimax.io";
+// ★호스트 failover — MiniMax 는 같은 API 를 여러 도메인으로 서비스한다(전부 동일 응답 확인).
+//   Render 리전에서 한 도메인이 막히면 "fetch failed" 로 컷이 통째로 날아가므로, 순서대로
+//   시도하고 성공한 호스트를 기억해 이후 호출은 바로 그걸 쓴다.
+const BASES = [
+  process.env.MINIMAX_API_BASE,
+  "https://api.minimax.io",
+  "https://api.minimaxi.com",
+  "https://api.minimaxi.chat",
+].filter(Boolean);
+let _goodBase = null; // 마지막으로 성공한 호스트(있으면 우선)
 const TIMEOUT_MS = 60_000;
 const MINIMAX_MODEL = process.env.MINIMAX_VIDEO_MODEL || "MiniMax-Hailuo-2.3";
 const MINIMAX_RESOLUTION = process.env.MINIMAX_VIDEO_RESOLUTION || "1080P"; // 768P|1080P. 합성서 프로젝트 비율로 재크롭.
@@ -52,6 +61,43 @@ function apiKey() {
   return k;
 }
 
+// ★네트워크 오류 재시도 + 원인 노출.
+//   Node fetch 는 연결 실패를 전부 "fetch failed" 로 뭉개고 진짜 이유(ENOTFOUND·ECONNRESET·
+//   ENETUNREACH·인증서 등)를 err.cause 에 숨긴다 → 로그만 봐선 고칠 수가 없다(실제 사고).
+//   여기서 cause 코드를 메시지에 담고, 일시적 오류는 지수 백오프로 재시도한다.
+//   path = "/v1/..." 형태. 성공한 호스트를 _goodBase 에 캐시한다.
+async function mmFetch(path, opts, tries = 2) {
+  const order = _goodBase ? [_goodBase, ...BASES.filter((b) => b !== _goodBase)] : BASES;
+  const errs = [];
+  for (const base of order) {
+    for (let i = 0; i <= tries; i++) {
+      try {
+        const r = await fetch(`${base}${path}`, opts);
+        // 5xx 는 그 호스트 문제일 수 있으니 재시도 후 다음 호스트로.
+        if ((r.status === 429 || r.status === 503) && i < tries) {
+          await new Promise((res) => setTimeout(res, Math.min(8, 2 ** (i + 1)) * 1000));
+          continue;
+        }
+        if (r.status >= 500 && i >= tries) {
+          errs.push(`${new URL(base).host}:HTTP${r.status}`);
+          break; // 다음 호스트 시도
+        }
+        _goodBase = base; // 응답 받았으면 이 호스트는 살아있음
+        return r;
+      } catch (e) {
+        const code = e?.cause?.code || e?.cause?.errno || e?.code || e?.message || "unknown";
+        errs.push(`${new URL(base).host}:${code}`);
+        // 주소·인증서 오류는 이 호스트에선 재시도 무의미 → 즉시 다음 호스트로.
+        if (/ENOTFOUND|EAI_AGAIN|CERT|DEPTH_ZERO|ERR_TLS/i.test(String(code))) break;
+        if (i >= tries) break;
+        await new Promise((res) => setTimeout(res, Math.min(8, 2 ** (i + 1)) * 1000));
+      }
+    }
+  }
+  // 모든 호스트 실패 — 어디서 왜 막혔는지 메시지에 담는다(Node 의 "fetch failed" 는 원인을 숨긴다).
+  throw new Error(`MiniMax 연결 실패 — ${errs.join(", ")}`);
+}
+
 function minimaxError(status, bodyText) {
   let detail = bodyText;
   try {
@@ -83,7 +129,7 @@ async function submit({ imageUrl, prompt, duration }) {
     duration: minimaxDuration(duration),
     resolution: MINIMAX_RESOLUTION,
   };
-  const r = await fetch(`${BASE}/v1/video_generation`, {
+  const r = await mmFetch(`/v1/video_generation`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey()}` },
     body: JSON.stringify(body),
@@ -100,7 +146,7 @@ async function submit({ imageUrl, prompt, duration }) {
 }
 
 async function poll(taskId) {
-  const r = await fetch(`${BASE}/v1/query/video_generation?task_id=${encodeURIComponent(taskId)}`, {
+  const r = await mmFetch(`/v1/query/video_generation?task_id=${encodeURIComponent(taskId)}`, {
     headers: { authorization: `Bearer ${apiKey()}` },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
@@ -117,7 +163,7 @@ async function poll(taskId) {
 
 // file_id → 다운로드 URL(3단계).
 async function retrieve(fileId) {
-  const r = await fetch(`${BASE}/v1/files/retrieve?file_id=${encodeURIComponent(fileId)}`, {
+  const r = await mmFetch(`/v1/files/retrieve?file_id=${encodeURIComponent(fileId)}`, {
     headers: { authorization: `Bearer ${apiKey()}` },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });

@@ -123,7 +123,7 @@ async function tick(types) {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log("[worker] BUILD = prompt-fit-v3 (프롬프트 길이 상한 초과로 반복금지·입다물기 지시가 잘려나가던 것 수정)");
+console.log("[worker] BUILD = mm-robust-v4 (MiniMax 호스트 failover + 엔진 failover + 연결오류 원인 노출)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);
