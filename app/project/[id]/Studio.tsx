@@ -244,11 +244,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   async function saveSectionStarts(starts: number[]) {
     const norm = [...new Set(starts.filter((s) => s >= 0).map((s) => Math.floor(s)))].sort((a, b) => a - b);
     setProject((prev) => ({ ...prev, sectionStarts: norm.length ? norm : undefined }));
-    await fetch(`/api/project/${project.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sectionStarts: norm }),
-    }).catch(() => {});
+    await patchProject({ sectionStarts: norm }, "섹션 경계");
   }
   function divideBySize(n: number) {
     const total = orderedScenes.length;
@@ -1571,62 +1567,61 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 출력 비율 선택(세로/가로/1:1) — 모든 컷이 이 비율로 일관되게 생성됨.
   async function setAspect(aspectRatio: "16:9" | "9:16" | "1:1") {
     setProject((prev) => ({ ...prev, aspectRatio }));
-    await fetch(`/api/project/${project.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ aspectRatio }),
-    }).catch(() => {});
+    await patchProject({ aspectRatio }, "출력 비율");
   }
 
   // 더빙 말 속도(프로젝트 레벨) — 1=기본, 1.2=조금 빠르게. 저장 후 다음 더빙부터 적용.
   async function setDubSpeed(v: number) {
     setProject((prev) => ({ ...prev, dubSpeed: v }));
-    await fetch(`/api/project/${project.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dubSpeed: v }),
-    }).catch(() => {});
+    await patchProject({ dubSpeed: v }, "더빙 속도");
   }
   // 스토리 맥락(프로젝트 레벨) — 모든 영상 프롬프트에 주입. onChange=로컬 즉시, onBlur=서버 저장.
   async function saveStoryContext(v: string) {
-    await fetch(`/api/project/${project.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ storyContext: v }),
-    }).catch(() => {});
+    await patchProject({ storyContext: v }, "스토리 맥락");
   }
+  // ★프로젝트 설정 저장 공용 — 실패를 조용히 삼키지 않는다.
+  //   예전엔 각 설정 함수가 .catch(() => {}) 로 넘겨서, 저장이 안 됐는데도 화면엔 반영된 것처럼
+  //   보였다("일본어 켰는데 먼저 켜라고 나온다"의 원인). ok 가 아니면 에러를 띄운다.
+  const patchProject = async (body: Record<string, unknown>, label: string) => {
+    try {
+      const r = await fetch(`/api/project/${project.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!d?.ok) throw new Error(d?.error ?? `HTTP ${r.status}`);
+      return true;
+    } catch (e) {
+      setError(`${label} 저장 실패 — ${e instanceof Error ? e.message : "네트워크"}`);
+      return false;
+    }
+  };
   // I2V 영상 엔진(§4) — 자동(키 유무)/Kling/Grok. Kling 만 첫+끝 프레임 보간(액션) 가능.
   async function setVideoEngine(v: "grok" | "kling" | "minimax" | "auto") {
     setProject((prev) => ({ ...prev, videoEngine: v === "auto" ? undefined : v }));
-    await fetch(`/api/project/${project.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(v === "auto" ? { videoEngine: null } : { videoEngine: v }),
-    }).catch(() => {});
+    await patchProject(v === "auto" ? { videoEngine: null } : { videoEngine: v }, "영상 엔진");
   }
   // 작업 언어(§10) — 화면 표시·더빙·자막이 이 언어로. ""=원어. 더빙/합성이 tracks[lang] 를 씀.
   async function setWorkingLanguage(lang: string) {
     setProject((prev) => ({ ...prev, workingLanguage: lang || undefined }));
-    await fetch(`/api/project/${project.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workingLanguage: lang }),
-    }).catch(() => {});
+    await patchProject({ workingLanguage: lang }, "작업 언어");
   }
   // 번역·출력 대상 언어(§10) — 토글. 켜면 다음 컷 추출부터 tracks 채움(기존 컷은 재추출 시 반영).
   async function toggleTargetLanguage(lang: string) {
-    // ★함수형 업데이트로 최신 상태에서 계산(빠른 연속 클릭 시 stale 클로저로 한 토글이 유실되던 것 방지).
-    let next: string[] = [];
-    setProject((prev) => {
-      const cur = prev.targetLanguages ?? [];
-      next = cur.includes(lang) ? cur.filter((l) => l !== lang) : [...cur, lang];
-      return { ...prev, targetLanguages: next };
-    });
-    await fetch(`/api/project/${project.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ targetLanguages: next }),
-    }).catch(() => {});
+    // ★★서버에 빈 배열이 전송되던 버그 —
+    //   예전엔 setProject 의 '함수형 업데이터' 안에서 next 를 계산했는데, React 는 그 업데이터를
+    //   나중에(렌더 시) 실행하므로 바로 다음 줄의 fetch 본문을 만들 때 next 가 아직 [] 였다.
+    //   → 화면은 켜진 것으로 보이는데 서버엔 targetLanguages: [] 가 저장돼
+    //     "대상 언어에서 일본어·영어를 먼저 켜주세요" 에러가 났다.
+    //   → projectRef(항상 최신 값) 로 '지금' 계산한 뒤, 그 값으로 화면과 서버를 함께 갱신한다.
+    const cur = projectRef.current.targetLanguages ?? [];
+    const next = cur.includes(lang) ? cur.filter((l) => l !== lang) : [...cur, lang];
+    setProject((prev) => ({ ...prev, targetLanguages: next }));
+    // 실패하면 화면도 되돌린다(서버와 불일치 방지) — 이게 이 버그의 핵심이었다.
+    if (!(await patchProject({ targetLanguages: next }, "대상 언어"))) {
+      setProject((prev) => ({ ...prev, targetLanguages: cur }));
+    }
   }
   // 🌐 번역만 다시 — 재추출 없이 대상 언어 번역을 채운다. 끝나면 프로젝트를 다시 읽어 반영.
   async function runTranslateJob() {
@@ -1767,11 +1762,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 나레이터 목소리(프로젝트 레벨) — 카탈로그에서 고른 값 저장. null=해제.
   async function setNarratorVoice(v: { provider: string; id: string; name: string } | null) {
     setProject((prev) => ({ ...prev, narratorVoice: v ?? undefined }));
-    await fetch(`/api/project/${project.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ narratorVoice: v }),
-    }).catch(() => {});
+    await patchProject({ narratorVoice: v }, "내레이터 목소리");
   }
 
   // 컷별 모델 — 그때그때 컷마다 다른 모델 선택. 미지정 컷은 헤더 기본 모델(genModel) 사용.
