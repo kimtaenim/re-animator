@@ -2702,41 +2702,71 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--accent)] bg-[var(--panel)] px-2.5 py-2 text-[11px] shadow-sm">
           <span className="text-xs font-semibold text-[var(--accent)]">📚 섹션 (부분 작업)</span>
           {sections.length === 0 ? (
+            // ★나누기 전 — 설명·선택지를 늘어놓지 않는다. 분할 직후 워커가 자동으로 나누므로
+            //   보통 이 상태를 볼 일이 없고, 안 나뉘었을 때만 버튼 하나로 끝낸다.
             <>
-              <span className="text-[var(--muted)]">한 회분을 나눠 부분부분 작업 — 서버 부하↓·설정/캐릭터 계승·최종에 이어붙이기</span>
-              <span className="ml-auto flex items-center gap-2">
-                <button type="button" onClick={autoSequence} disabled={seqBusy} className="rounded bg-[var(--accent)] px-2 py-0.5 font-medium text-white disabled:opacity-50" title="컷들을 서사 시퀀스(장면·장소 전환 단위)로 자동으로 묶어 나눕니다. 나눈 뒤 손으로 조정 가능.">
-                  {seqBusy ? "나누는 중…" : "🤖 시퀀스로 자동 나누기"}
+              <button
+                type="button"
+                onClick={autoSequence}
+                disabled={seqBusy}
+                className="rounded bg-[var(--accent)] px-2.5 py-1 font-medium text-white disabled:opacity-50"
+                title="컷들을 서사 시퀀스(장면·장소 전환 단위)로 나눕니다."
+              >
+                {seqBusy ? "나누는 중…" : "시퀀스로 나누기"}
+              </button>
+              <span className="text-[var(--muted)]">— 나누면 섹션별로 1~5단계를 따로 작업합니다</span>
+              <span className="ml-auto flex items-center gap-1 text-[10px] text-[var(--muted)]">
+                <input
+                  type="number"
+                  min={2}
+                  value={divN}
+                  onChange={(e) => setDivN(Math.max(2, Number(e.target.value) || 15))}
+                  className="w-11 rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
+                />
+                컷씩
+                <button type="button" onClick={() => divideBySize(divN)} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]">
+                  균등
                 </button>
-                <span className="flex items-center gap-1 text-[var(--muted)]">
-                  또는 컷
-                  <input type="number" min={2} value={divN} onChange={(e) => setDivN(Math.max(2, Number(e.target.value) || 15))} className="w-12 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5" />
-                  개씩
-                  <button type="button" onClick={() => divideBySize(divN)} className="rounded border border-[var(--border)] px-2 py-0.5 hover:border-[var(--accent)]">나누기</button>
-                </span>
               </span>
             </>
           ) : (
+            // ★나눈 뒤 — 탭만 크게. 조정 버튼은 작게 뒤로 밀어 평소엔 눈에 안 걸리게.
             <>
-              <button type="button" onClick={() => setCurrentSection(null)} className={`rounded border px-2 py-0.5 ${sec == null ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)]"}`}>전체</button>
-              {sections.map((s) => (
+              <button
+                type="button"
+                onClick={() => setCurrentSection(null)}
+                className={`rounded px-2.5 py-1 ${sec == null ? "bg-[var(--accent)] font-medium text-white" : "border border-[var(--border)] text-[var(--muted)] hover:brightness-110"}`}
+              >
+                전체
+              </button>
+              {sections.map((x) => (
                 <button
-                  key={s.i}
+                  key={x.i}
                   type="button"
-                  onClick={() => setCurrentSection(s.i)}
-                  title={`컷 ${s.start + 1}–${s.end}`}
-                  className={`rounded border px-2 py-0.5 ${currentSection === s.i ? "border-[var(--accent)] bg-[var(--panel)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)]"}`}
+                  onClick={() => setCurrentSection(x.i)}
+                  title={`컷 ${x.start + 1}–${x.end}`}
+                  className={`rounded px-2.5 py-1 ${currentSection === x.i ? "bg-[var(--accent)] font-medium text-white" : "border border-[var(--border)] text-[var(--muted)] hover:brightness-110"}`}
                 >
-                  섹션 {s.i + 1} <span className="opacity-60">({s.start + 1}–{s.end})</span>
+                  섹션 {x.i + 1}
+                  <span className="ml-1 opacity-70">({x.end - x.start}컷)</span>
                 </button>
               ))}
               <span className="ml-auto flex items-center gap-1 text-[10px] text-[var(--muted)]">
-                {sec && sec.end - sec.start >= 2 && <button type="button" onClick={() => splitSection(sec.i)} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]" title="이 섹션을 반으로 나눔">✂ 반으로</button>}
-                {sec && sections[sec.i + 1] && <button type="button" onClick={() => mergeSectionWithNext(sec.i)} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]" title="다음 섹션과 합침">⨝ 다음과 합치기</button>}
-                <button type="button" onClick={autoSequence} disabled={seqBusy} className="rounded border border-[var(--accent)] px-1.5 py-0.5 text-[var(--accent)] disabled:opacity-50 hover:bg-[var(--panel)]" title="AI로 서사 시퀀스에 맞춰 다시 나눔">{seqBusy ? "…" : "🤖 자동"}</button>
-                <input type="number" min={2} value={divN} onChange={(e) => setDivN(Math.max(2, Number(e.target.value) || 15))} className="w-12 rounded border border-[var(--border)] bg-[var(--panel)] px-1 py-0.5" />
-                <button type="button" onClick={() => divideBySize(divN)} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]" title="이 컷 수로 다시 나눔">다시 나누기</button>
-                <button type="button" onClick={() => { if (window.confirm("섹션 나눔을 해제할까요? (전체 한 덩어리로)")) clearSections(); }} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--danger)]">해제</button>
+                {sec && sec.end - sec.start >= 2 && (
+                  <button type="button" onClick={() => splitSection(sec.i)} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]" title="이 섹션을 반으로 나눔">✂</button>
+                )}
+                {sec && sections[sec.i + 1] && (
+                  <button type="button" onClick={() => mergeSectionWithNext(sec.i)} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]" title="다음 섹션과 합침">⨝</button>
+                )}
+                <button type="button" onClick={autoSequence} disabled={seqBusy} className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]" title="AI로 다시 나누기">{seqBusy ? "…" : "다시"}</button>
+                <button
+                  type="button"
+                  onClick={() => { if (window.confirm("섹션 나눔을 해제할까요? (전체 한 덩어리로)")) clearSections(); }}
+                  className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--danger)]"
+                  title="섹션 해제"
+                >
+                  해제
+                </button>
               </span>
             </>
           )}

@@ -807,6 +807,22 @@ export async function runSplit(projectId) {
     updatedAt: Date.now(),
   };
   await saveProject(p2);
+
+  // ★★섹션(시퀀스)을 '기본'으로 — 사용자가 찾아 들어가 버튼을 누를 일이 아니다.
+  //   시퀀스로 나눠 부분부분 작업하는 게 이 툴의 기본 작업 방식인데, 지금까지는 섹션 바를
+  //   찾아 '자동 나누기'를 눌러야 했다(그래서 존재조차 못 봤다는 보고).
+  //   → 분할이 끝나면 곧바로 시퀀스 나누기를 자동 적재한다. 사용자는 G1 에 들어오는 순간
+  //     이미 섹션 탭이 있는 상태로 시작한다. 텍스트만 쓰는 가벼운 잡이라 부담도 없다.
+  //   이미 섹션이 있으면(사람이 손으로 나눴거나 재분할) 건드리지 않는다.
+  //   컷이 적으면(12개 이하) 나눌 의미가 없으므로 생략.
+  if (!(p2.sectionStarts ?? []).length && scenes.length > 12) {
+    try {
+      await enqueueJob("sequence", projectId, {});
+      await log(`시퀀스 자동 나누기 예약 — 잠시 뒤 섹션 탭이 생깁니다`);
+    } catch (e) {
+      await log(`시퀀스 자동 나누기 예약 실패(수동으로 나눌 수 있음): ${String(e?.message ?? e).slice(0, 80)}`);
+    }
+  }
   return scenes.length;
 }
 
