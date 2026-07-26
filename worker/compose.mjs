@@ -492,8 +492,36 @@ export async function runJoin(projectId) {
     await log("최종 이어붙이는 중…");
     const listFile = join(dir, "list.txt");
     await writeFile(listFile, files.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"));
-    const finalPath = join(dir, "final.mp4");
+    let finalPath = join(dir, "final.mp4");
     await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", "-movflags", "+faststart", finalPath]);
+
+    // ★★BGM 트랙 + 대사 구간 덕킹(스펙 §6: 오디오 3트랙, 대사·발성 구간 BGM -6dB).
+    //   씬마다 얹으면 경계에서 음악이 끊기므로 '최종 이어붙인 뒤' 한 번만 얹는다.
+    //   sidechaincompress 로 대사(사이드체인)가 있을 때 BGM 을 자동으로 눌러준다 → 수동 구간
+    //   계산 없이 스펙의 덕킹이 성립한다. BGM 이 없으면 이 블록 자체를 건너뛴다(기존 동작).
+    if ((p.bgmUrl || "").trim()) {
+      try {
+        await log("BGM 얹는 중(대사 구간 자동 덕킹)…");
+        const bgmPath = join(dir, "bgm.m4a");
+        await download(p.bgmUrl, bgmPath);
+        const gain = Math.max(0, Math.min(1, Number(p.bgmGain) || 0.35));
+        const withBgm = join(dir, "final-bgm.mp4");
+        // [1:a] BGM 을 영상 길이에 맞춰 루프(-stream_loop) → 볼륨 → 대사([0:a])로 사이드체인 덕킹 → 합침.
+        await run(FFMPEG, [
+          "-y", "-i", finalPath, "-stream_loop", "-1", "-i", bgmPath,
+          "-filter_complex",
+          `[1:a]volume=${gain.toFixed(2)}[bg];` +
+            `[bg][0:a]sidechaincompress=threshold=0.03:ratio=6:attack=20:release=400[bgduck];` +
+            `[0:a][bgduck]amix=inputs=2:duration=first:dropout_transition=0,volume=1.1[a]`,
+          "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+          "-shortest", "-movflags", "+faststart", withBgm,
+        ]);
+        finalPath = withBgm;
+      } catch (e) {
+        // ★실패해도 BGM 없는 최종본으로 진행한다 — 합성이 깨지지 않게.
+        await log(`BGM 얹기 실패(BGM 없이 진행): ${String(e?.message ?? e).slice(0, 100)}`);
+      }
+    }
     await log("업로드 중…");
     const { url } = await put(`project/${projectId}/composed-${Date.now()}.mp4`, createReadStream(finalPath), {
       access: "public",

@@ -21,6 +21,8 @@ export async function PATCH(
         storyContext?: string;
         targetLanguages?: unknown;
         videoEngine?: unknown;
+        bgmUrl?: unknown;
+        bgmGain?: unknown;
         workingLanguage?: unknown;
       }
   );
@@ -78,6 +80,16 @@ export async function PATCH(
   if (typeof body.workingLanguage === "string") {
     // 작업 언어(§10): "" = 원어, "ja"/"en" = 그 언어. 빈 문자열도 저장(원어로 되돌림).
     project.workingLanguage = /^[a-z]{2,5}$/.test(body.workingLanguage) ? body.workingLanguage : undefined;
+    changed = true;
+  }
+  // ★BGM(§6) — URL 문자열, 빈 문자열이면 해제.
+  if (typeof body.bgmUrl === "string") {
+    const u = body.bgmUrl.trim();
+    project.bgmUrl = u ? u.slice(0, 600) : undefined;
+    changed = true;
+  }
+  if (typeof body.bgmGain === "number" && isFinite(body.bgmGain)) {
+    project.bgmGain = Math.max(0, Math.min(1, body.bgmGain));
     changed = true;
   }
   if (Array.isArray(body.sectionStarts)) {

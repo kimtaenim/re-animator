@@ -21,6 +21,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             "image/webp",
             "image/gif",
             "image/bmp",
+            // ★BGM 업로드(§6 오디오 3트랙) — 같은 직접업로드 경로를 재사용한다.
+            "audio/mpeg",
+            "audio/mp3",
+            "audio/wav",
+            "audio/x-wav",
+            "audio/mp4",
+            "audio/aac",
+            "audio/ogg",
           ],
           addRandomSuffix: true,
         };

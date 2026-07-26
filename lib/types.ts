@@ -283,6 +283,9 @@ export interface Project {
   virtualCanvas: VirtualCanvas | null; // 분할 전엔 null
   scenes: Scene[]; // 순서 있는 배열. 분할 결과 → G1 편집 → 확정.
   cast?: Character[]; // M2 캐스팅 결과(등장인물). 확정 전엔 미정.
+  // ★BGM(스펙 §6 오디오 3트랙) — 회분 전체에 깔리는 배경음악. 대사·발성 구간에서 -6dB 덕킹.
+  bgmUrl?: string; // 업로드된 BGM Blob URL(없으면 BGM 트랙 없음 = 기존 동작)
+  bgmGain?: number; // BGM 기본 볼륨 배수(0~1, 기본 0.35)
   composedUrl?: string; // 5단계 합성(이어붙인) 최종 영상 Blob URL(마지막 합성 결과)
   // ★언어별 최종 출력(스펙 §10) — { ja: url, en: url }. 비주얼은 공유하고 오디오·자막만 달라
   //   언어판을 각각 보관해야 언어별 납품이 된다.

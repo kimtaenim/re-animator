@@ -170,6 +170,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [progressLog, setProgressLog] = useState<string[]>([]);
   const [logOpen, setLogOpen] = useState(false); // 📋 작업 로그 상시 패널(단계 무관·스크롤 무관)
   const [translating, setTranslating] = useState(false); // 🌐 번역만 다시 실행 중
+  const [bgmBusy, setBgmBusy] = useState(false); // BGM 업로드 중(§6)
   const [srcOpen, setSrcOpen] = useState<boolean | null>(null); // null=기본(승인되면 접힘)
   const [regenOpen, setRegenOpen] = useState(true); // 3단계 컷 목록 접기
   // ★영상 생성 중인 컷 — 값 = '요청 시점의 옛 videoUrl'. 재생성은 옛 영상이 이미 있으므로
@@ -2339,6 +2340,33 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }, []);
 
   // 5단계 — 씬 영상들을 워커에서 이어붙이기(오디오·자막 없이).
+  // ★BGM 업로드(스펙 §6 오디오 3트랙) — 최종 이어붙인 뒤 한 번 얹고, 대사 구간은 자동 덕킹.
+  //   소스 이미지와 같은 '브라우저 직접 업로드' 경로를 재사용한다(서버리스 본문 한계 회피).
+  async function uploadBgm(file: File) {
+    setError("");
+    setBgmBusy(true);
+    try {
+      const blob = await upload(`project/${project.id}/bgm-${Date.now()}-${file.name}`, file, {
+        access: "public",
+        handleUploadUrl: "/api/source/blob-upload",
+      });
+      setProject((prev) => ({ ...prev, bgmUrl: blob.url }));
+      await patchProject({ bgmUrl: blob.url }, "BGM");
+    } catch (e) {
+      setError(`BGM 업로드 실패 — ${e instanceof Error ? e.message : "알 수 없음"}`);
+    } finally {
+      setBgmBusy(false);
+    }
+  }
+  async function setBgmGain(v: number) {
+    setProject((prev) => ({ ...prev, bgmGain: v }));
+    await patchProject({ bgmGain: v }, "BGM 볼륨");
+  }
+  async function clearBgm() {
+    setProject((prev) => ({ ...prev, bgmUrl: undefined }));
+    await patchProject({ bgmUrl: "" }, "BGM 해제");
+  }
+
   // lang 을 주면 그 언어 오디오·자막으로 합성해 언어별 파일을 만든다(§10). 없으면 작업 언어.
   async function runComposeJob(lang?: string) {
     setError("");
@@ -4517,6 +4545,52 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </div>
             );
           })()}
+          {/* ★BGM(스펙 §6 오디오 3트랙) — 회분 전체에 깔고, 대사·발성 구간에서 자동으로 눌러준다. */}
+          <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-2.5 py-2 text-[11px]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold">🎵 BGM</span>
+              {project.bgmUrl ? (
+                <>
+                  <audio src={project.bgmUrl} controls className="h-7" />
+                  <span className="flex items-center gap-1 text-[var(--muted)]">
+                    볼륨
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={project.bgmGain ?? 0.35}
+                      onChange={(e) => setBgmGain(Number(e.target.value))}
+                      className="w-24"
+                    />
+                    {Math.round((project.bgmGain ?? 0.35) * 100)}%
+                  </span>
+                  <button type="button" onClick={clearBgm} className="rounded border border-[var(--border)] px-2 py-0.5 hover:border-[var(--danger)]">
+                    해제
+                  </button>
+                </>
+              ) : (
+                <label className="cursor-pointer rounded border border-[var(--accent)] px-2 py-1 text-[var(--accent)] hover:bg-[var(--panel-2)]">
+                  {bgmBusy ? "업로드 중…" : "＋ BGM 파일 올리기"}
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    className="hidden"
+                    disabled={bgmBusy}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void uploadBgm(f);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              )}
+              <span className="ml-auto text-[10px] text-[var(--muted)]">
+                대사·발성 구간에서 BGM 이 자동으로 작아집니다(덕킹). 최종 이어붙인 뒤 한 번 얹습니다.
+              </span>
+            </div>
+          </div>
+
           {/* ★★언어별 최종 출력(스펙 §10) — 비주얼은 공유하고 언어별 오디오·자막만 갈아 끼워
               ep01_ja.mp4 / ep01_en.mp4 를 각각 만든다. 재생성 비용 0(비주얼 재사용). */}
           {(project.targetLanguages?.length ?? 0) > 0 && (
