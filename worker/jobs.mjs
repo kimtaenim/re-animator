@@ -5,7 +5,10 @@
 
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, stat } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { put } from "@vercel/blob";
@@ -353,6 +356,17 @@ async function download(url) {
   return Buffer.from(await r.arrayBuffer());
 }
 
+// ★영상은 '메모리에 올리지 않고' 디스크로 흘려 받는다 —
+//   예전엔 download() 가 전체 영상을 Buffer 로 만들고, conformVideo 가 결과를 또 Buffer 로
+//   읽어서, 컷당 큰 버퍼 2개가 RAM 에 남았다. 동시 3이면 최대 6개 → Render 워커 OOM.
+//   compose.mjs 는 원래부터 스트리밍이라 같은 문제가 없었다. 같은 방식으로 맞춘다.
+async function downloadToFile(url, dest) {
+  const r = await fetch(url, { signal: AbortSignal.timeout(180_000) });
+  if (!r.ok) throw new Error(`다운로드 실패 ${r.status} ${String(url).slice(0, 80)}`);
+  if (r.body) await pipeline(Readable.fromWeb(r.body), createWriteStream(dest));
+  else await writeFile(dest, Buffer.from(await r.arrayBuffer()));
+}
+
 // ffmpeg 경로(지연 확정) — ffmpeg-static 있으면 그걸, 없으면 PATH. env override 우선.
 let _ffPath = null;
 async function ffmpegPath() {
@@ -431,6 +445,37 @@ function targetDims(project) {
 // maxSec(선택): 이 길이로 잘라낸다. ★Kling 은 최소 3초라 1~2초짜리 액션 컷도 3초로 받는데,
 //   모델이 남는 시간을 '동작 반복'으로 채운다(사용자: 발차기가 여러 번 나온다). 의도한 길이로
 //   자르면 반복 구간이 사라진다. 트림은 재인코딩 중 -t 라 추가 비용이 없다.
+// srcPath(파일 경로) → outPath. ★버퍼를 만들지 않는다(OOM 회피). 실패 시 null.
+//   호출측이 outDir 을 주면 그 안에 결과를 만들고, 정리는 호출측이 한다(스트림 업로드용).
+async function conformVideoFile(srcPath, project, maxSec, outDir) {
+  try {
+    const ff = await ffmpegPath();
+    const [W, H] = targetDims(project);
+    const out = join(outDir, "conformed.mp4");
+    const vf = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1`;
+    const args = ["-y", "-i", srcPath, "-vf", vf, "-an"];
+    if (maxSec && maxSec > 0) args.push("-t", Number(maxSec).toFixed(2));
+    args.push(
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
+      "-threads", "1", "-tune", "zerolatency", "-bf", "0", "-g", "48",
+      "-max_muxing_queue_size", "256", "-movflags", "+faststart", out
+    );
+    await new Promise((res, rej) => {
+      const pr = spawn(ff, args);
+      let timedOut = false;
+      const kill = setTimeout(() => { timedOut = true; try { pr.kill("SIGKILL"); } catch {} }, 3 * 60 * 1000);
+      let err = "";
+      pr.stderr.on("data", (d) => { err += d; if (err.length > 8000) err = err.slice(-8000); });
+      pr.on("error", (e) => { clearTimeout(kill); rej(e); });
+      pr.on("close", (c) => { clearTimeout(kill); timedOut ? rej(new Error("ffmpeg 타임아웃(3분)")) : (c === 0 ? res() : rej(new Error(`ffmpeg ${c}: ${err.slice(-200)}`))); });
+    });
+    return out;
+  } catch (e) {
+    console.error("[conformVideoFile] 비율 맞춤 실패 → 원본 사용:", String(e?.message ?? e).slice(0, 300));
+    return null;
+  }
+}
+
 async function conformVideo(buf, project, maxSec) {
   let dir;
   try {
@@ -2147,7 +2192,12 @@ export async function runVideo(projectId, payload) {
               );
             } else throw e;
           }
-          let raw = await download(videoUrl);
+          // ★영상은 디스크로 흘려 받고, 인코딩도 파일→파일, 업로드도 스트림 — RAM 에 영상이 없다.
+          const vdir = await mkdtemp(join(tmpdir(), `vid${s.order}-`));
+          let uploadedUrl = null;
+          try {
+            const srcPath = join(vdir, "src.mp4");
+            await downloadToFile(videoUrl, srcPath);
           // ★지정 비율로 채워-크롭 + 오디오 제거. Grok 이 1:1 입력을 가로형으로 내도 여기서 프로젝트 비율로 바로잡음.
           //   실패 시 오디오만 제거(stripAudio), 그것도 실패면 원본.
           // ★★ffmpeg 구간은 직렬(withFfmpeg) — 영상 생성(네트워크, 컷당 수 분)은 3개 병렬로 두되,
@@ -2157,15 +2207,22 @@ export async function runVideo(projectId, payload) {
           // ★길이 트림 — 엔진 최소 길이(Kling 3초)와 의도한 길이(dur)가 다르면 잘라낸다.
           //   단 '동작 보간' 클립은 끝 프레임(다음 컷 이미지)에 도달하는 게 목적이라 자르면
           //   도착 포즈가 사라진다 → 보간 컷은 트림하지 않는다.
-          const trimTo = !tailUrl && dur > 0 ? dur : undefined;
-          let buf = await withFfmpeg(async () => (await conformVideo(raw, p, trimTo)) ?? (await stripAudio(raw)) ?? raw);
-          if (buf !== raw) raw = null; // 인코딩됐으면 원본 버퍼는 즉시 반납(피크 절반)
-          const { url } = await put(
-            `project/${projectId}/vid-${s.order}-${Date.now()}.mp4`,
-            buf,
-            { access: "public", contentType: "video/mp4", addRandomSuffix: false }
-          );
-          buf = null; // 업로드 끝나면 결과 버퍼도 반납
+            const trimTo = !tailUrl && dur > 0 ? dur : undefined;
+            // 인코딩은 여전히 직렬(withFfmpeg) — 동시에 여러 ffmpeg 가 뜨지 않게.
+            const conformed = await withFfmpeg(() => conformVideoFile(srcPath, p, trimTo, vdir));
+            const finalPath = conformed ?? srcPath; // 실패하면 원본 그대로 올린다(끊기지 않게)
+            const size = (await stat(finalPath)).size;
+            const r2 = await put(
+              `project/${projectId}/vid-${s.order}-${Date.now()}.mp4`,
+              Readable.toWeb(createReadStream(finalPath)), // ★스트림 업로드 — 버퍼 안 만든다
+              { access: "public", contentType: "video/mp4", addRandomSuffix: false }
+            );
+            uploadedUrl = r2.url;
+            await log(`컷 ${s.order + 1} 업로드 ${(size / 1048576).toFixed(1)}MB${conformed ? "" : " (비율맞춤 실패 → 원본)"}`);
+          } finally {
+            await rm(vdir, { recursive: true, force: true }).catch(() => {}); // 임시파일 즉시 정리(디스크)
+          }
+          const url = uploadedUrl;
 
           byId.set(s.id, { url, engine: eng });
           // 엔진별 초당 단가 × 길이.

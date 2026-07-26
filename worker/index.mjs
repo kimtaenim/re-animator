@@ -64,6 +64,26 @@ const JOB_STEP = {
   camerafx: "scene",
 };
 
+// ★잡별 피크 메모리 측정 — OOM 이 반복되는데 '어느 잡이 어디서' 를 몰라 추측만 했다.
+//   0.5초마다 RSS 를 재서 잡이 끝날 때(또는 죽기 전 마지막 로그로) 남긴다. 비용은 무시할 수준.
+function memWatch(type) {
+  let peak = 0;
+  const t = setInterval(() => {
+    const rss = process.memoryUsage().rss;
+    if (rss > peak) {
+      peak = rss;
+      // 위험 구간(350MB 이상)은 즉시 남긴다 — 프로세스가 죽으면 나중 로그는 안 남으므로.
+      if (rss > 350 * 1024 * 1024) console.error(`[mem] ${type} RSS ${(rss / 1048576).toFixed(0)}MB ★위험`);
+    }
+  }, 500);
+  return {
+    stop: () => {
+      clearInterval(t);
+      return Math.round(peak / 1048576);
+    },
+  };
+}
+
 async function runJob(job) {
   const fn = await jobFn(job.type);
   const count = await Promise.race([
@@ -98,7 +118,13 @@ async function tick(types) {
   console.log(`[worker] ${type} 시작 job=${job.id} project=${job.projectId}`);
   try {
     await updateJob(job.id, { status: "running" });
-    const count = await runJob(job);
+    const mw = memWatch(type);
+    let count;
+    try {
+      count = await runJob(job);
+    } finally {
+      console.log(`[worker] ${type} 피크 메모리 ${mw.stop()}MB`); // ★어느 잡이 메모리를 먹는지 기록
+    }
     await updateJob(job.id, { status: "done" });
     console.log(`[worker] ${type} 완료 job=${job.id} (${count}컷)`);
   } catch (e) {
@@ -123,7 +149,7 @@ async function tick(types) {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log("[worker] BUILD = mem-v12 (해상도 720p 복귀 + libx264 메모리 조임 — OOM 반복 대응)");
+console.log("[worker] BUILD = mem-v13 (영상 스트리밍 처리 + 잡별 피크 메모리 기록)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);
