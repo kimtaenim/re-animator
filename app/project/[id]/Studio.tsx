@@ -4438,6 +4438,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   )}
                   <CameraWorkEditor
                     cameraWork={s.cut?.cameraWork}
+                    motionTier={s.cut?.motionTier}
                     imageUrl={s.generatedImage ?? s.originalImage}
                     videoUrl={s.videoUrl}
                     onChange={(cw) => updateCut(s.id, { cameraWork: cw })}

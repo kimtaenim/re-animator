@@ -45,9 +45,10 @@ function Slider({
 }
 
 export default function CameraWorkEditor({
-  cameraWork, imageUrl, videoUrl, onChange, onApply, onPreview, applying, busy,
+  cameraWork, motionTier, imageUrl, videoUrl, onChange, onApply, onPreview, applying, busy,
 }: {
   cameraWork?: CameraWork;
+  motionTier?: string; // 티어별 기본 카메라 결정용(§3·§9 — 비어 있으면 자동 적용)
   imageUrl?: string;
   videoUrl?: string; // 있으면: 마우스 올릴 때 '정지 이미지' 대신 '실제 영상(raw)' 위에 카메라를 얹어 재생(굽기 전 실제에 가장 가까움).
   onChange: (cw: CameraWork) => void;
@@ -60,7 +61,15 @@ export default function CameraWorkEditor({
   const vidRef = useRef<HTMLVideoElement>(null);
   // ★실영상 프리뷰는 hover 시에만 <video> 를 mount(떼면 언마운트) — 컷 많을 때 수십 개 동시 디코딩=크롬 먹통 방지.
   const [hover, setHover] = useState(false);
-  const cw = cameraWork;
+  // ★★카메라워크가 비어 있으면 '정지'가 아니라 티어에 맞는 기본 카메라를 자동 적용한다.
+  //   스펙 §9: "연출 설정은 전부 자동으로 채워지며, 사람은 예외만 만진다."
+  //   예전엔 cameraWork 가 없으면 preset=static → 프리뷰가 아무것도 안 움직였고, 기존
+  //   프로젝트는 재추출을 해야만 채워졌다(사용자: 카메라워크가 왜 안 보이냐 — 열흘).
+  //   여기서 티어별 기본을 주면 재추출 없이 모든 컷에 카메라가 생긴다. 사람이 고르면 그게 우선.
+  const tierDefault: CameraPreset =
+    motionTier === "action" ? "crash_zoom" : motionTier === "emote" ? "push_in" : motionTier === "idle" ? "pan" : "push_in";
+  const cw = cameraWork ?? resolveCameraWork(tierDefault, {}, 3.5);
+  const isAuto = !cameraWork; // 자동 적용된 기본값인지(라벨로 정직하게 표시)
   const preset: CameraPreset = cw?.preset ?? "static";
   const layer = presetLayer(preset) as "A" | "B" | "C";
   const cwKey = JSON.stringify(cw ?? {});
@@ -114,6 +123,11 @@ export default function CameraWorkEditor({
       <div className="flex items-center gap-1">
         <span className="font-medium text-[var(--muted)]">🎥 카메라워크</span>
         <span className="rounded bg-[var(--panel)] px-1 text-[9px] text-[var(--muted)]" title="클라이언트 미리보기는 근사입니다. 최종 픽셀은 '적용(굽기)'로 워커가 렌더합니다.">근사</span>
+        {isAuto && (
+          <span className="rounded bg-[var(--panel)] px-1 text-[9px] text-[var(--accent)]" title="이 컷은 카메라워크를 따로 지정하지 않아 모션 티어에 맞는 기본값이 자동 적용됩니다. 프리셋을 고르면 그 값이 저장됩니다.">
+            자동
+          </span>
+        )}
         {layer === "C" && <span className="text-[var(--warn,#c90)]" title="orbit 은 2D 후처리로 불가 — I2V 위임. 클라이언트 미리보기 없이 프록시 렌더가 필요합니다.">프록시 렌더 필수</span>}
         {layer === "B" && <span className="text-[var(--muted)]" title="인물/배경 매트가 준비되면 2레이어로 굽습니다(현재 프리뷰는 근사).">계층 B · 매트 준비 후 굽기</span>}
       </div>
