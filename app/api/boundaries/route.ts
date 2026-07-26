@@ -125,8 +125,31 @@ export async function PUT(req: NextRequest) {
     Array.isArray(body.scopeIds) && body.scopeIds.length ? new Set(body.scopeIds) : null;
   const matchPool = scoped ? project.scenes.filter((s) => scoped.has(s.id)) : project.scenes;
   const oldByGeo = new Map(matchPool.map((s) => [geoKey(s.sourceRegion), s]));
+  // ★경계가 '바뀐' 컷도 연출 자산은 물려받는다 —
+  //   경계를 조금만 드래그하면 지오메트리 키가 달라져 그 컷의 AI 연출 결과(카메라워크·모션티어·
+  //   길이·전환·동작·오디오제안)가 통째로 사라졌다. 비싸게 만든 값이고, 경계를 살짝 옮긴 것이
+  //   '다른 장면이 됐다'는 뜻은 아니다 → 세로 구간이 가장 많이 겹치는 옛 컷에서 이어받는다.
+  //   (대사·이미지는 그대로 새로 처리 — 내용은 낡았을 수 있으므로 기존 규칙 유지.)
+  const DIRECTION_KEYS = [
+    "cameraWork", "motionTier", "tierConfidence", "tierEvidence", "motionPromptHint",
+    "durationSec", "transition", "action", "bodyMotion", "animatePicture",
+    "videoPrompt", "videoPromptOverride", "subtitlePos", "subtitleX", "subtitleY",
+    "noCastRef", "interpolationCandidate", "interpolationOn", "audioSuggestions",
+  ] as const;
+  const overlapBest = (r: { yStart: number; yEnd: number }) => {
+    let best: Scene | undefined;
+    let bestOv = 0;
+    for (const o of project.scenes) {
+      const ov = Math.min(r.yEnd, o.sourceRegion.yEnd) - Math.max(r.yStart, o.sourceRegion.yStart);
+      if (ov > bestOv) { bestOv = ov; best = o; }
+    }
+    // 겹침이 새 구간의 40% 이상일 때만 '같은 장면'으로 본다.
+    return bestOv >= (r.yEnd - r.yStart) * 0.4 ? best : undefined;
+  };
+
   const rebuilt: Scene[] = clean.map(({ cut, ...region }, i) => {
     const old = oldByGeo.get(geoKey(region));
+    const inherited = old ? undefined : overlapBest(region); // 경계 바뀐 컷의 연출 상속원
     return {
       id: old?.id ?? randomUUID(),
       order: i,
@@ -137,7 +160,16 @@ export async function PUT(req: NextRequest) {
       //   경계가 바뀐 컷은 내용이 어차피 낡았으므로 새로 시작(추출이 다시 OCR).
       // 경계 그대로면 서버 cut 위에 편집만 덮음(bubbles 보존 → 추출이 재OCR 스킵, 속도↑).
       // 경계 바뀐 컷은 내용이 낡았으니 bubbles 를 비워 추출이 그 컷만 새로 OCR 하게 한다.
-      cut: old?.cut ? { ...old.cut, ...cut } : { ...cut, bubbles: [] },
+      cut: old?.cut
+        ? { ...old.cut, ...cut }
+        : (() => {
+            // 경계 바뀐 컷: 내용(대사)은 새로 시작하되 연출 자산만 겹치는 옛 컷에서 이어받는다.
+            const base = { ...cut, bubbles: [] } as CutOntology;
+            const src = inherited?.cut as unknown as Record<string, unknown> | undefined;
+            const dst = base as unknown as Record<string, unknown>;
+            if (src) for (const k of DIRECTION_KEYS) if (src[k] !== undefined) dst[k] = src[k];
+            return base;
+          })(),
       originalImage: old?.originalImage,
       regenMode: old?.regenMode,
       generatedImage: old?.generatedImage,
