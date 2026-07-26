@@ -29,7 +29,9 @@ const BASES = [
 let _goodBase = null; // 마지막으로 성공한 호스트(있으면 우선)
 const TIMEOUT_MS = 60_000;
 const MINIMAX_MODEL = process.env.MINIMAX_VIDEO_MODEL || "MiniMax-Hailuo-2.3";
-const MINIMAX_RESOLUTION = process.env.MINIMAX_VIDEO_RESOLUTION || "1080P"; // 768P|1080P. 합성서 프로젝트 비율로 재크롭.
+// ★768P — 최종 출력이 720p 급(targetDims)이라 1080P 는 디코딩 비용만 내고 버려진다.
+//   1080P 로 두었다가 워커 OOM 반복. 필요 시 env MINIMAX_VIDEO_RESOLUTION=1080P.
+const MINIMAX_RESOLUTION = process.env.MINIMAX_VIDEO_RESOLUTION || "768P"; // 768P|1080P
 // 초당 단가(USD, 대략). env 로 조정.
 export const MINIMAX_VIDEO_COST = Number(process.env.MINIMAX_VIDEO_COST || 0.045);
 

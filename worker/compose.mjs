@@ -406,7 +406,9 @@ export async function runCompose(projectId, payload) {
         "-t", finalDur.toFixed(2), "-r", String(FPS),
         // -threads 2: x264 가 호스트 코어 수만큼 스레드·프레임버퍼를 잡아 피크가 커짐(실측
         // 596→404MB). 과거 문제였던 -threads 1+ultrafast 와 달리 2+veryfast 는 로컬 검증 통과.
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23", "-threads", "2",
+        // ★메모리 절약(OOM 반복) — 스레드 1 + 룩어헤드/B프레임 제거로 libx264 버퍼를 줄인다.
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23",
+        "-threads", "1", "-tune", "zerolatency", "-bf", "0", "-g", "48", "-max_muxing_queue_size", "256",
         "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out
       );
       await log(`씬 ${i + 1}/${scenes.length} 인코딩(자막 ${capPaths.length}·${finalDur.toFixed(1)}s)…`);

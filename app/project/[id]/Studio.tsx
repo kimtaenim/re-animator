@@ -2554,6 +2554,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 진행 바 — 로그의 "(N%)" 를 뽑아 표시(없으면 안 그림). 모든 워커 단계 공용.
   // 진행바 + 예상시간 — 워커 로그의 (N%) 또는 "N/M" 에서 퍼센트 추출, 경과시간으로 남은 시간 추정.
   const progressAnchor = useRef<{ at: number; pct: number } | null>(null);
+  const lastLogLenRef = useRef<number>(0); // 진행 로그 길이 — 줄어들면 새 잡(resetProgress) 신호
   // 한 줄에서 진행률(%) 추출 — "(N%)" 우선, 없으면 "N/M"(예: "대사 읽기 3/43", "이미지 생성 1~6/12").
   const parsePct = (line: string): number | null => {
     if (!line) return null;
@@ -2574,17 +2575,30 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       }
     if (pct === null) return null;
     pct = Math.max(0, Math.min(100, pct));
-    // ETA(대략) — 처음 본 진행률(anchor) 이후 경과시간을 진행량으로 나눠 남은 시간 선형 추정.
     const now = Date.now();
     const a = progressAnchor.current;
-    if (!a || pct < a.pct - 1) progressAnchor.current = { at: now, pct }; // 새 작업/되감김이면 기준 재설정
+    // ★기준점(anchor) 리셋 조건 —
+    //   (1) 진행률이 뒤로 감 = 새 작업, (2) ★진행 로그가 짧아짐 = 워커가 resetProgress 한 것(새 잡).
+    //   예전엔 (1)만 봤다. 새 잡이 시작돼도 %가 안 떨어지면 '이전 잡의 시각'이 기준으로 남아,
+    //   경과시간이 잡 시작 전부터 계산돼 남은 시간이 폭증했다(13컷인데 "약 96분 남음").
+    const logLen = progressLog.length;
+    const shrank = logLen < (lastLogLenRef.current ?? 0);
+    lastLogLenRef.current = logLen;
+    if (!a || pct < a.pct - 1 || shrank) progressAnchor.current = { at: now, pct };
     let eta = "";
-    if (pct > 0 && pct < 100 && progressAnchor.current) {
-      const el = (now - progressAnchor.current.at) / 1000;
-      const done = (pct - progressAnchor.current.pct) / 100;
-      if (done > 0.03 && el > 3) {
-        const remain = (el / done) * (1 - done);
-        eta = remain > 90 ? `약 ${Math.round(remain / 60)}분 남음` : `약 ${Math.round(remain)}초 남음`;
+    const an = progressAnchor.current;
+    if (pct > 0 && pct < 100 && an) {
+      const el = (now - an.at) / 1000; // 기준점 이후 경과(초)
+      const gained = pct - an.pct; // 기준점 이후 늘어난 진행률(%p)
+      // ★수식 수정 — 예전 (el/done)*(1-done) 은 '증가분'과 '전체 남은 비율'을 섞어 써서 값이 폭증했다.
+      //   올바른 계산: 속도(%p/초) = gained / el → 남은 시간 = (100 - pct) / 속도.
+      //   표본이 빈약하면(증가 3%p 미만·10초 미만) 추정하지 않는다 — 틀린 숫자보다 안 보이는 게 낫다.
+      if (gained >= 3 && el >= 10) {
+        const rate = gained / el;
+        const remain = (100 - pct) / rate;
+        if (remain > 0 && remain < 6 * 3600) {
+          eta = remain > 90 ? `약 ${Math.round(remain / 60)}분 남음` : `약 ${Math.round(remain)}초 남음`;
+        }
       }
     }
     return { pct, eta };

@@ -444,7 +444,14 @@ async function conformVideo(buf, project, maxSec) {
     await new Promise((res, rej) => {
       const args = ["-y", "-i", inp, "-vf", vf, "-an"];
       if (maxSec && maxSec > 0) args.push("-t", Number(maxSec).toFixed(2));
-      args.push("-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", out);
+      // ★메모리 절약 — Render 워커는 512MB 급이고 sharp 까지 상주한다. libx264 는 스레드·lookahead
+      //   버퍼가 메모리를 크게 먹으므로 조인다: threads 1, 룩어헤드 비활성(zerolatency), B프레임 0.
+      //   품질 영향은 미미(crf 20 유지)하고 OOM 여유는 크게 늘어난다.
+      args.push(
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
+        "-threads", "1", "-tune", "zerolatency", "-bf", "0", "-g", "48",
+        "-max_muxing_queue_size", "256", "-movflags", "+faststart", out
+      );
       const pr = spawn(ff, args);
       // ★매달림 방어: ffmpeg 가 멈추면 SIGKILL(고아 프로세스 누적→OOM 방지). 3분 캡(비율 맞춤은 짧은 작업).
       let timedOut = false;
