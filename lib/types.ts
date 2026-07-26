@@ -283,7 +283,10 @@ export interface Project {
   virtualCanvas: VirtualCanvas | null; // 분할 전엔 null
   scenes: Scene[]; // 순서 있는 배열. 분할 결과 → G1 편집 → 확정.
   cast?: Character[]; // M2 캐스팅 결과(등장인물). 확정 전엔 미정.
-  composedUrl?: string; // 5단계 합성(이어붙인) 최종 영상 Blob URL
+  composedUrl?: string; // 5단계 합성(이어붙인) 최종 영상 Blob URL(마지막 합성 결과)
+  // ★언어별 최종 출력(스펙 §10) — { ja: url, en: url }. 비주얼은 공유하고 오디오·자막만 달라
+  //   언어판을 각각 보관해야 언어별 납품이 된다.
+  composedByLang?: Record<string, string>;
   narratorVoice?: { provider: string; id: string; name: string }; // 나레이션 더빙 목소리(카탈로그에서 선택)
   dubSpeed?: number; // 더빙 말 속도 배수(1=기본, 1.2=조금 빠르게). Typecast tempo / ElevenLabs speed.
   storyContext?: string; // ★스토리 맥락/톤(사용자 작성) — 모든 영상 생성 프롬프트에 주입해 맥락 어긋난 동작(예: 죽어가는데 벌떡 일어남) 방지.

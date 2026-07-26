@@ -196,7 +196,12 @@ export async function runCompose(projectId, payload) {
 
   const p = await getProject(projectId);
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
-  const workingLang = (p.workingLanguage || "").trim(); // ★작업 언어(§10) — 자막·오디오를 이 언어로
+  // ★★언어별 출력(스펙 §10) — payload.lang 이 오면 그 언어로 합성한다(작업 언어 무시).
+  //   같은 비주얼 트랙에 언어별 오디오·자막만 갈아 끼워 ep01_ja.mp4 / ep01_en.mp4 를 따로 만든다.
+  //   비주얼(영상·카메라워크)은 언어 무관 공유 자산이라 재생성 비용이 0 — 스펙이 말한 비용 이점.
+  //   payload.lang 없으면 기존대로 project.workingLanguage 사용(회귀 0).
+  const outLang = payload?.lang != null ? String(payload.lang).trim() : null;
+  const workingLang = (outLang ?? p.workingLanguage ?? "").trim(); // 자막·오디오 언어
   // 자막 씬(무성영화 카드, text 컷)은 영상 없이도 합성 대상 — 검은 배경+카드로 직접 렌더.
   const isCardScene = (s) => !s.videoUrl && s.cut?.type === "text" && subtitleUnits(s.cut, workingLang).length > 0;
   const scenes = (p.scenes ?? [])
@@ -424,7 +429,9 @@ export async function runCompose(projectId, payload) {
     await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", "-movflags", "+faststart", finalPath]);
 
     await log("업로드 중…");
-    const { url } = await put(`project/${projectId}/composed-${Date.now()}.mp4`, createReadStream(finalPath), {
+    // 파일명에 언어 코드 — 스펙 §10(ep01_ja.mp4). 언어 미지정이면 기존 이름 유지.
+    const langTag = workingLang ? `-${workingLang}` : "";
+    const { url } = await put(`project/${projectId}/composed${langTag}-${Date.now()}.mp4`, createReadStream(finalPath), {
       access: "public",
       contentType: "video/mp4",
       addRandomSuffix: false,
@@ -436,6 +443,8 @@ export async function runCompose(projectId, payload) {
       pp.sectionVideos = { ...(pp.sectionVideos ?? {}), [sectionKey]: url };
     } else {
       pp.composedUrl = url;
+      // 언어별 결과 보관 — 일본어판·영어판을 각각 유지해야 언어별 납품이 된다(§10).
+      if (workingLang) pp.composedByLang = { ...(pp.composedByLang ?? {}), [workingLang]: url };
       pp.steps.compose = { ...pp.steps.compose, kind: "compose", status: "review", error: undefined, updatedAt: Date.now() };
     }
     await saveProject(pp);
