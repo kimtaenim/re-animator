@@ -2045,7 +2045,24 @@ export async function runVideo(projectId, payload) {
           //   구조 변경 없음 — 두 컷 다 씬으로 남고, 이 컷이 "이 이미지→다음 이미지"로 움직이는 클립이 된다.
           let eng = engineFor(s.cut); // ★컷별 엔진(action=Kling, 일반=MiniMax, 폴백 포함)
           const nextScene = scenes.find((x) => x.order > s.order && x.generatedImage);
-          const tailUrl = eng === "kling" && s.cut?.interpolationOn && nextScene ? nextScene.generatedImage : undefined;
+          // ★끝 프레임 결정 —
+          //   (1) 동작 보간 켠 컷: 끝 프레임 = 다음 연속 컷 이미지(원래 기능).
+          //   (2) 그 외 '잔잔한' 컷: 끝 프레임 = 자기 자신(앵커링). I2V 는 프레임마다 얼굴을 다시
+          //       그려 시간이 갈수록 다른 사람이 되는데(사용자: 동영상 얼굴 고정 불안), 끝을 원본
+          //       그림으로 못박으면 클립이 원본 얼굴로 돌아와야 하므로 표류가 구조적으로 묶인다.
+          //   ★액션 컷은 앵커링하지 않는다 — 끝이 시작과 같아지면 '한 번만 차고 끝'이 아니라
+          //     되감기가 되어 SINGLE_BEAT 규칙과 정면 충돌한다(사용자 지시: 되감기 금지).
+          //   문제 생기면 워커 env VIDEO_ANCHOR_TAIL=0 으로 즉시 끌 수 있다.
+          const ANCHOR = (process.env.VIDEO_ANCHOR_TAIL ?? "1") !== "0";
+          // ★앵커는 '움직임이 연속적이고 되돌아와도 자연스러운' 티어에만 — talk(입·표정)·idle(숨·머리카락).
+          //   emote(표정 A→B)·action(한 박자)에 앵커를 걸면 끝이 시작과 같아져 '되감기'가 되고,
+          //   침 뱉기·발차기가 되돌아가 버린다(사용자 금지 사항). 그 티어는 앵커 없이 트림으로 처리.
+          const tier = s.cut?.motionTier;
+          const anchorable = tier === "talk" || tier === "idle";
+          let tailUrl;
+          if (s.cut?.interpolationOn && nextScene) tailUrl = nextScene.generatedImage; // (1) 보간
+          else if (ANCHOR && anchorable) tailUrl = s.generatedImage; // (2) 자기 자신으로 앵커(표류 억제)
+          // Grok 은 끝 프레임 미지원 → 앵커·보간 모두 무시된다(전달만 하고 grok.mjs 가 안 씀).
           // ★대기 로그는 '드물게·경과시간과 함께'. 엔진 폴링은 6초마다 tick 하는데 그때마다
           //   찍으면 컷 3개 기준 분당 30줄이라, 진행 로그(120줄)가 몇 분이면 통째로 밀려
           //   정작 필요한 [진단]·실패 사유가 사라진다. 또 같은 문구만 반복되면 진행 중인지
@@ -2066,8 +2083,8 @@ export async function runVideo(projectId, payload) {
                 )
               : e === "minimax"
               ? minimaxVideoFromImage(
-                  { imageUrl: s.generatedImage, prompt, duration: dur },
-                  tick("MiniMax")
+                  { imageUrl: s.generatedImage, imageTailUrl: tailUrl, prompt, duration: dur },
+                  tick(tailUrl ? (s.cut?.interpolationOn ? "MiniMax·보간" : "MiniMax·앵커") : "MiniMax")
                 )
               : grokVideoFromImage(
                   { imageUrl: s.generatedImage, prompt, duration: grokDur },

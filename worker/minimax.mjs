@@ -121,11 +121,17 @@ function minimaxDuration(seconds) {
   return s <= 8 ? 6 : 10;
 }
 
-async function submit({ imageUrl, prompt, duration }) {
+// ★끝 프레임 모델 — first+last 프레임은 Hailuo-02 만 지원(2.3 은 미지원, 문서 확인).
+const MINIMAX_TAIL_MODEL = process.env.MINIMAX_TAIL_MODEL || "MiniMax-Hailuo-02";
+
+async function submit({ imageUrl, imageTailUrl, prompt, duration }) {
+  // 끝 프레임이 있으면 그걸 지원하는 모델로 바꿔 보낸다.
+  const model = imageTailUrl ? MINIMAX_TAIL_MODEL : MINIMAX_MODEL;
   const body = {
-    model: MINIMAX_MODEL,
+    model,
     prompt: String(prompt || "").slice(0, 2000),
     first_frame_image: imageUrl, // 공개 URL 그대로
+    ...(imageTailUrl ? { last_frame_image: imageTailUrl } : {}),
     duration: minimaxDuration(duration),
     resolution: MINIMAX_RESOLUTION,
   };
@@ -175,9 +181,10 @@ async function retrieve(fileId) {
 }
 
 // 제출 → 완료까지 폴링(최대 10분) → 비디오 URL. klingVideoFromImage 와 같은 시그니처.
-//   imageTailUrl 은 MiniMax 기본 I2V 미지원이라 무시(보간 컷은 Kling 라우팅).
-export async function minimaxVideoFromImage({ imageUrl, prompt, duration }, onTick) {
-  const id = await submit({ imageUrl, prompt, duration });
+//   ★imageTailUrl 지원 — 끝 프레임을 '첫 프레임과 같은 이미지'로 주면 클립이 원본 얼굴로
+//   돌아와야 하므로 얼굴 표류가 구조적으로 묶인다(잔잔한 컷용). 다음 컷 이미지를 주면 동작 보간.
+export async function minimaxVideoFromImage({ imageUrl, imageTailUrl, prompt, duration }, onTick) {
+  const id = await submit({ imageUrl, imageTailUrl, prompt, duration });
   const started = Date.now();
   const maxMs = 10 * 60 * 1000;
   for (;;) {

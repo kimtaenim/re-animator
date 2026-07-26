@@ -112,13 +112,17 @@ function audioUnits(cut, workingLang) {
     // ★작업 언어(§10): 그 언어 트랙의 오디오·텍스트 우선(원문 대신). 효과음은 언어 무관.
     const isSfx = b.speakerId === "__sfx__";
     const tr = workingLang && !isSfx ? b.tracks?.[workingLang] : null;
-    // 번역이 없는 줄은 원문으로 폴백한다(줄을 잃지 않는 게 우선 — 사용자 지시).
-    //   언어가 섞이는 건 번역 누락 자체를 고쳐서 해결한다(translate.mjs 잘림 버그 수정).
-    const audioUrl = tr?.audioUrl || b.audioUrl;
+    // ★★소리와 자막은 '같은 줄에서 반드시 같은 언어'여야 한다.
+    //   예전엔 자막은 번역문(tr.text), 소리는 원문 오디오(b.audioUrl)로 갈려서 — 번역만 채우고
+    //   재더빙을 안 한 줄에서 자막 일본어 + 소리 중국어가 됐다(사용자: 더빙·자막 언어 에러).
+    //   → 번역 오디오가 있으면 번역 자막을, 없으면(원문 오디오를 쓰므로) 원문 자막을 쓴다.
+    const useTrack = !!tr?.audioUrl;
+    const audioUrl = useTrack ? tr.audioUrl : b.audioUrl; // 줄을 잃지 않게 원문 오디오로 폴백
+    const pairedText = useTrack ? (tr.text || b.text || "") : (b.text || "");
     if (audioUrl)
       units.push({
         audioUrl,
-        subText: isSfx || b.noSubtitle ? "" : ((tr?.text || b.text || "").trim()), // 효과음·자막제외 줄은 캡션 없음(소리만)
+        subText: isSfx || b.noSubtitle ? "" : pairedText.trim(), // 효과음·자막제외 줄은 캡션 없음(소리만)
         sx: b.subtitleX,
         sy: b.subtitleY,
         vol: b.volume,

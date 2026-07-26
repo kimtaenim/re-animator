@@ -172,7 +172,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [translating, setTranslating] = useState(false); // 🌐 번역만 다시 실행 중
   const [srcOpen, setSrcOpen] = useState<boolean | null>(null); // null=기본(승인되면 접힘)
   const [regenOpen, setRegenOpen] = useState(true); // 3단계 컷 목록 접기
-  const [vidPending, setVidPending] = useState<Set<string>>(() => new Set()); // 영상 생성 중인 컷
+  // ★영상 생성 중인 컷 — 값 = '요청 시점의 옛 videoUrl'. 재생성은 옛 영상이 이미 있으므로
+  //   'videoUrl 이 있으면 완료'로 판정하면 첫 폴링에서 즉시 해제되고 폴링이 멈춰, 새 영상이
+  //   영영 화면에 안 들어온다(일주일간 "새 영상이 안 뜬다"의 진짜 원인). 옛 값과 비교해야 한다.
+  //   재생성(regenPending)은 원래 이 방식이었는데 영상만 Set 이라 빠져 있었다.
+  const [vidPending, setVidPending] = useState<Map<string, string>>(() => new Map());
+  const vidSawRunning = useRef(false); // 'running' 을 한 번 본 뒤 종료됐을 때만 일괄 해제(요청 직후 레이스 방지)
   const [regenPending, setRegenPending] = useState<Map<string, string>>(() => new Map()); // 재생성 중인 컷(값=요청시 옛 이미지 url)
   const regenSawRunning = useRef(false); // 재생성 잡이 실제 running 을 거쳤는지(스피너 조기 해제 방지)
   const [selForVideo, setSelForVideo] = useState<Set<string>>(() => new Set()); // 4단계 다중 선택
@@ -646,13 +651,22 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         }),
         steps: { ...prev.steps, scene: { ...prev.steps.scene, status: d.status, error: d.error } },
       }));
-      // 완료(영상 있음)·실패한 컷은 '생성 중'에서 해제 → 그 컷 버튼 다시 활성.
-      const resolved = new Set(
-        (d.scenes ?? [])
-          .filter((s: { videoUrl?: string; videoError?: string }) => s.videoUrl || s.videoError)
-          .map((s: { id: string }) => s.id)
-      );
-      setVidPending((prev) => new Set([...prev].filter((id) => !resolved.has(id))));
+      // ★'영상이 있으면 완료'가 아니라 '옛 URL 과 달라졌으면 완료'로 판정한다.
+      //   재생성은 옛 영상이 이미 있어서, 전자로 하면 첫 폴링에 즉시 해제되고 폴링이 멈춰
+      //   새 영상이 화면에 못 들어왔다(사용자 일주일 지적). 실패(videoError)도 해제.
+      if (d.status === "running") vidSawRunning.current = true;
+      const ended = d.status !== "running" && vidSawRunning.current;
+      if (ended) vidSawRunning.current = false;
+      setVidPending((prev) => {
+        if (prev.size === 0) return prev;
+        const n = new Map(prev);
+        for (const sc of (d.scenes ?? []) as { id: string; videoUrl?: string; videoError?: string }[]) {
+          if (!n.has(sc.id)) continue;
+          if (sc.videoError || (sc.videoUrl && sc.videoUrl !== n.get(sc.id))) n.delete(sc.id);
+        }
+        if (ended) n.clear(); // 잡이 끝났으면 남은 것도 정리(스피너 영구 회전 방지)
+        return n;
+      });
     } catch {
       /* 다음 틱 재시도 */
     }
@@ -1945,16 +1959,24 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     } catch (e) {
       // 적재 실패 시 '생성 중' 해제(안 그러면 스피너가 영영 돎). ids 없으면(전체) 전부.
       setVidPending((prev) => {
-        if (!ids) return new Set();
-        const n = new Set(prev);
+        if (!ids) return new Map();
+        const n = new Map(prev);
         for (const id of ids) n.delete(id);
         return n;
       });
       setError(e instanceof Error ? e.message : "영상 실패");
     }
   }
+  // 영상 요청 컷을 '생성 중'으로 표시 — 값은 지금의 videoUrl(새 URL 로 바뀌면 해제).
+  function markVidPending(ids: string[]) {
+    setVidPending((prev) => {
+      const n = new Map(prev);
+      for (const id of ids) n.set(id, project.scenes.find((s) => s.id === id)?.videoUrl ?? "");
+      return n;
+    });
+  }
   const videoOne = (sceneId: string) => {
-    setVidPending((prev) => new Set(prev).add(sceneId));
+    markVidPending([sceneId]);
     runVideoJob([sceneId]);
   };
   // 4단계 다중 선택 — 여러 컷 골라 한 번에 동영상 생성.
@@ -1974,7 +1996,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   function videoSelected() {
     if (selForVideo.size === 0) return;
     const ids = [...selForVideo];
-    setVidPending((prev) => new Set([...prev, ...ids]));
+    markVidPending(ids);
     runVideoJob(ids);
     setSelForVideo(new Set());
   }
@@ -3497,7 +3519,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             <button
               onClick={() => {
                 const ids = project.scenes.filter((s) => s.generatedImage && inSection(s)).map((s) => s.id);
-                setVidPending((prev) => new Set([...prev, ...ids]));
+                markVidPending(ids);
                 runVideoJob();
               }}
               disabled={busy || sceneRunning}
