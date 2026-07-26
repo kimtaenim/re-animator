@@ -267,6 +267,25 @@ export async function runCompose(projectId, payload) {
         await run(FFMPEG, cc);
       }
 
+      // ★★효과음·오디오 제안 믹싱 — 지금까지 '생성만 하고 최종 영상엔 안 넣었다'(사용자:
+      //   "액션·폭력씬 효과음이 하나도 안 되어 있다"). audioSuggestions[].audioUrl 과 컷의
+      //   sfxAudioUrl 을 대사 트랙 '위에' 얹는다(대사를 밀지 않고 겹쳐 재생 = amix).
+      //   timing: start=0s · mid=클립 중간 · end=끝 0.4s 앞. 대사보다 살짝 작게(0.8).
+      const sfxMix = []; // { path, atSec }
+      {
+        const sugs = (s.cut?.audioSuggestions ?? []).filter((g) => g && g.enabled !== false && g.audioUrl);
+        const cutSfx = (s.cut?.sfxAudioUrl || "").trim();
+        const list = [...sugs.map((g) => ({ url: g.audioUrl, timing: g.timing })), ...(cutSfx ? [{ url: cutSfx, timing: "start" }] : [])];
+        for (const it of list.slice(0, 4)) { // 컷당 4개까지(과밀·메모리 방지)
+          const ext = String(it.url).includes(".wav") ? "wav" : "mp3";
+          const sp = join(dir, `sx${i}_${sfxMix.length}.${ext}`);
+          try {
+            await download(it.url, sp);
+            sfxMix.push({ path: sp, timing: it.timing || "start" });
+          } catch {}
+        }
+      }
+
       // 더빙 없으면 자막을 영상 길이에 글자수 비례로 순차. (카드 씬은 글자수 기반 길이)
       if (!aPaths.length) {
         const subs = subtitleUnits(s.cut, workingLang);
@@ -288,6 +307,33 @@ export async function runCompose(projectId, payload) {
 
       const capTotal = caps.length ? caps[caps.length - 1].end : 0;
       const finalDur = Math.max(audioLen, capTotal) || (isCard ? 2.5 : vd);
+      // 효과음을 대사 트랙 위에 겹친다. 대사가 없으면 효과음만으로 오디오를 만든다.
+      if (sfxMix.length) {
+        try {
+          const mixed = join(dir, `mx${i}.m4a`);
+          const args2 = ["-y"];
+          if (aPath) args2.push("-i", aPath);
+          for (const m of sfxMix) args2.push("-i", m.path);
+          const base = aPath ? 1 : 0; // 효과음 입력 시작 인덱스
+          const chains = [];
+          const labels = [];
+          if (aPath) { chains.push("[0:a]volume=1.0[d0]"); labels.push("[d0]"); }
+          sfxMix.forEach((m, k) => {
+            const at = m.timing === "end" ? Math.max(0, finalDur - 0.4) : m.timing === "mid" ? finalDur / 2 : 0;
+            const ms = Math.round(at * 1000);
+            // adelay=…:all=1 — 채널 수(모노/스테레오)와 무관하게 전 채널 지연(|형식은 채널수 의존).
+            chains.push(`[${base + k}:a]adelay=${ms}:all=1,volume=0.8[x${k}]`);
+            labels.push(`[x${k}]`);
+          });
+          const n = labels.length;
+          const filter = `${chains.join(";")};${labels.join("")}amix=inputs=${n}:duration=longest:dropout_transition=0,volume=${n > 1 ? 1.4 : 1}[a]`;
+          args2.push("-filter_complex", filter, "-map", "[a]", "-c:a", "aac", "-b:a", "128k", mixed);
+          await run(FFMPEG, args2);
+          aPath = mixed; // 이후 인코딩이 이 트랙을 쓴다
+        } catch (e) {
+          await log(`씬 ${i + 1} 효과음 믹싱 실패(대사만 사용): ${String(e?.message ?? e).slice(0, 80)}`);
+        }
+      }
       if (caps.length) caps[caps.length - 1].end = finalDur + 0.5; // 마지막 자막 끝까지
       const speed = vd > 0 && finalDur > vd ? finalDur / vd : 1; // 오디오/자막 길면 영상 슬로모션
 

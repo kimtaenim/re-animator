@@ -123,7 +123,7 @@ async function tick(types) {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log("[worker] BUILD = wiring-v8 (AI연출 카메라를 cameraWork 로 연결 — 미리보기 정지 원인, 액션 효과음 자동)");
+console.log("[worker] BUILD = wiring-v9 (효과음이 생성만 되고 최종영상에 안 들어가던 것 믹싱 연결)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);
