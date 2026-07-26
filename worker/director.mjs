@@ -35,6 +35,24 @@ export const CAMERA_PROMPTS = {
   "slow-in":
     "Camera direction — SLOW CINEMATIC PUSH-IN: the camera glides forward very slowly and steadily toward the subject, calm and controlled, no sudden speed changes.",
 };
+// ★★연출 카메라 id → 카메라워크 프리셋(스펙 §2) 매핑.
+//   열흘간 "카메라 미리보기에 카메라워크가 안 보인다" 의 원인: AI 연출은 카메라를
+//   cut.motion(영문 프롬프트 문자열)에만 넣었고, 미리보기·굽기는 cut.cameraWork(구조체)를
+//   읽는다 → 두 필드가 연결돼 있지 않아 cameraWork 가 늘 비어 프리뷰가 정지였다.
+//   여기서 연출 결정을 프리뷰·굽기가 쓰는 어휘로 변환한다.
+export const DIRECTOR_CAMERA_TO_PRESET = {
+  "crash-in": "crash_zoom",
+  "crash-out": "pull_out",
+  "speed-ramp": "push_in",
+  vertigo: "vertigo",
+  "whip-pan": "whip",
+  "orbit-180": "orbit",
+  "orbit-120": "orbit",
+  "orbit-spin": "orbit",
+  "impact-shake": "shake",
+  static: "static",
+  "slow-in": "push_in",
+};
 const CAMERA_IDS = [...Object.keys(CAMERA_PROMPTS), "none"];
 const EMOTION_IDS = ["shout", "angry", "cry", "whisper", "laugh", "shock", "excited", "sigh", "none"];
 // 컷 끝 전환 — lib/types CutOntology.transition · /api/cut 화이트리스트와 일치해야 함.

@@ -344,7 +344,8 @@ function normalizeSfx(cut) {
   cut.sfx = ""; // 단일 원천 = 말풍선(__sfx__). 중복 등록 방지.
 }
 import { loadSplitConfig } from "./config.mjs";
-import { directCut, CAMERA_PROMPTS } from "./director.mjs";
+import { directCut, CAMERA_PROMPTS, DIRECTOR_CAMERA_TO_PRESET } from "./director.mjs";
+import { resolveCameraWork } from "./cameraKeyframes.mjs"; // ★워커 자기완결(../lib 금지)
 
 async function download(url) {
   const r = await fetch(url);
@@ -1008,7 +1009,17 @@ export async function runExtract(projectId, payload) {
                   .filter((l) => l.speaker && l.text);
                 const d = await directCut(png, s.cut, lines);
                 if (d) {
-                  if (needCam && d.camera !== "none" && CAMERA_PROMPTS[d.camera]) s.cut.motion = CAMERA_PROMPTS[d.camera];
+                  if (needCam && d.camera !== "none" && CAMERA_PROMPTS[d.camera]) {
+                    s.cut.motion = CAMERA_PROMPTS[d.camera]; // I2V 프롬프트용(기존)
+                    // ★★그리고 '카메라 미리보기·굽기가 실제로 읽는' 구조체에도 넣는다.
+                    //   이게 없어서 AI 연출이 카메라를 정해도 카메라 탭은 늘 '정지'였다(열흘 버그).
+                    //   사람이 이미 직접 지정한 컷은 덮지 않는다(수동 우선).
+                    const pre = DIRECTOR_CAMERA_TO_PRESET[d.camera];
+                    if (pre && !s.cut.cameraWork) {
+                      const dur = Number(s.cut.durationSec) || Number(d.durationSec) || 3.5;
+                      s.cut.cameraWork = resolveCameraWork(pre, { duration_s: dur }, dur);
+                    }
+                  }
                   if (needDur && d.durationSec) s.cut.durationSec = d.durationSec;
                   if (needTrans && d.transition) s.cut.transition = d.transition;
                   if (needAction) s.cut.action = d.action; // "" 도 저장 → '동작 없음'으로 확정(재실행 방지)
