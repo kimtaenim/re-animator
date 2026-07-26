@@ -1,37 +1,12 @@
 // re-animator 입력단 워커 — jobq:split / jobq:extract 를 폴링해 무거운 연산 실행.
 // aninews 와 달리 이 워커가 입력단 픽셀 연산까지 담당(Vercel 서버리스 60초·메모리 회피).
 // Render/Railway/Fly 등 상시 서버에서 `node index.mjs`.
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { popJob, updateJob, failStep } from "./store.mjs";
-import { runCompose, runJoin } from "./compose.mjs";
 
-// ★sharp(libvips) 격리 — jobs.mjs 는 로드 시 sharp 네이티브 라이브러리를 프로세스에 올린다.
-//   compose(ffmpeg)와 같은 프로세스에 sharp 가 상주하면 그 몫만큼 ffmpeg 여유가 줄어 OOM.
-//   aninews 워커에는 sharp 가 아예 없어서 같은 합성이 안 터진다 — 같은 조건을 만들기 위해
-//   jobs.mjs 는 compose 외의 잡이 실제로 들어왔을 때만 lazy 로드한다(compose 경로는 sharp 무관).
-let _jobs = null;
-async function jobFn(type) {
-  if (type === "compose") return runCompose;
-  if (type === "join") return runJoin; // 섹션 합성본 이어붙이기(ffmpeg concat, sharp 무관 → jobs.mjs 로드 회피)
-  _jobs ??= await import("./jobs.mjs");
-  const map = {
-    split: _jobs.runSplit,
-    resplit: _jobs.runResplit,
-    splitcut: _jobs.runSplitCut,
-    mergecut: _jobs.runMergeCut,
-    extract: _jobs.runExtract,
-    cast: _jobs.runCast,
-    regen: _jobs.runRegen,
-    video: _jobs.runVideo,
-    portrait: _jobs.runPortrait,
-    dub: _jobs.runDub,
-    postfx: _jobs.runPostfx,
-    camerafx: _jobs.runCameraFx,
-    sequence: _jobs.runSequence,
-    translate: _jobs.runTranslate,
-  };
-  return map[type] ?? _jobs.runSplit;
-}
-
+// ★부모(폴러)는 jobs.mjs·compose.mjs 를 아예 로드하지 않는다 — sharp(libvips)도 안 올라온다.
+//   모든 실제 작업은 runOne.mjs 자식이 하고, 끝나면 프로세스가 죽어 메모리가 OS 로 반환된다.
 // ★크래시 가드 — 'Exited with status 1'(2026-07-17 00:03Z, 유휴 중 사망) 재발 방지.
 //   떠돌이 promise 거부는 로그만 남기고 계속(폴러는 무상태라 안전), 동기 예외는
 //   원인을 로그에 남긴 뒤 종료(Render 재시작) — 원인 불명 사망 금지.
@@ -64,38 +39,60 @@ const JOB_STEP = {
   camerafx: "scene",
 };
 
-// ★잡별 피크 메모리 측정 — OOM 이 반복되는데 '어느 잡이 어디서' 를 몰라 추측만 했다.
-//   0.5초마다 RSS 를 재서 잡이 끝날 때(또는 죽기 전 마지막 로그로) 남긴다. 비용은 무시할 수준.
-function memWatch(type) {
-  let peak = 0;
-  const t = setInterval(() => {
-    const rss = process.memoryUsage().rss;
-    if (rss > peak) {
-      peak = rss;
-      // 위험 구간(350MB 이상)은 즉시 남긴다 — 프로세스가 죽으면 나중 로그는 안 남으므로.
-      if (rss > 350 * 1024 * 1024) console.error(`[mem] ${type} RSS ${(rss / 1048576).toFixed(0)}MB ★위험`);
-    }
-  }, 500);
-  return {
-    stop: () => {
-      clearInterval(t);
-      return Math.round(peak / 1048576);
-    },
-  };
-}
+// ★★잡 1개 = 자식 프로세스 1개.
+//   OOM 이 반복되고 내가 계속 못 잡은 구조적 원인: 워커가 장수 프로세스라, 분할·추출 잡이
+//   올려놓은 메모리(sharp/libvips 네이티브·큰 raw 버퍼)가 잡이 끝나도 OS 로 반환되지 않고
+//   남았다. 다음 영상 잡의 ffmpeg 가 그 위에 얹혀 한도를 넘었다 → 증상은 영상, 원인은 앞 잡.
+//   자식에서 돌리고 종료시키면 그 잡의 메모리는 전부 OS 로 돌아간다(누적 원천 차단).
+//   부모는 Redis 폴링만 하므로 수십 MB 로 유지된다.
+//   ★타임아웃도 이제 '진짜 취소'다 — 자식을 SIGKILL 하면 실제로 멈춘다(예전 Promise.race 는
+//     거부만 하고 실행 중 잡을 못 멈춰 다음 잡과 겹쳤다).
+const RUN_ONE = fileURLToPath(new URL("./runOne.mjs", import.meta.url));
 
-async function runJob(job) {
-  const fn = await jobFn(job.type);
-  const count = await Promise.race([
-    fn(job.projectId, job.payload),
-    new Promise((_, rej) =>
-      setTimeout(
-        () => rej(new Error(`${job.type} 타임아웃(${Math.round(JOB_TIMEOUT_MS / 60000)}분) — 워커 매달림`)),
-        JOB_TIMEOUT_MS
-      )
-    ),
-  ]);
-  return count;
+function runJobInChild(job) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [RUN_ONE, JSON.stringify(job)], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+    let count = 0;
+    let errMsg = "";
+    let killed = false;
+    const timer = setTimeout(() => {
+      killed = true;
+      try { child.kill("SIGKILL"); } catch {}
+    }, JOB_TIMEOUT_MS);
+
+    const onLine = (line, isErr) => {
+      if (!line) return;
+      if (line.startsWith("__RESULT__")) count = Number(line.slice(10).trim()) || 0;
+      else if (line.startsWith("__ERROR__")) errMsg = line.slice(9).trim();
+      else if (isErr) console.error(line);
+      else console.log(line);
+    };
+    const wire = (stream, isErr) => {
+      let buf = "";
+      stream.on("data", (d) => {
+        buf += d.toString();
+        const parts = buf.split(/\r?\n/);
+        buf = parts.pop() ?? "";
+        for (const l of parts) onLine(l, isErr);
+      });
+      stream.on("end", () => onLine(buf, isErr));
+    };
+    wire(child.stdout, false);
+    wire(child.stderr, true);
+
+    child.on("error", (e) => { clearTimeout(timer); reject(e); });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      if (killed) return reject(new Error(`${job.type} 타임아웃(${Math.round(JOB_TIMEOUT_MS / 60000)}분) — 자식 프로세스 강제 종료`));
+      if (code === 0) return resolve(count);
+      // 종료 코드로 OOM 을 구분해 알려준다(부모는 안 죽는다).
+      const oom = signal === "SIGKILL" || code === 137;
+      reject(new Error(errMsg || (oom ? "메모리 초과로 잡 프로세스가 종료됨(OOM)" : `잡 프로세스 종료 코드 ${code}`)));
+    });
+  });
 }
 
 async function tick(types) {
@@ -118,13 +115,7 @@ async function tick(types) {
   console.log(`[worker] ${type} 시작 job=${job.id} project=${job.projectId}`);
   try {
     await updateJob(job.id, { status: "running" });
-    const mw = memWatch(type);
-    let count;
-    try {
-      count = await runJob(job);
-    } finally {
-      console.log(`[worker] ${type} 피크 메모리 ${mw.stop()}MB`); // ★어느 잡이 메모리를 먹는지 기록
-    }
+    const count = await runJobInChild(job);
     await updateJob(job.id, { status: "done" });
     console.log(`[worker] ${type} 완료 job=${job.id} (${count}컷)`);
   } catch (e) {
@@ -149,7 +140,7 @@ async function tick(types) {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log("[worker] BUILD = mem-v13 (영상 스트리밍 처리 + 잡별 피크 메모리 기록)");
+console.log("[worker] BUILD = child-per-job-v14 (잡 1개=자식 프로세스 1개 — 잡 사이 메모리 누적 원천 차단)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);
