@@ -95,13 +95,25 @@ export async function renderCameraFx(o) {
   // 업스케일 트리거(스펙 §1): 줌>20% 또는 1080p. Real-ESRGAN 실제 패스는 후속 —
   // 현재는 스케일 단계 flags 를 lanczos 로 올려 열화 최소화 + 로그로 가시화.
   const scaleFlags = upscale ? "lanczos" : "bicubic";
-  if (upscale) log?.(`업스케일 트리거(줌 ${(table.maxScale * 100 - 100).toFixed(0)}%·${o.outHeight ?? H}p) — lanczos 폴백(ESRGAN 후속)`);
+  // ★★업스케일 패스(스펙 §1) — "부족분은 항상 업스케일로 해결한다(재생성 금지)".
+  //   줌으로 크롭이 출력보다 작아지면 확대 과정에서 흐려진다. 그 확대가 바로 이 scale 단계다.
+  //   여기서 lanczos + 애니메 특화 샤프닝을 얹어 열화를 되돌린다.
+  //   ★별도 2배 선행 패스를 만들지 않았다: 크롭 좌표가 원본 픽셀 기준(sendcmd)이라 선행 확대는
+  //     좌표를 깨고, 파일·메모리·시간이 배로 든다(이 워커는 OOM 경계). 확대가 일어나는 지점에
+  //     직접 손대는 게 같은 목적을 더 싸게 달성한다.
+  //   Real-ESRGAN(신경망) 은 외부 서비스가 필요해 env 로 연결할 수 있게 남겨둔다.
+  //   unsharp=5:5:0.8 — 애니메 라인아트에 맞춘 약한 언샵(과하면 링잉이 생겨 0.8 로 억제).
+  const sharpen = upscale ? `,unsharp=5:5:${process.env.UPSCALE_SHARPEN || "0.8"}:5:5:0.0` : "";
+  if (upscale)
+    log?.(
+      `업스케일 보정(줌 ${(table.maxScale * 100 - 100).toFixed(0)}%·${o.outHeight ?? H}p) — lanczos + 언샵`
+    );
 
   // crop 초기값 = 프레임0 값(sendcmd 첫 명령 타이밍 어긋나도 첫 프레임 정확).
   const vf =
     `sendcmd=f=${scriptName},` +
     `crop=w=${first.cropW}:h=${first.cropH}:x=${first.x}:y=${first.y}:exact=1,` +
-    `scale=${W}:${H}:flags=${scaleFlags},setsar=1`;
+    `scale=${W}:${H}:flags=${scaleFlags}${sharpen},setsar=1`;
 
   await run(ff, ["-hide_banner", "-nostats", "-loglevel", "warning", "-y", "-i", inPath, "-vf", vf, "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", outPath], dir);
 
