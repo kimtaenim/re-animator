@@ -5,6 +5,7 @@
 // ============================================================================
 
 import { getProject, saveProject, logProgress, resetProgress, recordCost } from "./store.mjs";
+import { buildAss, assFilterPath } from "./ass.mjs";
 import { put } from "@vercel/blob";
 import { spawn } from "node:child_process";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -12,7 +13,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { renderCaptionBox, renderIntertitleFrame } from "./subtitle-render.mjs";
 import { stripMarks } from "./emphasis.mjs";
 
@@ -343,7 +344,21 @@ export async function runCompose(projectId, payload) {
       const capTotal = caps.length ? caps[caps.length - 1].end : 0;
       const finalDur = Math.max(audioLen, capTotal) || (isCard ? 2.5 : vd);
       if (caps.length) caps[caps.length - 1].end = finalDur + 0.5; // 마지막 자막 끝까지
-      const speed = vd > 0 && finalDur > vd ? finalDur / vd : 1; // 오디오/자막 길면 영상 슬로모션
+      // ★★길이 부족 보정(스펙 §5) — 예전엔 오디오가 길면 '전 티어'를 슬로모션했다.
+      //   스펙: "idle/emote 는 0.6-0.8배 슬로우 허용, ★talk 는 슬로우 금지, 루프는 전 티어 금지.
+      //          final > 클립이면 마지막 프레임 홀드 + 카메라워크 지속."
+      //   talk 를 늘리면 입 움직임이 대사와 어긋나 어색해진다 → talk/action 은 슬로우 없이
+      //   '마지막 프레임 홀드'(tpad)로 채운다. idle/emote 만 0.8배까지 슬로우하고 남는 건 홀드.
+      const tier = s.cut?.motionTier;
+      const slowAllowed = tier === "idle" || tier === "emote"; // 스펙 §5
+      const MAX_SLOW = 1 / 0.8; // 0.8배 슬로우 = 1.25배 길이까지만
+      let speed = 1;
+      let holdSec = 0;
+      if (vd > 0 && finalDur > vd) {
+        const need = finalDur / vd;
+        speed = slowAllowed ? Math.min(need, MAX_SLOW) : 1;
+        holdSec = Math.max(0, finalDur - vd * speed); // 슬로우로 못 채운 나머지는 마지막 프레임 홀드
+      }
 
       // 자막 캡션 PNG(캔버스 재사용). 위치는 자막 있을 때만 계산.
       // 위치 해석: 대사(말풍선)별 지정 > 컷 기본 > 디폴트. 카드 씬 기본은 정중앙(무성영화).
@@ -353,16 +368,50 @@ export async function runCompose(projectId, payload) {
           : subtitleCenterY(s.cut, H);
       const cxDef = subtitleCenterX(s.cut, W);
       const frac = (v) => (typeof v === "number" && isFinite(v) ? Math.max(0.05, Math.min(0.95, v)) : null);
+      // ★★자막을 ASS 로 굽는다(스펙 §7). PNG 오버레이는 캡션마다 sharp/canvas 로 이미지를
+      //   만들어 compose(OOM 경계 경로)에 네이티브 이미지 메모리를 얹었다 — 반복된 OOM 의 알려진
+      //   원인. ASS 는 텍스트 파일 하나라 이미지 메모리 0, ffmpeg 입력도 늘지 않는다.
+      //   AI 가 정한 줄별 자막 위치(bubble.subtitleY — 연출기가 '얼굴·입 안 가리는 위치'로 결정)는
+      //   caps[].sy 로 그대로 전달돼 ASS \pos 로 반영된다. 없으면 스펙 기본(하단 93%).
+      //   ASS_DISABLE=1 이면 옛 PNG 경로로 되돌릴 수 있다(폰트 문제 등 비상용).
+      // ★ASS 는 기본 OFF(opt-in: ASS_ENABLE=1) —
+      //   스펙 §7 이 ASS 를 지정했고 구현·검증했지만, libass 가 우리 자막 폰트(Noto Sans KR
+      //   가변폰트)를 패밀리명으로 못 찾아 실측에서 '자막이 아예 안 그려졌다'(검정 배경 밝은
+      //   픽셀 4개). PNG 경로는 같은 폰트를 직접 등록해 잘 그린다.
+      //   자막이 사라지는 회귀를 만들 수 없으므로 기본은 PNG, ASS 는 env 로 켠다.
+      //   (남은 일: 고정 굵기 TTF 를 번들해 fontsdir 로 물리면 ASS 를 기본으로 승격 가능.)
+      const useAss = (process.env.ASS_ENABLE ?? "0") === "1";
+      let assPath = null;
+      // ★한글 폰트 파일을 못 구하면 ASS 는 빈 화면이 된다(libass 가 대체 폰트를 못 찾음).
+      //   그 경우 조용히 PNG 경로로 되돌린다 — 자막이 사라지는 것보다 낫다.
+      const assFontPath = useAss && caps.length ? await ensureSubtitleFontPath().catch(() => null) : null;
       const capPaths = [];
-      for (const c of caps) {
-        const ccy = frac(c.sy) != null ? Math.round(H * frac(c.sy)) : cyDef;
-        const ccx = frac(c.sx) != null ? Math.round(W * frac(c.sx)) : cxDef;
-        // 박스 크기 PNG + 프레임 내 좌표 — 전체화면 PNG 대비 ffmpeg 피크 실측 ~100MB↓.
-        const box = await renderCaptionBox(c.text, { W, H, cy: ccy, cx: ccx });
-        if (box) {
-          const cp = join(dir, `cap${i}_${capPaths.length}.png`);
-          await writeFile(cp, box.buf);
-          capPaths.push({ path: cp, span: c, x: box.x, y: box.y });
+      if (useAss && caps.length && assFontPath) {
+        try {
+          const ass = buildAss(caps, {
+            W,
+            H,
+            defaultYFrac: cyDef / H, // 컷 기본 자막 높이(수동 지정·카드 씬 중앙 반영)
+            defaultXFrac: cxDef / W,
+          });
+          assPath = join(dir, `sub${i}.ass`);
+          await writeFile(assPath, ass, "utf8");
+        } catch (e) {
+          assPath = null;
+          await log(`ASS 자막 생성 실패(PNG 경로로) : ${String(e?.message ?? e).slice(0, 80)}`);
+        }
+      }
+      if (!assPath) {
+        for (const c of caps) {
+          const ccy = frac(c.sy) != null ? Math.round(H * frac(c.sy)) : cyDef;
+          const ccx = frac(c.sx) != null ? Math.round(W * frac(c.sx)) : cxDef;
+          // 박스 크기 PNG + 프레임 내 좌표 — 전체화면 PNG 대비 ffmpeg 피크 실측 ~100MB↓.
+          const box = await renderCaptionBox(c.text, { W, H, cy: ccy, cx: ccx });
+          if (box) {
+            const cp = join(dir, `cap${i}_${capPaths.length}.png`);
+            await writeFile(cp, box.buf);
+            capPaths.push({ path: cp, span: c, x: box.x, y: box.y });
+          }
         }
       }
 
@@ -388,6 +437,8 @@ export async function runCompose(projectId, payload) {
         ? `[0:v]setsar=1,fps=${FPS}` // 프레임이 이미 W×H 정확 — 스케일·슬로모션 불필요
         : `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
           `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,setpts=${speed.toFixed(4)}*PTS,fps=${FPS}`;
+      // 마지막 프레임 홀드(스펙 §5) — tpad 로 클립 끝을 늘린다. 루프가 아니라 정지 홀드.
+      if (holdSec > 0.05 && !isCard) filter += `,tpad=stop_mode=clone:stop_duration=${holdSec.toFixed(2)}`;
       if (fadeIn) filter += `,fade=t=in:st=0:d=${FADE}`;
       if (fadeOut) filter += `,fade=t=out:st=${Math.max(0, finalDur - FADE).toFixed(2)}:d=${FADE}`;
       // ★whip(스펙 §2) — 씬 전환 속성. 컷 경계에서 짧고 강한 모션블러 whoosh(≈12프레임).
@@ -398,6 +449,12 @@ export async function runCompose(projectId, payload) {
       const whipIn = scenes[i - 1]?.cut?.transition === "whip";
       if (whipIn) filter += `,boxblur=luma_radius=${whipR}:luma_power=1:enable='lt(t,${WHIP})'`;
       if (whipOut) filter += `,boxblur=luma_radius=${whipR}:luma_power=1:enable='gte(t,${Math.max(0, finalDur - WHIP).toFixed(2)})'`;
+      // ★ASS 자막 번인(스펙 §7) — subtitles 필터. 텍스트라 이미지 메모리 0.
+      if (assPath) {
+        // fontsdir = 그 폰트 파일이 있는 폴더. libass 가 시스템 폰트 없이도 한글을 그린다.
+        const fdir = assFontPath ? `:fontsdir='${assFilterPath(dirname(assFontPath))}'` : "";
+        filter += `,subtitles='${assFilterPath(assPath)}'${fdir}`;
+      }
       filter += `[bg]`;
       let prev = "bg";
       capPaths.forEach((c, k) => {

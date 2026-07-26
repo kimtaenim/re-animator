@@ -27,6 +27,16 @@ const BG_ALPHA = Number(process.env.SUBTITLE_BG_ALPHA || 0.6); // 검은 바탕 
 let _canvas = null; // { createCanvas, GlobalFonts } | false(불가)
 let _fontReady = false;
 let _fontOk = false;
+let _fontPath = null; // ★실제로 등록된 폰트 파일 경로 — ASS(libass)도 같은 파일을 써야 한다.
+
+// ASS 자막용 — 자막 폰트 파일 경로를 확보해서 돌려준다(없으면 null).
+//   libass 는 시스템 폰트를 찾으므로, Render(Linux)엔 한글 폰트가 없어 자막이 안 그려진다.
+//   PNG 경로가 이미 Noto Sans KR 을 내려받아 쓰므로 그 파일을 fontsdir 로 물려준다.
+export async function ensureSubtitleFontPath() {
+  const c = await loadCanvas();
+  if (c && c.GlobalFonts) await ensureFont(c.GlobalFonts);
+  return _fontPath;
+}
 
 async function loadCanvas() {
   if (_canvas !== null) return _canvas;
@@ -56,6 +66,7 @@ async function ensureFont(GlobalFonts) {
   if (envPath && existsSync(envPath)) {
     try {
       GlobalFonts.registerFromPath(envPath, FAMILY);
+      _fontPath = envPath;
       _fontOk = true;
       return true;
     } catch {}
@@ -67,6 +78,7 @@ async function ensureFont(GlobalFonts) {
       const f = (await readdir(dir)).find((n) => /\.(otf|ttf|ttc)$/i.test(n));
       if (f) {
         GlobalFonts.registerFromPath(join(dir, f), FAMILY);
+        _fontPath = join(dir, f);
         _fontOk = true;
         return true;
       }
@@ -83,6 +95,7 @@ async function ensureFont(GlobalFonts) {
       await writeFile(dest, Buffer.from(await r.arrayBuffer()));
     }
     GlobalFonts.registerFromPath(dest, FAMILY);
+    _fontPath = dest;
     _fontOk = true;
     return true;
   } catch {
