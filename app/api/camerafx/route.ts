@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 // preset 이 정지/orbit/계층B/무설정이면 워커가 fxUrl 을 해제(원본 클립 사용).
 // 기존 /api/postfx(effect/strength) 는 그대로 — 이 라우트는 새 cameraWork 경로.
 export async function POST(req: NextRequest) {
-  let body: { projectId?: string; sceneIds?: string[] };
+  let body: { projectId?: string; sceneIds?: string[]; proxy?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -30,7 +30,8 @@ export async function POST(req: NextRequest) {
     id: randomUUID(),
     type: "camerafx",
     projectId,
-    payload: { sceneIds },
+    // ★proxy=true 면 480p 정확 미리보기(스펙 §8②) — 본 굽기 결과(fxUrl)는 건드리지 않는다.
+    payload: { sceneIds, ...(body.proxy === true ? { proxy: true } : {}) },
     status: "queued",
     createdAt: now,
     updatedAt: now,

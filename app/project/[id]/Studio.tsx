@@ -2045,7 +2045,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
 
   // ── 카메라워크(스펙 §2 계층 A) 굽기 — scene.cut.cameraWork 를 워커가 클립 위에 실픽셀로 굽는다. ──
   //   저장(cameraWork JSON)은 슬라이더 편집 시 updateCut 이 이미 반영. 여기선 굽기 잡만.
-  async function applyCameraFx(sceneId: string) {
+  // proxy=true 면 480p '정확 미리보기'(스펙 §8②) — 본 굽기 결과는 건드리지 않는다.
+  async function applyCameraFx(sceneId: string, proxy = false) {
     const s = projectRef.current.scenes.find((x) => x.id === sceneId);
     if (!s?.videoUrl) {
       setError("먼저 동영상을 생성하세요 — 카메라워크는 생성된 클립 위에 굽습니다.");
@@ -2063,7 +2064,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       const r = await fetch("/api/camerafx", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, sceneIds: [sceneId] }),
+        body: JSON.stringify({ projectId: project.id, sceneIds: [sceneId], ...(proxy ? { proxy: true } : {}) }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "카메라워크 적용 실패");
@@ -4509,6 +4510,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   <CameraWorkEditor
                     cameraWork={s.cut?.cameraWork}
                     motionTier={s.cut?.motionTier}
+                    proxyUrl={s.fxProxyUrl}
+                    onProxy={() => applyCameraFx(s.id, true)}
                     imageUrl={s.generatedImage ?? s.originalImage}
                     videoUrl={s.videoUrl}
                     onChange={(cw) => updateCut(s.id, { cameraWork: cw })}

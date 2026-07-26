@@ -45,10 +45,12 @@ function Slider({
 }
 
 export default function CameraWorkEditor({
-  cameraWork, motionTier, imageUrl, videoUrl, onChange, onApply, onPreview, applying, busy,
+  cameraWork, motionTier, proxyUrl, onProxy, imageUrl, videoUrl, onChange, onApply, onPreview, applying, busy,
 }: {
   cameraWork?: CameraWork;
-  motionTier?: string; // 티어별 기본 카메라 결정용(§3·§9 — 비어 있으면 자동 적용)
+  motionTier?: string;
+  proxyUrl?: string; // 480p 정확 미리보기 결과(§8②)
+  onProxy?: () => void; // "정확 미리보기" 요청 // 티어별 기본 카메라 결정용(§3·§9 — 비어 있으면 자동 적용)
   imageUrl?: string;
   videoUrl?: string; // 있으면: 마우스 올릴 때 '정지 이미지' 대신 '실제 영상(raw)' 위에 카메라를 얹어 재생(굽기 전 실제에 가장 가까움).
   onChange: (cw: CameraWork) => void;
@@ -73,7 +75,10 @@ export default function CameraWorkEditor({
   const preset: CameraPreset = cw?.preset ?? "static";
   const layer = presetLayer(preset) as "A" | "B" | "C";
   const cwKey = JSON.stringify(cw ?? {});
-  const liveVideo = !!videoUrl && hover && layer !== "C"; // orbit 은 2D 오버레이로 표현 불가
+  // ★프록시가 있으면 그걸 그대로 재생한다 — 이미 카메라워크가 구워진 '정확' 영상이라
+  //   오버레이(근사 변환)를 얹지 않는다. orbit·계층B 도 이 경로로 실제 결과를 볼 수 있다.
+  const liveVideo = !!videoUrl && hover && layer !== "C";
+  const showProxy = !!proxyUrl && hover;
 
   // Web Animations 프리뷰 — cameraWork/대상(이미지↔실영상) 바뀌면 재생성(즉시 반영).
   //   수식은 lib/cameraKeyframes.mjs 단일 소스라 굽기(ffmpeg crop)와 궤적이 일치(골든 테스트 ~2px).
@@ -191,6 +196,17 @@ export default function CameraWorkEditor({
         >
           기본값
         </button>
+        {onProxy && (
+          <button
+            type="button"
+            onClick={onProxy}
+            disabled={busy || applying || !videoUrl || preset === "static"}
+            className="rounded border border-[var(--accent)] px-2 py-0.5 text-[var(--accent)] disabled:opacity-40 hover:bg-[var(--panel)]"
+            title="480p 로 빠르게 구워 '실제 결과'를 봅니다(스펙 §8②). 본 굽기 결과(fxUrl)는 건드리지 않습니다. orbit·계층B 도 이걸로 확인."
+          >
+            {applying ? "…" : "🔍 정확 미리보기"}
+          </button>
+        )}
         <button
           type="button"
           onClick={onApply}

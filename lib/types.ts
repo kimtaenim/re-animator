@@ -246,6 +246,9 @@ export interface Scene {
   videoError?: string; // 영상 생성 실패 사유(있으면)
   videoEngineUsed?: "kling" | "minimax" | "grok"; // 이 영상이 실제로 어떤 엔진으로 생성됐는지(카드 배지)
   fxUrl?: string; // 후처리(줌 커브) 구운 영상 Blob URL — 있으면 미리보기·합성이 이걸 사용
+  // ★프록시 미리보기(스펙 §8②) — 480p 정확 미리보기. 본 굽기(fxUrl)·합성에는 쓰지 않는다.
+  //   클라이언트 프리뷰가 '근사'라서 orbit·계층B 를 못 보는 걸 메운다.
+  fxProxyUrl?: string;
   fx?: { effect: string; strength: number }; // 적용된 후처리(크래시인/아웃·램프·펀치)와 강도
   status: StepStatus; // M1 에선 경계 확정 여부 관리에만 사용
 }

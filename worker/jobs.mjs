@@ -2351,8 +2351,7 @@ export async function runPostfx(projectId, payload) {
       dir = await mkdtemp(join(tmpdir(), "refx-"));
       const inp = join(dir, "in.mp4");
       const outp = join(dir, "out.mp4");
-      const buf = await download(s.videoUrl);
-      await writeFile(inp, buf);
+      await downloadToFile(s.videoUrl, inp); // 스트리밍 — 영상 버퍼를 메모리에 올리지 않는다
       const [W, H] = await probe(inp, "stream=width,height");
       const [T] = await probe(inp, "format=duration");
       if (!W || !H || !T) throw new Error("클립 정보를 읽지 못함");
@@ -2436,6 +2435,10 @@ export async function runCameraFx(projectId, payload) {
     await logProgress(projectId, m);
   };
   const ids = new Set(Array.isArray(payload?.sceneIds) ? payload.sceneIds : []);
+  // ★★프록시 렌더(스펙 §8②) — "정확 미리보기": 480p 로 빠르게 굽고 fxProxyUrl 에 저장한다.
+  //   클라이언트 프리뷰는 '근사'라서 orbit·계층B 는 아예 못 보고, 굽기 결과와도 미세하게 다르다.
+  //   본 굽기(fxUrl)를 건드리지 않으므로 미리보기용으로 몇 번이든 돌릴 수 있다.
+  const proxy = payload?.proxy === true;
   const p = await getProject(projectId);
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
   const targets = (p.scenes ?? []).filter((s) => ids.has(s.id) && s.videoUrl);
@@ -2462,17 +2465,48 @@ export async function runCameraFx(projectId, payload) {
           onLog: (m) => console.error("[camerafx]", m),
         });
       }
+      // 프록시는 480p 로 줄여 용량·시간을 낮춘다(정확한 궤적은 그대로 — 굽기 결과와 같은 수식).
+      let proxyOut = null;
+      if (proxy && !result.skipped) {
+        proxyOut = join(dir, "proxy.mp4");
+        await new Promise((res, rej) => {
+          const pr = spawn(ff, [
+            "-y", "-i", outp, "-vf", "scale=-2:480", "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+            "-threads", "1", "-tune", "zerolatency", "-bf", "0",
+            "-movflags", "+faststart", proxyOut,
+          ]);
+          let err = "";
+          const kill = setTimeout(() => { try { pr.kill("SIGKILL"); } catch {} }, 3 * 60 * 1000);
+          pr.stderr.on("data", (d) => { err += d; if (err.length > 4000) err = err.slice(-4000); });
+          pr.on("error", (e) => { clearTimeout(kill); rej(e); });
+          pr.on("close", (c) => { clearTimeout(kill); c === 0 ? res() : rej(new Error(`ffmpeg ${c}: ${err.slice(-200)}`)); });
+        });
+      }
 
       // fresh 재읽기 후 해당 씬 필드만 머지(저장 규약).
       const p2 = await getProject(projectId);
       const t2 = (p2?.scenes ?? []).find((x) => x.id === s.id);
-      if (p2 && t2) {
+      if (p2 && t2 && proxy) {
+        // 프록시: 본 굽기 결과(fxUrl)는 절대 건드리지 않는다 — 미리보기 전용.
+        if (proxyOut) {
+          const { url } = await put(`project/${projectId}/camproxy-${s.order}-${Date.now()}.mp4`, createReadStream(proxyOut), {
+            access: "public",
+            contentType: "video/mp4",
+            addRandomSuffix: false,
+          });
+          t2.fxProxyUrl = url;
+        } else {
+          delete t2.fxProxyUrl; // 카메라워크 없음 = 프록시도 없음
+        }
+        await saveProject(p2);
+      } else if (p2 && t2) {
         if (result.skipped) {
           // 후처리 없음 → 원본 클립 사용. 낡은 fxUrl 무효화(안 지우면 미리보기가 옛 fx 를 보여줌).
           delete t2.fxUrl;
           delete t2.fx;
         } else {
-          const { url } = await put(`project/${projectId}/cam-${s.order}-${Date.now()}.mp4`, await readFile(outp), {
+          const { url } = await put(`project/${projectId}/cam-${s.order}-${Date.now()}.mp4`, createReadStream(outp), {
             access: "public",
             contentType: "video/mp4",
             addRandomSuffix: false,
@@ -2483,7 +2517,7 @@ export async function runCameraFx(projectId, payload) {
         await saveProject(p2);
       }
       done++;
-      await log(`카메라워크 ${done}/${targets.length} — 컷 ${s.order + 1} (${cw?.preset ?? "없음"}${result.skipped ? "·원본" : result.upscale ? "·업스케일" : ""})`);
+      await log(`${proxy ? "프록시 미리보기" : "카메라워크"} ${done}/${targets.length} — 컷 ${s.order + 1} (${cw?.preset ?? "없음"}${result.skipped ? "·원본" : result.upscale ? "·업스케일" : ""})`);
     } catch (e) {
       await log(`컷 ${s.order + 1} 카메라워크 실패: ${String(e?.message ?? e).slice(0, 120)}`);
     } finally {
