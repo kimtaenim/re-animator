@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 //   { projectId, sceneIds, sectionKey }   → 섹션 부분 합성(방향 B) — 그 컷만 합성 → sectionVideos[key].
 //   { projectId, mode: "join" }           → 섹션 합성본들을 최종 이어붙이기 → composedUrl.
 export async function POST(req: NextRequest) {
-  let body: { projectId?: string; sceneIds?: string[]; sectionKey?: number | string; mode?: string };
+  let body: { projectId?: string; sceneIds?: string[]; sectionKey?: number | string; mode?: string; lang?: string };
   try {
     body = await req.json();
   } catch {
@@ -28,13 +28,15 @@ export async function POST(req: NextRequest) {
   }
   const sceneIds = Array.isArray(body.sceneIds) ? body.sceneIds.filter((x): x is string => typeof x === "string") : null;
   const sectionKey = body.sectionKey != null ? String(body.sectionKey) : null;
+  // ★언어별 출력(§10) — lang 이 오면 그 언어 오디오·자막으로 합성하고 파일명에 언어코드를 붙인다.
+  const lang = typeof body.lang === "string" && /^[a-z]{2,5}$/.test(body.lang) ? body.lang : null;
 
   const now = Date.now();
   const job: Job = {
     id: randomUUID(),
     type: mode === "join" ? "join" : "compose",
     projectId,
-    payload: mode === "join" ? {} : { ...(sceneIds ? { sceneIds } : {}), ...(sectionKey ? { sectionKey } : {}) },
+    payload: mode === "join" ? {} : { ...(sceneIds ? { sceneIds } : {}), ...(sectionKey ? { sectionKey } : {}), ...(lang ? { lang } : {}) },
     status: "queued",
     createdAt: now,
     updatedAt: now,

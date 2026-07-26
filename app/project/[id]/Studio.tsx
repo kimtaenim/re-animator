@@ -2339,13 +2339,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }, []);
 
   // 5단계 — 씬 영상들을 워커에서 이어붙이기(오디오·자막 없이).
-  async function runComposeJob() {
+  // lang 을 주면 그 언어 오디오·자막으로 합성해 언어별 파일을 만든다(§10). 없으면 작업 언어.
+  async function runComposeJob(lang?: string) {
     setError("");
     try {
       const r = await fetch("/api/compose", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id }),
+        body: JSON.stringify({ projectId: project.id, ...(lang ? { lang } : {}) }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "합성 실패");
@@ -2907,7 +2908,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         if (activeStep === "compose" && approved)
           return (
             <div className={REMOTE}>
-              <button onClick={runComposeJob} disabled={busy || composeRunning} className={P}>
+              <button onClick={() => runComposeJob()} disabled={busy || composeRunning} className={P}>
                 {composeRunning ? "합성 중…" : "영상 묶기"}
               </button>
               {composeRunning && miniBar()}
@@ -4436,6 +4437,47 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       </button>
                     </div>
                   )}
+                  {/* ★★영상 프롬프트 직접 입력 — 사용자가 여러 번 요구한 기능인데 4단계 아코디언
+                      펼침 안쪽에만 있어서 찾기 어려웠다. 카메라 탭은 컷이 격자로 죽 늘어서 있으니
+                      여기서 컷을 훑으며 바로 쓸 수 있게 꺼낸다. 값이 있으면 자동 조립을 무시하고
+                      이 문장을 그대로 엔진에 보낸다(워커 buildVideoPrompt 최상단 early return). */}
+                  <div className="rounded border border-[var(--border)] bg-[var(--panel-2)] p-1.5">
+                    <div className="mb-1 flex items-center gap-1 text-[10px]">
+                      <span className="font-medium text-[var(--accent)]">🎬 영상 프롬프트 직접 입력</span>
+                      {(s.cut?.videoPromptOverride || "").trim() ? (
+                        <span className="rounded bg-[var(--accent)] px-1 text-white">사용 중 — 자동 조립 무시</span>
+                      ) : (
+                        <span className="text-[var(--muted)]">비우면 자동 조립</span>
+                      )}
+                      <span className="ml-auto flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => updateCut(s.id, { videoPromptOverride: composeVideoPromptDraft(s) })}
+                          className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--accent)]"
+                          title="자동으로 만들어지는 문장을 불러와 고쳐 쓰기"
+                        >
+                          기본값 불러오기
+                        </button>
+                        {(s.cut?.videoPromptOverride || "").trim() && (
+                          <button
+                            type="button"
+                            onClick={() => updateCut(s.id, { videoPromptOverride: "" })}
+                            className="rounded border border-[var(--border)] px-1.5 py-0.5 hover:border-[var(--danger)]"
+                            title="직접 입력 해제(자동 조립으로 되돌림)"
+                          >
+                            해제
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                    <textarea
+                      value={s.cut?.videoPromptOverride ?? ""}
+                      onChange={(e) => updateCut(s.id, { videoPromptOverride: e.target.value })}
+                      rows={3}
+                      placeholder="이 컷에서 무엇이 어떻게 움직이는지 직접 쓰세요. 쓰면 이 문장이 그대로 엔진에 전달됩니다(자동 조립·제약 문구 없음)."
+                      className="w-full resize-y rounded border border-[var(--border)] bg-[var(--panel)] px-1.5 py-1 text-[11px]"
+                    />
+                  </div>
                   <CameraWorkEditor
                     cameraWork={s.cut?.cameraWork}
                     motionTier={s.cut?.motionTier}
@@ -4465,7 +4507,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   — 영상 {nVid}개를 하나로 이어붙이기(전환 적용 · 오디오·자막은 나중)
                 </span>
                 <button
-                  onClick={runComposeJob}
+                  onClick={() => runComposeJob()}
                   disabled={busy || composeRunning || nVid === 0}
                   title={nVid === 0 ? "먼저 4단계에서 동영상을 생성하세요" : ""}
                   className="ml-auto rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
@@ -4475,6 +4517,44 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               </div>
             );
           })()}
+          {/* ★★언어별 최종 출력(스펙 §10) — 비주얼은 공유하고 언어별 오디오·자막만 갈아 끼워
+              ep01_ja.mp4 / ep01_en.mp4 를 각각 만든다. 재생성 비용 0(비주얼 재사용). */}
+          {(project.targetLanguages?.length ?? 0) > 0 && (
+            <div className="mb-3 rounded-lg border border-[var(--accent)] bg-[var(--panel)] px-2.5 py-2 text-[11px]">
+              <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-[var(--accent)]">🌐 언어별 최종 출력</span>
+                <span className="text-[var(--muted)]">같은 영상에 그 언어 더빙·자막만 얹어 언어판을 따로 만듭니다</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {(project.targetLanguages ?? []).map((lg) => {
+                  const done = project.composedByLang?.[lg];
+                  const label = LANGUAGES.find((l) => l.id === lg)?.label ?? lg;
+                  return (
+                    <span key={lg} className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => runComposeJob(lg)}
+                        disabled={busy || composeRunning || !project.scenes.some((x) => x.videoUrl)}
+                        className="rounded bg-[var(--accent)] px-2.5 py-1 font-medium text-white disabled:opacity-40"
+                        title={`${label} 더빙·자막으로 최종 합성(파일명에 ${lg} 표시)`}
+                      >
+                        {label}판 합성
+                      </button>
+                      {done && (
+                        <a href={done} target="_blank" rel="noreferrer" className="rounded border border-[var(--ok)] px-2 py-1 text-[var(--ok)] hover:brightness-110">
+                          ⬇ {label}판 받기
+                        </a>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+              <div className="mt-1.5 text-[10px] text-[var(--muted)]">
+                ※ 그 언어 번역·더빙이 먼저 채워져 있어야 합니다(🌐 지금 번역 채우기 → 더빙).
+              </div>
+            </div>
+          )}
+
 
           {/* 방향 B — 섹션이 있으면 섹션별 합성 후 최종 이어붙이기(한 잡=섹션치 → OOM·디스크 안전판, 실패 격리) */}
           {sections.length > 0 && (
