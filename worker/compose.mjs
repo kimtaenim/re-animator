@@ -251,20 +251,69 @@ export async function runCompose(projectId, payload) {
       }
       let audioLen = acc;
 
-      // 오디오 유닛 여러 개 → 하나로 concat(가벼운 오디오 패스). 하나면 그대로. 없으면 무음.
+      // ★효과음(오디오 제안·검출 sfx) 경로 수집 — 대사와 '같은 ffmpeg 패스'에서 겹쳐 넣는다.
+      //   ★★별도 믹싱 패스를 추가했다가 compose(OOM 경계 경로)에서 워커가 터졌다 → ffmpeg
+      //   호출 수를 늘리지 않는다. 오디오 전용 필터라 픽셀 연산도 없다. 컷당 2개까지만.
+      const sfxPaths = []; // { path, timing }
+      if (!isCard) {
+        const cand = [
+          ...(s.cut?.audioSuggestions ?? []).filter((g) => g && g.enabled !== false && g.audioUrl).map((g) => ({ url: g.audioUrl, timing: g.timing })),
+          ...((s.cut?.sfxAudioUrl || "").trim() ? [{ url: s.cut.sfxAudioUrl, timing: "start" }] : []),
+        ].slice(0, 2);
+        for (const it of cand) {
+          const sp = join(dir, `sx${i}_${sfxPaths.length}.${String(it.url).includes(".wav") ? "wav" : "mp3"}`);
+          try {
+            await download(it.url, sp);
+            sfxPaths.push({ path: sp, timing: it.timing || "start" });
+          } catch {}
+        }
+      }
+
+      // 오디오 유닛 → 하나로 합침. 대사 concat + 효과음 겹치기를 '한 번의' ffmpeg 로 처리한다.
+      //   효과음이 없으면 예전과 완전히 동일(1개면 그대로, 여러 개면 concat 1패스, 없으면 무음).
       let aPath = null;
-      if (aPaths.length === 1) {
-        aPath = aPaths[0];
-      } else if (aPaths.length > 1) {
+      if (aPaths.length === 1 && !sfxPaths.length) {
+        aPath = aPaths[0]; // 그대로 — ffmpeg 호출 0
+      } else if (aPaths.length + sfxPaths.length > 0 && (aPaths.length > 1 || sfxPaths.length > 0)) {
         aPath = join(dir, `sa${i}.m4a`);
         const cc = ["-y"];
         for (const ap of aPaths) cc.push("-i", ap);
-        cc.push(
-          "-filter_complex",
-          `${aPaths.map((_, j) => `[${j}:a]`).join("")}concat=n=${aPaths.length}:v=0:a=1[a]`,
-          "-map", "[a]", "-c:a", "aac", "-b:a", "128k", aPath
-        );
-        await run(FFMPEG, cc);
+        for (const sx of sfxPaths) cc.push("-i", sx.path);
+        const chains = [];
+        const mixLabels = [];
+        if (aPaths.length === 1) {
+          mixLabels.push("[0:a]");
+        } else if (aPaths.length > 1) {
+          chains.push(`${aPaths.map((_, j) => `[${j}:a]`).join("")}concat=n=${aPaths.length}:v=0:a=1[dlg]`);
+          mixLabels.push("[dlg]");
+        }
+        // 효과음은 대사 길이(audioLen) 기준 timing 으로 지연 후 겹침. 대사가 없으면 클립 길이 기준.
+        const refLen = audioLen > 0 ? audioLen : vd || 3;
+        sfxPaths.forEach((sx, k) => {
+          const at = sx.timing === "end" ? Math.max(0, refLen - 0.4) : sx.timing === "mid" ? refLen / 2 : 0;
+          const ms = Math.round(at * 1000);
+          chains.push(`[${aPaths.length + k}:a]adelay=${ms}:all=1,volume=0.8[x${k}]`);
+          mixLabels.push(`[x${k}]`);
+        });
+        let outLabel = mixLabels[0];
+        if (mixLabels.length > 1) {
+          chains.push(`${mixLabels.join("")}amix=inputs=${mixLabels.length}:duration=longest:dropout_transition=0,volume=1.3[mx]`);
+          outLabel = "[mx]";
+        }
+        cc.push("-filter_complex", chains.join(";"), "-map", outLabel, "-c:a", "aac", "-b:a", "128k", aPath);
+        try {
+          await run(FFMPEG, cc);
+        } catch (e) {
+          // 실패하면 대사만이라도 살린다(효과음 포기) — 합성이 깨지지 않게.
+          await log(`씬 ${i + 1} 오디오 합치기 실패(효과음 제외 재시도): ${String(e?.message ?? e).slice(0, 80)}`);
+          aPath = aPaths.length === 1 ? aPaths[0] : null;
+          if (aPaths.length > 1) {
+            const cc2 = ["-y"];
+            for (const ap of aPaths) cc2.push("-i", ap);
+            cc2.push("-filter_complex", `${aPaths.map((_, j) => `[${j}:a]`).join("")}concat=n=${aPaths.length}:v=0:a=1[a]`, "-map", "[a]", "-c:a", "aac", "-b:a", "128k", join(dir, `sa2_${i}.m4a`));
+            try { await run(FFMPEG, cc2); aPath = join(dir, `sa2_${i}.m4a`); } catch { aPath = null; }
+          }
+        }
       }
 
       // 더빙 없으면 자막을 영상 길이에 글자수 비례로 순차. (카드 씬은 글자수 기반 길이)

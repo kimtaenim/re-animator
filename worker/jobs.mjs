@@ -2064,7 +2064,11 @@ export async function runVideo(projectId, payload) {
           //   ★액션 컷은 앵커링하지 않는다 — 끝이 시작과 같아지면 '한 번만 차고 끝'이 아니라
           //     되감기가 되어 SINGLE_BEAT 규칙과 정면 충돌한다(사용자 지시: 되감기 금지).
           //   문제 생기면 워커 env VIDEO_ANCHOR_TAIL=0 으로 즉시 끌 수 있다.
-          const ANCHOR = (process.env.VIDEO_ANCHOR_TAIL ?? "1") !== "0";
+          // ★앵커 기본 OFF — 앵커를 걸면 끝프레임 때문에 트림을 못 하고(trimTo=!tailUrl) 클립이
+          //   엔진 최소 길이(MiniMax 6초)로 남아 파일·버퍼가 2배가 된다. 1080p 상향과 겹쳐
+          //   워커가 즉시 OOM 났다(사용자: 예전엔 안 터지던 분량이 바로 터짐). 메모리가 여유
+          //   있을 때만 env VIDEO_ANCHOR_TAIL=1 로 켠다.
+          const ANCHOR = (process.env.VIDEO_ANCHOR_TAIL ?? "0") === "1";
           // ★앵커는 '움직임이 연속적이고 되돌아와도 자연스러운' 티어에만 — talk(입·표정)·idle(숨·머리카락).
           //   emote(표정 A→B)·action(한 박자)에 앵커를 걸면 끝이 시작과 같아져 '되감기'가 되고,
           //   침 뱉기·발차기가 되돌아가 버린다(사용자 금지 사항). 그 티어는 앵커 없이 트림으로 처리.
