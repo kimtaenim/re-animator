@@ -1264,10 +1264,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         <span className="w-7 shrink-0 text-[10px] uppercase text-[var(--muted)]" title={langLabel}>
                           {lang}
                         </span>
-                        <input
-                          type="text"
+                        {/* ★input 이 아니라 textarea — 자막 줄바꿈은 이 칸에서 엔터로 넣는다.
+                            합성(ASS·캡션 렌더)은 \n 을 하드 브레이크로 존중한다. input 이면
+                            엔터가 안 먹어 언어판 자막의 줄바꿈을 아예 지정할 수 없었다. */}
+                        <textarea
+                          rows={1}
                           value={b.tracks?.[lang]?.text ?? ""}
-                          placeholder={`${langLabel} 번역 — 재추출 시 자동`}
+                          placeholder={`${langLabel} 번역 — 엔터로 줄바꿈`}
                           onChange={(e) => {
                             const val = e.target.value;
                             const nb = (s.cut?.bubbles ?? []).map((x, i) =>
@@ -1283,7 +1286,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             );
                             updateCut(s.id, { bubbles: nb });
                           }}
-                          className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
+                          className="min-w-0 flex-1 resize-y whitespace-pre-wrap rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5 leading-snug"
                         />
                       </div>
                     );
@@ -2438,10 +2441,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         //   예전엔 원문(중국어)으로 폴백해서, 미리보기에 중국어 자막이 떴다(=결과와도 달랐다).
         if (wl && !langText) continue;
         const t = langText || (b.text || "").trim();
-        if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY, tr: (b.translation || "").trim() || undefined });
+        if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY });
       }
     else if (cut?.dialogue?.trim())
-      units.push({ text: cut.dialogue.trim(), tr: (cut.dialogueTranslation || "").trim() || undefined });
+      units.push({ text: cut.dialogue.trim() });
     // 내레이션은 별개가 아니라 화자=내레이터인 말풍선 → 위 bubbles 루프가 이미 포함.
     return units;
   }
@@ -5144,12 +5147,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           )
                         )}
                       </span>
-                      {/* 편집 보조용 번역(최종 자막엔 안 나감) — 원문 아래 작게 */}
-                      {u.tr && (
-                        <span className="max-w-[86vw] whitespace-pre-wrap rounded bg-black/40 px-2 py-0.5 text-center text-[11px] italic text-white/75">
-                          {u.tr}
-                        </span>
-                      )}
+                      {/* ★자막 아래 한국어 병기는 뺐다(사용자 지정) — 미리보기는 최종 결과와
+                          같은 것만 보여준다. 한국어 뜻은 씬 목록의 대사 줄에서 볼 수 있다. */}
                     </div>
                     );
                   })()}
