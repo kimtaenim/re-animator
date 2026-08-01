@@ -215,7 +215,11 @@ export async function runCompose(projectId, payload) {
   //   비주얼(영상·카메라워크)은 언어 무관 공유 자산이라 재생성 비용이 0 — 스펙이 말한 비용 이점.
   //   payload.lang 없으면 기존대로 project.workingLanguage 사용(회귀 0).
   const outLang = payload?.lang != null ? String(payload.lang).trim() : null;
-  const workingLang = (outLang ?? p.workingLanguage ?? "").trim(); // 자막·오디오 언어
+  // ★언어를 안 넘겼고 작업 언어도 안 정해져 있으면 '대상 언어(🌐)의 첫 번째' 로 합성한다.
+  //   예전엔 그대로 원어(중국어)로 합성해서, 일본어 더빙을 다 해놓고 합성하면
+  //   "중국어 자막 + 중국어 음성" 파일이 나왔다(사용자 반복 보고).
+  //   앱 배포가 늦어도 워커가 스스로 맞추도록 여기(워커)에 둔다. 원어판은 lang="" 을 명시.
+  const workingLang = (outLang ?? p.workingLanguage ?? "").trim() || (outLang === "" ? "" : (p.targetLanguages ?? [])[0] || "");
   // ★★언어판을 요청했는데 그 언어 번역이 하나도 없으면 '전부 원문' 인 파일이 만들어진다 —
   //   사용자는 일본어판인 줄 알고 받는데 자막·소리가 중국어다(실제 보고). 조용한 폴백을 막는다.
   if (outLang) {

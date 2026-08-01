@@ -2597,7 +2597,13 @@ export async function runDub(projectId, payload) {
   //   예전에는 더빙이 project.workingLanguage 만 봐서, "일본어판 합성"을 눌러도 일본어 오디오가
   //   없으면 원문(중국어) 오디오로 폴백됐다 — 자막만 일본어, 소리는 중국어(사용자 보고).
   //   이제 언어를 직접 받아 그 언어 트랙에 오디오를 채울 수 있다.
-  const workingLang = (payload?.lang != null ? String(payload.lang) : (p.workingLanguage || "")).trim();
+  // ★lang 을 안 받았고 작업 언어도 안 정해져 있으면 '대상 언어(🌐) 첫 번째' 로 더빙한다.
+  //   앱이 언어를 안 넘기는 경로(옛 배포·다른 버튼)에서도 원어(중국어) 더빙이 생기지 않게.
+  //   원어 더빙은 lang="" 을 명시해야 한다('🎙 원어로' 버튼).
+  const workingLang =
+    payload?.lang != null
+      ? String(payload.lang).trim()
+      : ((p.workingLanguage || "").trim() || (p.targetLanguages ?? [])[0] || "");
   const speed = Math.max(0.5, Math.min(2, Number(p.dubSpeed) || 1.2)); // 말 속도 배수(기본 1.2배)
   const only =
     Array.isArray(payload?.sceneIds) && payload.sceneIds.length ? new Set(payload.sceneIds) : null;
@@ -2622,8 +2628,11 @@ export async function runDub(projectId, payload) {
       const n = need.reduce((a, s) => a + (s.cut?.bubbles ?? []).filter(lacks).length, 0);
       await log(`${workingLang} 번역이 빠진 ${n}줄 — 더빙 전에 여기서 채웁니다`);
       try {
-        const { translated } = await translateScenesMultilang(need, [workingLang]);
-        await log(`${workingLang} 번역 ${translated}줄 채움 — 이어서 더빙합니다`);
+        const { translated, errors } = await translateScenesMultilang(need, [workingLang]);
+        await log(
+          `${workingLang} 번역 ${translated}줄 채움 — 이어서 더빙합니다` +
+            (translated === 0 && errors?.length ? ` / ★번역이 0줄인 이유: ${errors.slice(0, 2).join(" | ")}` : "")
+        );
         // 번역만이라도 즉시 저장한다(더빙이 뒤에서 실패해도 번역은 남게). 저장 규약: fresh 재읽기 후
         // 인덱스+원문이 일치하는 말풍선의 tracks 만 얹는다.
         if (translated > 0) {

@@ -205,7 +205,9 @@ export async function translateToLanguages(texts, langs) {
 
   try {
     const res = await client.messages.create({ model: MODEL, max_tokens: MAX_OUT, messages: [{ role: "user", content: prompt }] });
-    if (res.stop_reason === "refusal") return { result, cost: 0, truncated: false };
+    // ★거부도 '조용한 0줄' 이 아니라 이유로 돌려준다 — 예전엔 그냥 빈 결과라 원인을 알 수 없었다.
+    if (res.stop_reason === "refusal")
+      return { result, cost: 0, truncated: false, error: "모델이 이 대사 번역을 거부했습니다(refusal)" };
     const truncated = res.stop_reason === "max_tokens";
     const raw = res.content?.find((b) => b.type === "text")?.text ?? "{}";
     // ★잘렸든 아니든 '완결된 항목'만 골라 담는다 → 잘려도 앞부분은 살린다(예전엔 전부 버렸다).
@@ -256,9 +258,10 @@ export async function translateScenesMultilang(scenes, langs) {
       items.push({ b, text: t });
     }
   }
-  if (!items.length) return { translated: copied, cost: 0 };
+  if (!items.length) return { translated: copied, cost: 0, errors: [] };
   let translated = copied;
   let cost = 0;
+  const errors = []; // 번역이 0줄일 때 '왜' 를 호출측이 사용자에게 보여줄 수 있게
   // ★덩어리 크기를 언어 수로 나눈다 — 50줄 × 2언어면 출력이 max_tokens 를 넘겨 잘렸다.
   //   (잘리면 그 덩어리 전체가 버려져 번역이 들쭉날쭉해졌다 = 사용자 보고의 원인.)
   const CHUNK = Math.max(6, Math.floor(Number(process.env.TRANSLATE_CHUNK || 40) / Math.max(1, langs.length)));
@@ -283,7 +286,10 @@ export async function translateScenesMultilang(scenes, langs) {
   // 한 덩어리 처리 — 잘리거나 빠진 줄이 있으면 반으로 쪼개 재귀 재시도(끝까지 채운다).
   const run = async (slice, depth = 0) => {
     if (!slice.length) return;
-    const { result, cost: c, truncated } = await translateToLanguages(slice.map((it) => it.text), langs);
+    const { result, cost: c, truncated, error } = await translateToLanguages(slice.map((it) => it.text), langs);
+    // ★에러를 버리지 않는다 — 예전엔 호출측이 error 를 안 읽어서 "0줄 채움" 만 남고
+    //   왜 안 됐는지(키·거부·과부하·타임아웃)를 아무도 알 수 없었다.
+    if (error && !errors.includes(error)) errors.push(error);
     cost += c;
     translated += apply(slice, result);
     // 아직 안 채워진 줄만 모아 재시도. 쪼개면 출력이 짧아져 잘림이 해소된다.
@@ -296,7 +302,10 @@ export async function translateScenesMultilang(scenes, langs) {
   };
 
   for (let i = 0; i < items.length; i += CHUNK) await run(items.slice(i, i + CHUNK));
-  return { translated, cost };
+  // 한 줄도 못 채웠는데 이유도 없으면 그것 자체가 단서다(모델이 빈 응답 = 형식 불일치).
+  if (translated === copied && !errors.length)
+    errors.push("모델이 번역 결과를 돌려주지 않았습니다(빈 응답 또는 형식 불일치)");
+  return { translated, cost, errors };
 }
 
 // ★프로젝트 전체를 한 번의 Claude 호출로 번역(비용·지연 최소). 컷 대사(dialogue→dialogueTranslation)
