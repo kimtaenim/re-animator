@@ -47,6 +47,15 @@ export function buildRegenPrompt(scene, project, nRefs = 0) {
   // 아까 읽어낸 내용(사람이 편집 가능)을 참고로 다시 넣는다 — 그림에 충실한 선에서.
   const content = String(cut.description || cut.promptDraft || "").trim();
   if (content) p += ` Scene content (reference; stay faithful to the drawing): ${content}`;
+  // ★★인체 묘사 정확도(사용자 지시) — 생성 모델은 손·발·관절을 가장 잘 망가뜨린다
+  //   (손가락 개수, 팔다리 개수·길이, 꿨인 관절, 붙은 손). 명시적으로 거지해 준다.
+  //   원본에서 가려져 안 보이는 부위를 새로 지어내면 안 되므로 '그려진 대로' 를 같이 말한다.
+  p +=
+    " ANATOMY (critical): draw every character's body correctly — head, neck, torso, both arms, both hands, both legs and both feet" +
+    " exactly as they appear in the panel. Correct number of fingers (five per hand) and limbs; natural joint bends at shoulders, elbows," +
+    " wrists, hips, knees and ankles; correct proportions and foreshortening. No extra or missing limbs or digits, no fused, melted," +
+    " twisted or broken joints, no hands merging into the body or into each other, no warped or rubbery arms and legs." +
+    " If a limb, hand or foot is cropped or hidden behind something in the original panel, keep it cropped or hidden — do NOT invent it.";
   // ★ 목표 프레임을 꽉 채워라 — 컷 모양이 달라도 배경을 자연스럽게 확장해 채우되
   // 주요 인물·피사체는 왜곡 없이 충실히. 모든 출력이 같은 프레임 크기.
   p += ` Compose the result to completely fill ${frameDesc(project)}, edge to edge. If the source panel has a different shape (e.g. a tall vertical webtoon panel), naturally extend the background and setting to fill the whole frame — do NOT stretch, squash, or distort the subject; keep characters and drawing faithful, placed sensibly within the frame. There must be NO black bars, white space, empty margins, borders, vignette, or gradient fade at any edge — the entire frame is finished illustration. Every output must share this exact same frame size.`;
@@ -59,7 +68,7 @@ export function buildRegenPrompt(scene, project, nRefs = 0) {
       "Do NOT clean up, neutralize, or override this panel's state with the reference; the references are ONLY for base identity and design.";
   const style = String(project.stylePrompt || "").trim();
   if (style) p += ` Style note: ${style}.`;
-  return p.slice(0, 1600);
+  return p.slice(0, 2600);
 }
 
 // 프로젝트 비율의 '정확한' 최종 크기(gpt-image-1 3종 크기와 별개 — 진짜 16:9 등).

@@ -336,12 +336,42 @@ function normalizeNarration(cut) {
 // 검출된 효과음 문자열(cut.sfx) → 통제 가능한 '효과음' 말풍선(speakerId=__sfx__)으로 통일.
 // 사용자가 연출 보고서/편집기에서 보고 지우거나 고칠 수 있고(=통제), 더빙 때만 ElevenLabs 효과음으로
 // 생성된다. 절제: OCR 이 실제로 잡은 의성어/앰비언스만 한 줄로 등록하고, 원치 않으면 사용자가 지운다.
+// ★효과음인데 '대사(내레이터)' 로 잡힌 줄을 되돌린다 —
+//   OCR 이 말풍선 밖 의성어를 bubbles 에 넣으면 화자가 없어(null) 내레이터 목소리가 그걸
+//   읽어버린다(사용자 보고: 효과음이 내레이터로 잡힘). 프롬프트로도 막지만 모델은 실수하므로
+//   결정적 판정을 코드로 둔다. ★사람이 화자를 지정한 줄은 절대 건드리지 않는다.
+const SFX_WORDS =
+  /^(쾅|콰앙|쿵|퍽|퍼억|팍|턱|툭|탁|털썩|우당탕|와장창|쨍그랑|후욱|휙|휘익|쉭|촤악|철썩|찰싹|버럭|으드득|바스락|사각|스륵|스르륵|덜컥|덜덜|부르르|두근|두근두근|쿵쾅|삐걱|끼익|끼이익|드르륵|따당|탕|빵|펑|펑펑|쏴아|촤아|주르륵|뚝|똑|딸깍|치익|지익|파앗|번쩍|화악|훅|헉|흡|끄응|으윽|윽|억|악|캬|콜록|훌쩍)+[!?~…\.\s]*$/;
+const SFX_JP = /^[゠-ヿㇰ-ㇿ･-ﾟ…!?~\s]{1,10}$/; // 가타카나(반각 포함) 의성어 덩어리 // 가타카나 의성어 덩어리
+function looksLikeSfx(text) {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  if (t.length > 12) return false; // 긴 문장은 대사로 본다(오탐 방지)
+  if (SFX_WORDS.test(t)) return true;
+  if (SFX_JP.test(t)) return true;
+  // 같은 글자 3회 이상 반복(쾅쾅쾅, ㄷㄷㄷ, ~~~) + 문장부호만 남는 짧은 덩어리
+  if (/(.)\1{2,}/.test(t) && t.length <= 8) return true;
+  // ★"짧은 한글 + 느낌표" 규칙은 뺐다 — 살려줘!/형!/정말이야? 같은 실제 대사를 효과음으로
+  //   잡아 대사가 통째로 사라진다(검증에서 오탐 확인). 사전(SFX_WORDS)에 있는 것만 인정한다.
+  return false;
+}
+
 function normalizeSfx(cut) {
   if (!cut) return;
-  const sfx = (cut.sfx || "").trim();
-  if (!sfx) return;
   cut.bubbles = cut.bubbles ?? [];
   const norm = (t) => String(t || "").replace(/\s+/g, "").trim();
+
+  // (1) OCR 이 bubbles 에 잘못 넣은 의성어를 효과음으로 되돌린다.
+  //     조건: 화자가 아직 정해지지 않은 줄(undefined/null)만. 사람이 지정한 줄은 보존.
+  for (const b of cut.bubbles) {
+    if (!b || b.speakerId === "__sfx__") continue;
+    const unassigned = b.speakerId === undefined || b.speakerId === null;
+    if (unassigned && looksLikeSfx(b.text)) b.speakerId = "__sfx__";
+  }
+
+  // (2) cut.sfx 문자열 → 효과음 말풍선(기존 동작)
+  const sfx = (cut.sfx || "").trim();
+  if (!sfx) return;
   const already = cut.bubbles.some((b) => b.speakerId === "__sfx__" && norm(b.text) === norm(sfx));
   if (!already) cut.bubbles.push({ text: sfx, speakerId: "__sfx__" });
   cut.sfx = ""; // 단일 원천 = 말풍선(__sfx__). 중복 등록 방지.

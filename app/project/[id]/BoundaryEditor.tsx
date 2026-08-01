@@ -129,7 +129,8 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
   const [zoom, setZoom] = useState<Region | null>(null);
   // regions 는 항상 yStart 오름차순 유지(렌더 인덱스=드래그 인덱스 일치).
   const [regions, setRegions] = useState<Region[]>(() => scenesToRegions(scopedScenes));
-  const [drag, setDrag] = useState<{ index: number; edge: "top" | "bottom" } | null>(null);
+  // ★가로(좌우) 조정 추가 — 예전엔 위/아래(세로)만 끌 수 있어 좌우 여백을 손으로 못 고쳤다.
+  const [drag, setDrag] = useState<{ index: number; edge: "top" | "bottom" | "left" | "right" } | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   // 편집 일련번호 — 저장 시작 시점의 번호와 끝난 시점의 번호가 같을 때만 dirty 를 내린다.
@@ -198,6 +199,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
       if (!el) return;
       const rect = el.getBoundingClientRect();
       const y = Math.round((e.clientY - rect.top) / scale);
+      const x = Math.round((e.clientX - rect.left) / scale); // 가로 조정용
       setRegions((prev) => {
         const next = prev.map((r) => ({ ...r }));
         const r = next[drag.index];
@@ -205,10 +207,17 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
         if (drag.edge === "top") {
           const lo = drag.index > 0 ? next[drag.index - 1].yEnd : 0;
           r.yStart = Math.max(lo, Math.min(r.yEnd - minH, y));
-        } else {
+        } else if (drag.edge === "bottom") {
           const hi =
             drag.index < next.length - 1 ? next[drag.index + 1].yStart : canvas.totalHeight;
           r.yEnd = Math.min(hi, Math.max(r.yStart + minH, y));
+        } else {
+          // ★좌우 — 세로와 달리 이웃 컷과 겹쳐도 되므로(같은 y 대역에 나란한 컷은 없음)
+          //   캔버스 폭 안에서만 제한한다. 최소 폭은 세로와 같은 기준(minH)을 쓴다.
+          const curL = r.xStart ?? 0;
+          const curR = r.xEnd ?? canvas.refWidth;
+          if (drag.edge === "left") r.xStart = Math.max(0, Math.min(curR - minH, x));
+          else r.xEnd = Math.min(canvas.refWidth, Math.max(curL + minH, x));
         }
         return next;
       });
@@ -221,7 +230,7 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [drag, scale, minH, canvas.totalHeight]);
+  }, [drag, scale, minH, canvas.totalHeight, canvas.refWidth]);
 
   // 자동 저장 — 변경(타입·내용·경계) 후 잠시 뒤 자동으로 저장. 드래그 중엔 재예약돼
   // 손 뗀 900ms 뒤 한 번만 저장.
@@ -530,6 +539,25 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
                       setDrag({ index: i, edge: "bottom" });
                     }}
                     className="absolute bottom-[-3px] left-0 h-1.5 w-full cursor-ns-resize"
+                  />
+                  {/* ★좌우 핸들 — 컷의 왼쪽·오른쪽 경계를 끌어 좌우 여백을 직접 자른다. */}
+                  <div
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDrag({ index: i, edge: "left" });
+                    }}
+                    title="왼쪽 경계 — 끌어서 좌우 폭 조정"
+                    className="absolute bottom-0 left-[-3px] top-0 w-1.5 cursor-ew-resize"
+                  />
+                  <div
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDrag({ index: i, edge: "right" });
+                    }}
+                    title="오른쪽 경계 — 끌어서 좌우 폭 조정"
+                    className="absolute bottom-0 right-[-3px] top-0 w-1.5 cursor-ew-resize"
                   />
                 </div>
               );
