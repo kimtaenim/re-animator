@@ -185,7 +185,9 @@ export default function CameraWorkEditor({
           {/* ★가속 줌 — 사용자 지정 "처음엔 거의 멈춰 있다가 갑자기 엄청난 속도로 파고든다".
               0=일정 속도. 12 면 전체 시간의 90% 동안 겨우 25% 만 움직이고 마지막에 몰아친다.
               가속만으로는 부족하고 '줌 속도'(폭)도 같이 올려야 확 들어간다. */}
-          {(preset === "push_in" || preset === "pull_out" || preset === "crash_zoom" || preset === "pan") && (
+          {/* ★버티고(달리줌)·패럴랙스도 같은 진행값을 쓰므로 가속이 그대로 걸린다(사용자 지정) —
+              슬라이더가 안 보여서 조절을 못 했을 뿐이다. */}
+          {preset !== "whip" && preset !== "shake" && (
             <Slider
               label="가속"
               value={cw?.zoom_accel ?? 0}
