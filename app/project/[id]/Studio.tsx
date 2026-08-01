@@ -4625,15 +4625,32 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             <span className="text-xs text-[var(--muted)]">
               생성된 영상 위에 카메라워크를 얹어 미리보고 굽는 단계 — 가장 손이 많이 가고 예측이 어려운 작업이라 따로 뺐습니다. 편집기 프리뷰는 실시간 근사, ‘적용(굽기)’ 후 👁 결과가 최종 픽셀입니다.
             </span>
+            {/* ★프리셋 기본값을 0 으로 바꿔도 '이미 저장된 컷' 의 흔들림 값은 그대로 남는다.
+                옛 컷까지 한 번에 끄는 버튼(사용자 지정: 흔들 진폭 0). 컷별 슬라이더로 다시 올릴 수 있다. */}
             <button
               type="button"
-              onClick={bakeAllCamera}
-              disabled={busy || fxPending.size > 0}
-              className="ml-auto rounded bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white disabled:opacity-40"
-              title="카메라워크가 지정된 모든 컷(영상 생성됨·정지 제외)을 한 번에 굽습니다(컷당 ~20-40초)."
+              onClick={() => {
+                const targets = projectRef.current.scenes.filter(
+                  (s) => inSection(s) && s.cut?.cameraWork && (s.cut.cameraWork.shake_amp_px ?? 0) > 0
+                );
+                for (const s of targets)
+                  updateCut(s.id, { cameraWork: { ...s.cut!.cameraWork!, shake_amp_px: 0 } });
+                setDubMsg(
+                  targets.length
+                    ? `✓ ${targets.length}개 컷의 흔들림을 0 으로 — 영상에 반영하려면 그 컷을 다시 구우세요`
+                    : "흔들림이 켜진 컷이 없습니다"
+                );
+                setTimeout(() => setDubMsg(null), 6000);
+              }}
+              className="ml-auto rounded border border-[var(--accent)] px-2 py-1 text-xs text-[var(--accent)] hover:bg-[var(--panel-2)]"
+              title="이미 저장된 컷들의 흔들 진폭을 0 으로 만듭니다(옛 컷은 예전 기본값 5px 등이 남아 있습니다). 컷별 슬라이더로 다시 올릴 수 있습니다."
             >
-              {fxPending.size > 0 ? "굽는 중…" : "🎥 전체 굽기"}
+              흔들림 모두 끄기
             </button>
+            {/* 굽기는 각 컷 카드의 '적용(굽기)' — 지금 보고 있는 컷만 굽는다(사용자 지정). */}
+            <span className="rounded border border-[var(--border)] px-2 py-1 text-[10px] text-[var(--muted)]">
+              굽기 = 각 컷의 ‘적용(굽기)’
+            </span>
           </div>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {project.scenes

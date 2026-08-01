@@ -39,7 +39,8 @@ export function cleanCameraWork(raw: unknown): CameraWork | undefined {
     preset: r.preset as CameraPreset,
     duration_s: clampNum(r.duration_s, 0.3, 20) ?? 3.5,
   };
-  const zr = clampNum(r.zoom_rate_pct_per_s, -15, 15);
+  // ★±40%/s — 가속 줌("거의 멈췄다가 확")은 폭이 커야 체감된다(사용자 지정).
+  const zr = clampNum(r.zoom_rate_pct_per_s, -40, 40);
   if (zr !== undefined) cw.zoom_rate_pct_per_s = zr;
   if (r.drift_px_per_s && typeof r.drift_px_per_s === "object") {
     const d = r.drift_px_per_s as Record<string, unknown>;
@@ -55,7 +56,7 @@ export function cleanCameraWork(raw: unknown): CameraWork | undefined {
   const sd = clampNum(r.shake_damp, 0, 20);
   if (sd !== undefined) cw.shake_damp = sd;
   // ★가속 줌·흔들림 속도 — 화이트리스트에서 빠지면 저장 시 사라진다(이 프로젝트 단골 사고).
-  const za = clampNum(r.zoom_accel, 0, 4);
+  const za = clampNum(r.zoom_accel, 0, 12);
   if (za !== undefined) cw.zoom_accel = za;
   const sh = clampNum(r.shake_hz, 0, 30);
   if (sh !== undefined) cw.shake_hz = sh;

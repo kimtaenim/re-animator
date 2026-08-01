@@ -171,7 +171,9 @@ export default function CameraWorkEditor({
       {preset !== "static" && layer !== "C" && (
         <div className="flex flex-col gap-1">
           <Slider label="길이" value={cw?.duration_s ?? 3.5} min={0.5} max={12} step={0.5} suffix="s" onChange={(v) => set({ duration_s: v })} />
-          <Slider label="줌 속도" value={cw?.zoom_rate_pct_per_s ?? 0} min={-15} max={15} step={0.5} suffix="%/s" onChange={(v) => set({ zoom_rate_pct_per_s: v })} />
+          {/* ★줌 폭을 ±40%/s 까지 — 가속만 올리고 폭이 작으면 "확 들어가는" 느낌이 안 난다.
+              가속(뒤 슬라이더)과 함께 써야 '거의 멈췄다가 순간적으로 파고드는' 줌이 된다. */}
+          <Slider label="줌 속도" value={cw?.zoom_rate_pct_per_s ?? 0} min={-40} max={40} step={0.5} suffix="%/s" onChange={(v) => set({ zoom_rate_pct_per_s: v })} />
           <Slider label="드리프트X" value={drift.x} min={-100} max={100} step={5} onChange={(v) => set({ drift_px_per_s: { x: v, y: drift.y } })} />
           <Slider label="드리프트Y" value={drift.y} min={-100} max={100} step={5} onChange={(v) => set({ drift_px_per_s: { x: drift.x, y: v } })} />
           {(preset === "pull_out" || preset === "pan" || preset === "shake") && (
@@ -180,15 +182,16 @@ export default function CameraWorkEditor({
           {layer === "B" && (
             <Slider label="배경 델타" value={cw?.bg_scale_delta_pct_per_s ?? 0} min={-10} max={10} step={0.5} suffix="%p/s" onChange={(v) => set({ bg_scale_delta_pct_per_s: v })} />
           )}
-          {/* ★가속 줌 — 사용자 지정 "느리다가 갑자기 빨라지는 가속도 줌이 제일 중요".
-              0=일정 속도, 클수록 초반이 더 느리고 후반이 더 급하다. 팬에도 같이 걸린다. */}
+          {/* ★가속 줌 — 사용자 지정 "처음엔 거의 멈춰 있다가 갑자기 엄청난 속도로 파고든다".
+              0=일정 속도. 12 면 전체 시간의 90% 동안 겨우 25% 만 움직이고 마지막에 몰아친다.
+              가속만으로는 부족하고 '줌 속도'(폭)도 같이 올려야 확 들어간다. */}
           {(preset === "push_in" || preset === "pull_out" || preset === "crash_zoom" || preset === "pan") && (
             <Slider
               label="가속"
               value={cw?.zoom_accel ?? 0}
               min={0}
-              max={4}
-              step={0.1}
+              max={12}
+              step={0.5}
               onChange={(v) => set({ zoom_accel: v })}
             />
           )}
