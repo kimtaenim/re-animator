@@ -437,20 +437,39 @@ export async function runCompose(projectId, payload) {
       // ── ffmpeg (aninews 패턴): 입력 0=영상(카드 씬은 검정+테두리 프레임), 1=오디오, 2..=자막 PNG ──
       // -nostats/-loglevel warning: 프레임마다 진행 로그를 stderr 에 쏟지 않게(메모리 폭증 방지).
       const args = ["-hide_banner", "-nostats", "-loglevel", "warning", "-y"];
+      let cardNative = false; // 카드 배경을 ffmpeg 로 직접 그렸는지(canvas 폴백)
       if (isCard) {
         const frame = await renderIntertitleFrame({ W, H });
-        if (!frame) throw new Error("자막 씬 배경 렌더 실패(canvas 미설치?)");
-        const fp = join(dir, `frame${i}.png`);
-        await writeFile(fp, frame);
-        args.push("-loop", "1", "-framerate", String(FPS), "-i", fp);
+        if (frame) {
+          const fp = join(dir, `frame${i}.png`);
+          await writeFile(fp, frame);
+          args.push("-loop", "1", "-framerate", String(FPS), "-i", fp);
+        } else {
+          // ★예전엔 여기서 합성 '전체' 를 실패시켰다 — canvas 는 optionalDependency 라
+          //   설치가 안 되면(플랫폼·네트워크) 무성영화 카드 씬이 하나만 있어도 최종 합성이
+          //   통째로 죽었다. 카드 배경은 검정+이중 테두리뿐이라 ffmpeg 로 그대로 그릴 수 있다.
+          //   → 부품 하나가 없다고 납품물 전체를 막지 않는다.
+          await log("자막 씬 배경: canvas 없이 ffmpeg 로 직접 렌더(동일한 검정+테두리)");
+          args.push("-f", "lavfi", "-i", `color=c=black:s=${W}x${H}:r=${FPS}`);
+          cardNative = true;
+        }
       } else {
         args.push("-i", vPath);
       }
       if (aPath) args.push("-i", aPath);
       else args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100");
       for (const c of capPaths) args.push("-loop", "1", "-framerate", String(FPS), "-i", c.path);
+      // canvas 폴백일 때만 테두리를 ffmpeg 로 그린다(미리보기와 같은 인셋 4%/5.2%, 아이보리).
+      const cardBorders = (() => {
+        const bx = Math.round(W * 0.04), by = Math.round(H * 0.04);
+        const ix = Math.round(W * 0.052), iy = Math.round(H * 0.052);
+        return (
+          `,drawbox=x=${bx}:y=${by}:w=${W - bx * 2}:h=${H - by * 2}:color=0xf4efe4@0.8:t=2` +
+          `,drawbox=x=${ix}:y=${iy}:w=${W - ix * 2}:h=${H - iy * 2}:color=0xf4efe4@0.6:t=1`
+        );
+      })();
       let filter = isCard
-        ? `[0:v]setsar=1,fps=${FPS}` // 프레임이 이미 W×H 정확 — 스케일·슬로모션 불필요
+        ? `[0:v]${cardNative ? `${cardBorders.slice(1)},` : ""}setsar=1,fps=${FPS}` // 프레임이 이미 W×H 정확 — 스케일·슬로모션 불필요
         : `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
           `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,setpts=${speed.toFixed(4)}*PTS,fps=${FPS}`;
       // 마지막 프레임 홀드(스펙 §5) — tpad 로 클립 끝을 늘린다. 루프가 아니라 정지 홀드.
