@@ -215,10 +215,12 @@ export function salvageItems(raw) {
   return out;
 }
 
-export async function translateToLanguages(texts, langs) {
+// opts._call = 테스트용 주입점(모델 호출만 가짜로 바꿔 '번역을 채우는 코드 전체'를 실제로 실행).
+// ★이 경로가 한 달간 조용히 0줄을 돌려줬는데, 네트워크가 필요해서 아무도 실행해보지 않았다.
+export async function translateToLanguages(texts, langs, opts = {}) {
   const result = {};
   (langs || []).forEach((l) => (result[l] = new Array(texts.length).fill(null)));
-  const client = await getClient();
+  const client = opts._call ? { messages: { create: opts._call } } : await getClient();
   if (!client || !langs?.length) return { result, cost: 0 };
   const todo = [];
   texts.forEach((t, i) => {
@@ -267,7 +269,7 @@ export async function translateToLanguages(texts, langs) {
 
 // scenes 의 말풍선(text, 효과음 제외) → 각 언어 tracks[lang].text 채움(in-place). 이미 있으면 스킵.
 // 원어가 한국어여도 ja/en 은 필요하므로 번역한다(§10). 반환 { translated, cost }.
-export async function translateScenesMultilang(scenes, langs) {
+export async function translateScenesMultilang(scenes, langs, opts = {}) {
   if (!langs?.length) return { translated: 0, cost: 0 };
   const items = []; // { b, text }
   let copied = 0; // 번역할 글자가 없어 원문을 그대로 채운 줄(…·!? 등)
@@ -319,7 +321,7 @@ export async function translateScenesMultilang(scenes, langs) {
   // 한 덩어리 처리 — 잘리거나 빠진 줄이 있으면 반으로 쪼개 재귀 재시도(끝까지 채운다).
   const run = async (slice, depth = 0) => {
     if (!slice.length) return;
-    const { result, cost: c, truncated, error } = await translateToLanguages(slice.map((it) => it.text), langs);
+    const { result, cost: c, truncated, error } = await translateToLanguages(slice.map((it) => it.text), langs, opts);
     // ★에러를 버리지 않는다 — 예전엔 호출측이 error 를 안 읽어서 "0줄 채움" 만 남고
     //   왜 안 됐는지(키·거부·과부하·타임아웃)를 아무도 알 수 없었다.
     if (error && !errors.includes(error)) errors.push(error);
