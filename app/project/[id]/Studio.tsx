@@ -1219,8 +1219,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   title={
                     isSfx
                       ? "효과음 생성됨 — 듣기"
-                      : (project.workingLanguage ?? "") && (b.tracks?.[project.workingLanguage!]?.audioUrl || "").trim()
-                        ? `${LANGUAGES.find((l) => l.id === project.workingLanguage)?.label ?? project.workingLanguage} 더빙 — 듣기`
+                      : dubLang && (b.tracks?.[dubLang]?.audioUrl || "").trim()
+                        ? `${dubLangLabel} 더빙 — 듣기`
                         : "더빙됨 — 듣기"
                   }
                   className="shrink-0 rounded border border-[var(--ok)] px-1.5 py-1 leading-none text-[var(--ok)] hover:bg-[var(--panel-2)]"
@@ -2095,6 +2095,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   //   리턴해서, 5단계 '언어판 합성' 이 더빙이 끝나기 전에 합성을 걸었다(그래서 일본어판에
   //   일본어 소리가 안 들어갔다). 이제 호출측이 await 로 실제 완료를 기다린다.
   const dubResolveRef = useRef<((ok: boolean) => void) | null>(null);
+  // ★★더빙 언어 — 원어(중국어) 더빙은 만들지 않는다(사용자 지정, 반복).
+  //   예전엔 더빙 언어가 '작업 언어' 를 따랐고, 작업 언어가 원어면 원문(중국어) TTS 를 만들었다.
+  //   납품물은 일본어판인데 중국어 음성을 만들며 시간·비용을 버렸다.
+  //   → 대상 언어(🌐)가 켜져 있으면 더빙은 항상 그 언어로 나간다. 대상 언어가 없는 프로젝트만
+  //     예전처럼 원어 더빙(회귀 0).
+  const dubLang = ((project.workingLanguage || "").trim() || (project.targetLanguages ?? [])[0] || "").trim();
+  const dubLangLabel = dubLang ? (LANGUAGES.find((l) => l.id === dubLang)?.label ?? dubLang) : "원어";
   const [dubMsg, setDubMsg] = useState<string | null>(null); // 더빙 완료/실패 안내(잠깐 표시)
   // ── 후처리 줌(postfx) — Grok 원본에 줌 커브를 실픽셀로 굽는 잡. fxUrl 이 미리보기·합성에 쓰임. ──
   async function runFxJob(sceneIds: string[], effect: string, strength: number, openPreviewId?: string) {
@@ -2253,11 +2260,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setDubMsg(null);
     // 명시 sceneIds 없고 섹션 활성이면 그 섹션 컷만 더빙(부분 작업).
     const ids = sceneIds ?? (sec ? project.scenes.filter((s) => sec.ids.has(s.id)).map((s) => s.id) : undefined);
+    // ★언어를 안 넘긴 호출(전체 더빙·이 컷 더빙·선택 더빙)도 원어가 아니라 더빙 언어로 나간다.
+    const useLang = (lang ?? dubLang).trim();
     try {
       const r = await fetch("/api/dub", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, ...(ids ? { sceneIds: ids } : {}), ...(lang ? { lang } : {}) }),
+        body: JSON.stringify({ projectId: project.id, ...(ids ? { sceneIds: ids } : {}), ...(useLang ? { lang: useLang } : {}) }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "더빙 실패");
@@ -2365,7 +2374,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   //   "일본어 더빙이 안 된다"로 보였다. lang 인자를 주면 그 언어를 강제로 듣는다(언어판 확인용).
   type Bub = NonNullable<NonNullable<Project["scenes"][number]["cut"]>["bubbles"]>[number];
   const bubbleAudio = (b: Bub, lang?: string): string => {
-    const lg = (lang ?? project.workingLanguage ?? "").trim();
+    const lg = (lang ?? dubLang).trim(); // 기본 = 더빙 언어(원어 더빙을 안 만드므로 여기도 같은 기준)
     return (lg && (b.tracks?.[lg]?.audioUrl || "").trim()) || b.audioUrl || "";
   };
   // 씬 오디오 전체 재생 — 말풍선(대사·내레이션·효과음) audioUrl 순서대로. 효과음도 소리로 재생.
@@ -3052,8 +3061,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   선택 {selForVideo.size} 더빙
                 </button>
               )}
-              <button onClick={() => runDubJob()} disabled={busy || dubbing} className={P}>
-                {dubbing ? "더빙 중…" : "🎙 전체 더빙"}
+              <button onClick={() => runDubJob()} disabled={busy || dubbing} className={P} title={`${dubLangLabel}로 더빙합니다(원어 더빙은 만들지 않습니다).`}>
+                {dubbing ? "더빙 중…" : `🎙 전체 더빙 (${dubLangLabel})`}
               </button>
               {(sceneRunning || dubbing) && miniBar()}
               {/* 동영상·더빙은 병렬로 돌 수 있어 정지 버튼도 각각. */}
@@ -3859,10 +3868,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             <button
               onClick={() => runDubJob()}
               disabled={busy || dubbing}
-              title="모든 컷의 대사(화자 목소리)·내레이션(나레이터)·효과음 음성 생성"
+              title={`모든 컷의 대사·효과음을 ${dubLangLabel}로 더빙합니다(원어 더빙은 만들지 않습니다).`}
               className={`${selForVideo.size > 0 ? "" : "ml-auto "}rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50`}
             >
-              {dubbing ? "더빙 중…" : "🎙 전체 더빙 생성"}
+              {dubbing ? "더빙 중…" : `🎙 전체 더빙 생성 (${dubLangLabel})`}
             </button>
           </div>
 
@@ -4200,7 +4209,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           type="button"
                           onClick={() => runDubJob([s.id])}
                           disabled={busy || dubbing}
-                          title="이 컷만 더빙(대사·내레이션·효과음) 다시 생성 — 하나만 고쳤을 때"
+                          title={`이 컷만 ${dubLangLabel}로 다시 더빙 — 하나만 고쳤을 때. 더빙 후 영상을 다시 만들 필요는 없습니다(합성이 소리 길이에 맞춥니다).`}
                           className="rounded border border-[var(--accent)] px-2 py-0.5 text-[var(--accent)] hover:bg-[var(--panel-2)] disabled:opacity-40"
                         >
                           🎙 이 컷 더빙
