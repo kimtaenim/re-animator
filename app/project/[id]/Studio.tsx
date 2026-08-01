@@ -22,7 +22,8 @@ const STEP_LABEL: Record<StepKind, string> = {
   cast: "2. 캐스팅",
   regen: "3. 이미지 재생성",
   scene: "4. 동영상 생성 및 더빙",
-  compose: "5. 합성",
+  // ★카메라 미리보기가 5단계, 합성이 6단계다(사용자 지정) — 실제 작업 순서와 번호를 맞춘다.
+  compose: "6. 합성",
 };
 
 // 카메라 워크 프리셋 — 고르면 그 컷 모션 프롬프트(영문)를 이 문구로 채운다.
@@ -393,19 +394,30 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 초기값은 진행 상황에 맞춰: 이미지 있으면 4단계, 승인됐으면 2단계, 아니면 1단계.
   // ★단계 키에 UI 전용 'camera'(카메라 미리보기) 추가 — steps 레코드(source/cast/regen/scene/compose)는
   //   건드리지 않는다(옛 프로젝트 안전·데이터 무변경). 순수 화면 탭으로만 존재.
-  const [activeStep, setActiveStep] = useState<StepKind | "camera">(() =>
-    project.scenes?.some((s) => s.generatedImage)
+  // ★새로고침해도 보던 단계 그대로 — 예전엔 리로드마다 진행상황으로 다시 계산해서 카메라
+  //   미리보기에서 F5 하면 4단계로 튕겼다(사용자 지적). 주소 해시(#camera)에 남겨 복원한다.
+  const [activeStep, setActiveStep] = useState<StepKind | "camera">(() => {
+    const VALID = new Set(["source", "cast", "regen", "scene", "camera", "compose"]);
+    if (typeof window !== "undefined") {
+      const h = window.location.hash.replace(/^#/, "");
+      if (VALID.has(h)) return h as StepKind | "camera";
+    }
+    return project.scenes?.some((s) => s.generatedImage)
       ? "scene"
       : project.steps?.source?.status === "approved"
         ? "cast"
-        : "source"
-  );
+        : "source";
+  });
   // ★단계 전환 시 화면 리셋 방지 — 단계를 조건부 렌더해 언마운트하므로 스크롤이 초기화됐다.
   //   떠나는 단계의 스크롤 위치를 기억했다가, 그 단계로 돌아오면 정확히 그 자리로 복원한다.
   const stepScrollY = useRef<Record<string, number>>({});
   function goToStep(k: StepKind | "camera") {
     stepScrollY.current[activeStep] = window.scrollY; // 떠나기 전 현재 위치 저장
     setActiveStep(k);
+    // 주소에 남긴다 — 새로고침·뒤로가기에도 같은 단계로 돌아온다(히스토리는 더럽히지 않음).
+    try {
+      window.history.replaceState(null, "", `#${k}`);
+    } catch {}
   }
   useEffect(() => {
     const y = stepScrollY.current[activeStep];
@@ -1796,7 +1808,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   );
                 })}
                 <span className="w-full text-[10px] text-[var(--muted)]">
-                  아래 🎙 전체 더빙 생성 하나면 번역 → 더빙까지 됩니다. 끝나면 5단계에서 합성하세요.
+                  아래 🎙 전체 더빙 생성 하나면 번역 → 더빙까지 됩니다. 끝나면 6단계에서 합성하세요.
                 </span>
                 {/* ★어느 빌드가 떠 있는지 화면에 박는다 — "새 앱이냐 옛 앱이냐" 를 매번 추측하느라
                     시간을 버렸다. 배포가 반영됐는지 여기 SHA 로 즉시 확인한다. */}
@@ -2873,7 +2885,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             ((k === "cast" || k === "regen") && approved) ||
             ((k === "scene" || k === "camera" || k === "compose") && approved && hasImages);
           const cur = activeStep === k;
-          const label = k === "camera" ? "🎥 카메라 미리보기" : STEP_LABEL[k];
+          const label = k === "camera" ? "5. 🎥 카메라 미리보기" : STEP_LABEL[k];
           return (
             <button
               key={k}
@@ -2915,7 +2927,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               >
                 {seqBusy ? "나누는 중…" : "시퀀스로 나누기"}
               </button>
-              <span className="text-[var(--muted)]">— 나누면 섹션별로 1~5단계를 따로 작업합니다</span>
+              <span className="text-[var(--muted)]">— 나누면 섹션별로 1~6단계를 따로 작업합니다</span>
               <span className="ml-auto flex items-center gap-1 text-[10px] text-[var(--muted)]">
                 <input
                   type="number"
@@ -4308,7 +4320,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       {/* 전환 — 카메라워크처럼 칩으로. 이 컷 → 다음 컷 사이(5단계 합성에서 적용). */}
                       <div
                         className="flex flex-wrap items-center gap-1"
-                        title="이 컷 → 다음 컷 사이 전환. 5단계 '영상 묶기' 결과에 적용됩니다."
+                        title="이 컷 → 다음 컷 사이 전환. 6단계 '영상 묶기' 결과에 적용됩니다."
                       >
                         <span className="text-[var(--muted)]">🎞</span>
                         {TRANSITIONS.map(([v, t]) => (
