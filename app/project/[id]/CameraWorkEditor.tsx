@@ -21,8 +21,9 @@ const PRESETS: { id: CameraPreset; label: string; layer: "A" | "B" | "C" }[] = [
   { id: "shake", label: "흔들기 shake", layer: "A" },
   { id: "crash_zoom", label: "크래시 줌", layer: "A" },
   { id: "whip", label: "휩 whip(전환)", layer: "A" },
-  { id: "parallax_push", label: "패럴랙스(계층B·매트 후)", layer: "B" },
-  { id: "vertigo", label: "버티고 달리줌(계층B·매트 후)", layer: "B" },
+  // ★매트(인물 분리)는 굽기 때 자동 생성된다 — 예전 라벨('매트 후')은 이제 틀렸다.
+  { id: "parallax_push", label: "패럴랙스(인물/배경 분리)", layer: "B" },
+  { id: "vertigo", label: "버티고 달리줌(인물/배경 분리)", layer: "B" },
   { id: "orbit", label: "오빗 orbit(I2V·프록시 필수)", layer: "C" },
 ];
 
@@ -147,7 +148,14 @@ export default function CameraWorkEditor({
             궤도=생성 · 줌=후처리
           </span>
         )}
-        {layer === "B" && <span className="text-[var(--muted)]" title="인물/배경 매트가 준비되면 2레이어로 굽습니다(현재 프리뷰는 근사).">계층 B · 매트 준비 후 굽기</span>}
+        {layer === "B" && (
+          <span
+            className="text-[var(--muted)]"
+            title="인물과 배경을 따로 움직입니다. 굽기를 누르면 인물 매트를 자동으로 한 번 만들고(그 뒤 재사용) 2레이어로 굽습니다. 여기 프리뷰는 인물 궤적만 보여주는 근사입니다."
+          >
+            인물/배경 2레이어 · 매트 자동
+          </span>
+        )}
       </div>
 
       {/* 프리뷰 — 정지 이미지 위 카메라(항상) + 마우스 올리면 실제 영상(raw) 위 카메라로 전환(굽기 전 실제에 가장 가까움). */}
