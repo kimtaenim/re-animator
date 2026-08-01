@@ -60,6 +60,8 @@ export function cleanCameraWork(raw: unknown): CameraWork | undefined {
   if (za !== undefined) cw.zoom_accel = za;
   const ah = clampNum(r.accel_hold, 0, 0.9);
   if (ah !== undefined) cw.accel_hold = ah;
+  const ac = clampNum(r.accel_hold_creep, 0, 0.6);
+  if (ac !== undefined) cw.accel_hold_creep = ac;
   const sh = clampNum(r.shake_hz, 0, 30);
   if (sh !== undefined) cw.shake_hz = sh;
   const sz = clampNum(r.start_zoom, 1, 3);

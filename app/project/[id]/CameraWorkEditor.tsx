@@ -213,7 +213,7 @@ export default function CameraWorkEditor({
               {/* ★정지 구간 — 지수 가속만으로는 움직임이 끝 10% 에 몰려 뒷부분이 짧다(사용자 지적).
                   0.5 면 "앞 절반 정지 · 뒤 절반에 줌 전체". 구간을 사람이 직접 나눈다. */}
               <Slider
-                label="정지 구간"
+                label="느린 구간"
                 value={cw?.accel_hold ?? 0}
                 min={0}
                 max={0.9}
@@ -221,6 +221,18 @@ export default function CameraWorkEditor({
                 suffix="비율"
                 onChange={(v) => set({ accel_hold: v })}
               />
+              {/* 그 느린 구간에서 얼마나 움직일지 — 0 이면 완전 정지(정지컷처럼 보임), 0.15 기본. */}
+              {(cw?.accel_hold ?? 0) > 0 && (
+                <Slider
+                  label="느린 구간 이동"
+                  value={cw?.accel_hold_creep ?? 0.15}
+                  min={0}
+                  max={0.6}
+                  step={0.05}
+                  suffix="비율"
+                  onChange={(v) => set({ accel_hold_creep: v })}
+                />
+              )}
               <Slider
                 label="가속"
                 value={cw?.zoom_accel ?? 0}

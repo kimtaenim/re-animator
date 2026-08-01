@@ -204,7 +204,8 @@ export interface CameraWork {
   shake_damp?: number;
   shake_hz?: number; // 흔들리는 속도(초당 흔들림 수). 0=프레임마다(가장 빠른 진동)
   zoom_accel?: number; // ★가속 줌: 0=일정, 클수록 '느리게 시작 → 급가속'(p = t^(1+accel))
-  accel_hold?: number; // ★정지 구간 비율(0~0.9). 0.5=앞 절반 완전 정지 → 뒤 절반에서 줌 전체
+  accel_hold?: number; // ★느린 구간 비율(0~0.9). 0.5=앞 절반은 아주 느리게 → 뒤 절반에서 몰아침
+  accel_hold_creep?: number; // 그 느린 구간에서 소화할 이동량 비율(0~0.6, 기본 0.15). 0=완전 정지
   start_zoom?: number; // pull_out 은 >1 로 시작
 }
 
