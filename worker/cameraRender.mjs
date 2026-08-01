@@ -64,10 +64,15 @@ export async function renderCameraFx(o) {
     }
     log?.(`orbit + 후처리 줌 — 궤도는 I2V, 줌·드리프트는 여기서 굽는다`);
   }
-  // 계층 B: 인물/배경 매트 미구현 → 현재는 미지원(온디맨드 매트 후). 안전하게 스킵.
+  // 계층 B(버티고·패럴랙스): 인물/배경을 따로 움직인다 — 인물 매트(알파)가 있어야 한다.
+  //   매트가 없으면 예전처럼 스킵(무엇이 없어서 안 되는지 로그로 남긴다).
   if (layer === "B") {
-    log?.(`${cameraWork.preset}(계층 B) — 인물/배경 매트 필요, 현재 미구현으로 스킵`);
-    return { skipped: true, layer, upscale: false, maxScale: 1 };
+    if (!o.mattePath) {
+      log?.(`${cameraWork.preset}(계층 B) — 인물 매트가 없어 스킵(매트를 먼저 만들어야 합니다)`);
+      return { skipped: true, layer, upscale: false, maxScale: 1, needsMatte: true };
+    }
+    const r = await renderLayerB({ ...o, log });
+    return r;
   }
 
   const [W, H] = await probe(fp, inPath, "stream=width,height");
@@ -123,6 +128,73 @@ export async function renderCameraFx(o) {
   await run(ff, ["-hide_banner", "-nostats", "-loglevel", "warning", "-y", "-i", inPath, "-vf", vf, "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", outPath], dir);
 
   return { skipped: false, layer, upscale, maxScale: table.maxScale };
+}
+
+// ── 계층 B(2레이어) — 인물과 배경이 서로 다른 궤적으로 움직인다 ──────────────────
+// 버티고(달리줌): 인물은 크기를 유지하고 배경만 반대로 스케일 → 공간이 늘어나는 그 느낌.
+// 패럴랙스: 인물과 배경의 스케일 속도 차.
+//
+// ★구현: 같은 클립을 두 갈래로 crop 한다(각자 sendcmd 스크립트).
+//   배경 = background 트랙 crop → 화면 채움
+//   인물 = character 트랙 crop + '같은 crop 을 적용한 매트'로 알파를 만들어 배경 위에 올림
+//   매트에 인물 crop 을 똑같이 걸기 때문에 알파가 인물과 정확히 붙어 다닌다.
+// ★단일 ffmpeg 패스 — 프레임별 sharp 디코딩 없음(합성 OOM 회피 원칙 유지).
+//   추가 비용은 매트 PNG 입력 1개(루프)뿐이다.
+// 매트 입력에 걸 길이(초) — 루프 입력이 무한이면 파이프라인이 안 끝나는 경우가 있어 명시한다.
+function dur0(cameraWork) {
+  return Math.max(1, Math.ceil(Number(cameraWork?.duration_s) || 4) + 2);
+}
+
+async function renderLayerB(o) {
+  const { ff, dir, inPath, outPath, cameraWork, mattePath, log } = o;
+  const [W, H] = await probe(o.fp, inPath, "stream=width,height");
+  const [fpsRaw] = await probeRaw(o.fp, inPath, "stream=r_frame_rate");
+  const fps = parseFps(fpsRaw) || 24;
+  const table = buildKeyframeTable(cameraWork, { fps, refWidth: W, refHeight: H });
+  const bgTr = table.tracks.background;
+  const chTr = table.tracks.character;
+  if (!bgTr?.keys?.length || !chTr?.keys?.length) throw new Error("계층 B 트랙이 비어있음");
+
+  // 트랙별 sendcmd 스크립트(같은 형식, 대상만 다른 crop 인스턴스).
+  const scriptFor = (tr, name) => {
+    const lines = [];
+    let first = null;
+    for (const k of tr.keys) {
+      const c = toPixelCrop({ scale: k.scale, cx: k.cx, cy: k.cy }, W, H, { even: true });
+      if (!first) first = c;
+      lines.push(`${k.t.toFixed(3)} ${name} w ${c.cropW}, ${name} h ${c.cropH}, ${name} x ${c.x}, ${name} y ${c.y};`);
+    }
+    return { text: lines.join("\n") + "\n", first };
+  };
+  // ★crop 필터 인스턴스를 이름으로 구분(sendcmd 의 target 은 필터 이름) — 안 그러면 두 갈래가
+  //   같은 'crop' 이름을 공유해 서로의 명령을 받아 화면이 뒤섞인다.
+  const bg = scriptFor(bgTr, "cbg");
+  const ch = scriptFor(chTr, "cch");
+  await writeFile(join(dir, "cam_bg.txt"), bg.text, "utf8");
+  await writeFile(join(dir, "cam_ch.txt"), ch.text, "utf8");
+
+  // ★알파를 '먼저' 합쳐 두고 그 RGBA 를 crop 한다 — 매트에 같은 crop 을 따로 거는 것보다
+  //   단순하고(스크립트 2개), 알파가 픽셀과 같이 잘려 어긋날 여지가 없다.
+  const cropOf = (nm, f) => `crop@${nm}=w=${f.cropW}:h=${f.cropH}:x=${f.x}:y=${f.y}:exact=1`;
+  const filter =
+    `[0:v]split=2[vb][vc];` +
+    `[vb]sendcmd=f=cam_bg.txt,${cropOf("cbg", bg.first)},scale=${W}:${H}:flags=lanczos,setsar=1[bgv];` +
+    `[1:v]scale=${W}:${H},format=gray[m];` +
+    `[vc][m]alphamerge[rgba];` +
+    `[rgba]sendcmd=f=cam_ch.txt,${cropOf("cch", ch.first)},scale=${W}:${H}:flags=lanczos,setsar=1[fg];` +
+    `[bgv][fg]overlay=0:0:format=auto:shortest=1[out]`;
+
+  await run(
+    ff,
+    ["-hide_banner", "-nostats", "-loglevel", "warning", "-y",
+     "-i", inPath, "-loop", "1", "-framerate", String(fps), "-t", String(dur0(cameraWork)), "-i", mattePath,
+     "-filter_complex", filter, "-map", "[out]", "-shortest", "-an",
+     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
+     "-threads", "2", "-movflags", "+faststart", outPath],
+    dir
+  );
+  log?.(`${cameraWork.preset}(계층 B) — 인물/배경 2레이어로 구움(매트 사용)`);
+  return { skipped: false, layer: "B", upscale: false, maxScale: table.maxScale };
 }
 
 // crash_zoom(§2) — 클립을 와이드→바스트→ECU 3단 크롭 하드컷으로 굽는다(단일 filter_complex).

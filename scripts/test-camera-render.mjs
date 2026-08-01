@@ -103,6 +103,28 @@ try {
   const psz = await capture(ff, ["-hide_banner", "-i", oz, "-i", clip, "-lavfi", "psnr", "-f", "null", "-"]);
   const avgz = psz.match(/average:([0-9.]+|inf)/);
   ok(avgz && avgz[1] !== "inf", `orbit+줌이 화면을 실제로 변경(psnr average=${avgz?.[1]})`);
+
+  // ── 5) ★계층 B(버티고·패럴랙스) 2레이어 — 인물 매트로 인물/배경을 따로 움직인다 ──
+  //   매트가 없으면 스킵(무엇이 없는지 알려줘야 함), 있으면 실제로 구워져야 한다.
+  const rbNo = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: join(dir, "bn.mp4"), cameraWork: resolveCameraWork("vertigo", { duration_s: 3 }) });
+  ok(rbNo.skipped && rbNo.needsMatte, "계층 B: 매트 없으면 스킵 + '매트 필요' 표시");
+
+  // 합성 매트(가운데 흰 사각형 = 인물, 나머지 검정 = 배경).
+  const matte = join(dir, "matte.png");
+  await run(ff, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=black:s=${W}x${H}`,
+    "-vf", `drawbox=x=${Math.round(W * 0.35)}:y=${Math.round(H * 0.2)}:w=${Math.round(W * 0.3)}:h=${Math.round(H * 0.7)}:color=white:t=fill`,
+    "-frames:v", "1", matte]);
+  const bOut = join(dir, "b2.mp4");
+  const rbYes = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: bOut, mattePath: matte, cameraWork: resolveCameraWork("vertigo", { duration_s: 3 }) });
+  ok(!rbYes.skipped && rbYes.layer === "B", "계층 B: 매트가 있으면 2레이어로 굽는다");
+  await stat(bOut);
+  const [bdur] = await probe(bOut, "format=duration");
+  ok(Math.abs(Number(bdur) - 3) < 0.5, `계층 B 출력 길이 ~3s (실제 ${Number(bdur).toFixed(2)})`);
+  const [bw, bh] = await probe(bOut, "stream=width,height");
+  ok(Number(bw) === W && Number(bh) === H, `계층 B 출력 해상도 ${bw}x${bh}`);
+  const psb = await capture(ff, ["-hide_banner", "-i", bOut, "-i", clip, "-lavfi", "psnr", "-f", "null", "-"]);
+  const avgb = psb.match(/average:([0-9.]+|inf)/);
+  ok(avgb && avgb[1] !== "inf", `계층 B 가 화면을 실제로 변경(psnr average=${avgb?.[1]})`);
 } finally {
   await rm(dir, { recursive: true, force: true }).catch(() => {});
 }
