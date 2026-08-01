@@ -26,7 +26,11 @@ export async function POST(req: NextRequest) {
   if (sceneIds && sceneIds.length) payload.sceneIds = sceneIds;
   // ★언어별 더빙(§10) — lang 이 오면 그 언어 트랙(tracks[lang])에 오디오를 채운다.
   //   작업 언어를 바꾸지 않고도 일본어판·영어판 더빙을 각각 만들 수 있다.
-  if (typeof body.lang === "string" && /^[a-z]{2,5}$/.test(body.lang)) payload.lang = body.lang;
+  // ★빈 문자열("")도 유효한 값이다 = '원어로 더빙' 을 명시한 것. 예전엔 정규식에서 걸러져
+  //   원어 더빙 요청이 payload 에서 사라지고, 워커가 작업 언어로 폴백했다.
+  //   (원어 더빙은 자주는 아니지만 필요할 때가 있다 — 기능을 없애지 않는다.)
+  if (typeof body.lang === "string" && (body.lang === "" || /^[a-z]{2,5}$/.test(body.lang)))
+    payload.lang = body.lang;
   const now = Date.now();
   const job: Job = {
     id: randomUUID(),

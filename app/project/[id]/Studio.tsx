@@ -1737,9 +1737,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             {/* ★★언어별 더빙 — 더빙은 4단계 기능인데 언어별 버튼을 5단계에만 뒀던 게 잘못이었다.
                 여기(4단계 언어 바)에서 바로 그 언어로 더빙한다. 작업 언어를 바꾸지 않아도 된다.
                 결과는 bubble.tracks[lang].audioUrl 에 들어가고, 5단계 언어별 합성이 그걸 쓴다. */}
+            {/* ★'언어판 만들기' 라는 별도 단계는 없앴다 — 아래 '🎙 전체 더빙 생성' 이 번역까지
+                알아서 선행하므로, 같은 일을 하는 버튼이 두 줄로 있었다(사용자 지적: 왜 필요하냐).
+                여기 남는 것은 '얼마나 됐나' 상태와 '들어보기' 뿐이다. 대상 언어가 둘 이상일 때만
+                언어별 버튼이 의미가 있으므로(전체 더빙은 한 언어만 만든다) 그때만 버튼을 둔다. */}
             {(
               <div className="w-full flex flex-wrap items-center gap-1.5 border-t border-[var(--border)] pt-1.5">
-                <span className="font-semibold text-[var(--accent)]">🎬 언어판 만들기</span>
+                <span className="font-semibold text-[var(--accent)]">🎬 진행 상태</span>
                 {(project.targetLanguages ?? []).map((lg) => {
                   const label = LANGUAGES.find((l) => l.id === lg)?.label ?? lg;
                   let total = 0, tr = 0, au = 0;
@@ -1753,17 +1757,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   const done = total > 0 && au === total;
                   return (
                     <span key={lg} className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => makeLanguage(lg)}
-                        disabled={busy || dubbing || translating}
-                        className="rounded bg-[var(--accent)] px-2.5 py-1 font-medium text-white disabled:opacity-40"
-                        title={`${label} 번역이 없으면 채우고, 이어서 ${label}로 더빙합니다. 한 번만 누르면 됩니다.`}
-                      >
-                        {translating ? "번역 중…" : dubbing ? "더빙 중…" : done ? `${label} 다시 만들기` : `${label}로 만들기`}
-                      </button>
+                      {/* 대상 언어가 둘 이상일 때만 언어별 버튼 — 하나면 아래 '전체 더빙' 이 그 언어다. */}
+                      {(project.targetLanguages?.length ?? 0) > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => makeLanguage(lg)}
+                          disabled={busy || dubbing || translating}
+                          className="rounded bg-[var(--accent)] px-2.5 py-1 font-medium text-white disabled:opacity-40"
+                          title={`${label} 번역이 없으면 채우고, 이어서 ${label}로 더빙합니다. 한 번만 누르면 됩니다.`}
+                        >
+                          {translating ? "번역 중…" : dubbing ? "더빙 중…" : done ? `${label} 다시 만들기` : `${label}로 만들기`}
+                        </button>
+                      )}
                       <span className={`text-[10px] ${done ? "text-[var(--ok)]" : "text-[var(--muted)]"}`}>
-                        번역 {tr}/{total} · 더빙 {au}/{total}
+                        {label} · 번역 {tr}/{total} · 더빙 {au}/{total}
                       </span>
                       {/* ★그 언어 더빙을 '작업 언어를 바꾸지 않고' 바로 들어본다 — 만들어졌는지
                           확인할 방법이 앱에 없었다(그래서 "일본어 더빙이 안 된다"를 확인할 수 없었다). */}
@@ -1786,7 +1793,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   );
                 })}
                 <span className="w-full text-[10px] text-[var(--muted)]">
-                  버튼 하나로 번역 → 더빙까지 됩니다. 끝나면 5단계에서 그 언어판을 합성하세요.
+                  아래 🎙 전체 더빙 생성 하나면 번역 → 더빙까지 됩니다. 끝나면 5단계에서 합성하세요.
                 </span>
               </div>
             )}
@@ -3865,13 +3872,25 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 선택 {selForVideo.size}개 더빙
               </button>
             )}
+            {/* ★원어 더빙 — 자주는 아니지만 필요할 때가 있다(사용자 지정). 기본은 더빙 언어,
+                원어는 여기서 명시적으로. 지웠다가 되살린 기능이 아니라 '기본에서 뺀' 것뿐이다. */}
+            {dubLang && (
+              <button
+                onClick={() => runDubJob(undefined, "")}
+                disabled={busy || dubbing}
+                title="원어(번역 전 원문)로 더빙합니다 — 필요할 때만."
+                className="rounded-md border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
+              >
+                🎙 원어로
+              </button>
+            )}
             <button
-              onClick={() => runDubJob()}
-              disabled={busy || dubbing}
-              title={`모든 컷의 대사·효과음을 ${dubLangLabel}로 더빙합니다(원어 더빙은 만들지 않습니다).`}
+              onClick={() => (dubLang ? makeLanguage(dubLang) : runDubJob(undefined, ""))}
+              disabled={busy || dubbing || translating}
+              title={`모든 컷을 ${dubLangLabel}로 더빙합니다. ${dubLangLabel} 번역이 덜 돼 있으면 번역부터 알아서 채웁니다 — 버튼 하나면 됩니다.`}
               className={`${selForVideo.size > 0 ? "" : "ml-auto "}rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50`}
             >
-              {dubbing ? "더빙 중…" : `🎙 전체 더빙 생성 (${dubLangLabel})`}
+              {translating ? "번역 중…" : dubbing ? "더빙 중…" : `🎙 전체 더빙 생성 (${dubLangLabel})`}
             </button>
           </div>
 

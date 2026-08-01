@@ -2622,6 +2622,7 @@ export async function runDub(projectId, payload) {
   // 합성 유닛 수집: 말풍선 + 내레이션.
   const units = [];
   let alreadyDone = 0; // 이미 더빙돼 스킵한 줄 수(전체 더빙 증분)
+  let sugNoVoice = 0; // 목소리 없어 건너뛴 '오디오 제안'(부가 기능 — 더빙을 막지 않는다)
   let missingLang = 0; // 작업 언어 번역이 없어 원문으로 더빙한 줄 수
   for (const s of scenes) {
     const cut = s.cut;
@@ -2675,8 +2676,22 @@ export async function runDub(projectId, payload) {
       const sg = sugs[si];
       if (!sg || sg.enabled === false || !(sg.text || "").trim()) continue; // 끈 삽입 대사·빈 것 스킵
       if (!force && (sg.audioUrl || "").trim()) { alreadyDone++; continue; }
-      if (sg.type === "sfx") units.push({ s, kind: "sug_sfx", sugIdx: si, text: sg.text });
-      else units.push({ s, kind: "sug_voice", sugIdx: si, text: sg.text, voice: resolve(cutSpeakerId) });
+      // ★vocal_reaction(헐떡임·한숨 같은 비언어 발성)은 '대사' 가 아니다. TTS 로 보내면
+      //   "gasp of shock" 같은 영어 설명문을 목소리가 그대로 읽는다 → 효과음 경로로 만든다.
+      if (sg.type === "sfx" || sg.type === "vocal_reaction") {
+        units.push({ s, kind: "sug_sfx", sugIdx: si, text: sg.text });
+        continue;
+      }
+      // ★오디오 제안(삽입 대사)은 '부가' 기능이다 — 목소리가 없다고 더빙 잡 전체를 막으면 안 된다.
+      //   실제로 이것 때문에 일본어 더빙이 통째로 실패했다(사용자 보고: 컷 3·11 "gasp of shock").
+      //   게다가 이 항목은 컷 화면의 접힌 '연출·세부' 안에 있어서, 사용자는 그런 줄이 있는지도
+      //   알 수 없었다. 목소리가 없으면 조용히 건너뛰고 로그로만 남긴다.
+      const sugVoice = resolve(cutSpeakerId);
+      if (!sugVoice) {
+        sugNoVoice++;
+        continue;
+      }
+      units.push({ s, kind: "sug_voice", sugIdx: si, text: sg.text, voice: sugVoice });
     }
   }
   if (!units.length) {
@@ -2694,6 +2709,8 @@ export async function runDub(projectId, payload) {
   }
   if (missingLang > 0 && workingLang)
     await log(`[진단] ${workingLang} 번역 없는 ${missingLang}줄은 건너뜀 — 번역 채우고 다시 더빙하면 포함됩니다`);
+  if (sugNoVoice > 0)
+    await log(`오디오 제안 ${sugNoVoice}개는 목소리가 없어 건너뜀(더빙에는 영향 없음)`);
 
   await log(`더빙 대상 ${units.length}개 — 목소리 생성 시작`);
   const C = Number(process.env.DUB_CONCURRENCY || 2);

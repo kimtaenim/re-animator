@@ -144,7 +144,7 @@ async function tick(types) {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log("[worker] BUILD = jadub-v21 (더빙 실패를 성공으로 끝내지 않음 + 더빙 전용 로그 + 합성은 맨 뒤)");
+console.log("[worker] BUILD = jadub-v22 (오디오 제안이 더빙을 막지 않음 + 비언어 발성은 효과음 경로)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);
