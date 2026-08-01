@@ -2441,10 +2441,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         //   예전엔 원문(중국어)으로 폴백해서, 미리보기에 중국어 자막이 떴다(=결과와도 달랐다).
         if (wl && !langText) continue;
         const t = langText || (b.text || "").trim();
-        if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY });
+        if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY, tr: (b.translation || "").trim() || undefined });
       }
     else if (cut?.dialogue?.trim())
-      units.push({ text: cut.dialogue.trim() });
+      units.push({ text: cut.dialogue.trim(), tr: (cut.dialogueTranslation || "").trim() || undefined });
     // 내레이션은 별개가 아니라 화자=내레이터인 말풍선 → 위 bubbles 루프가 이미 포함.
     return units;
   }
@@ -5147,8 +5147,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           )
                         )}
                       </span>
-                      {/* ★자막 아래 한국어 병기는 뺐다(사용자 지정) — 미리보기는 최종 결과와
-                          같은 것만 보여준다. 한국어 뜻은 씬 목록의 대사 줄에서 볼 수 있다. */}
+                      {/* 편집 보조용 번역(최종 자막엔 안 나감) — 자막 아래 작게.
+                          ★미리보기 전용이라 유지한다(사용자 확인). 합성 출력에는 들어가지 않는다. */}
+                      {u.tr && (
+                        <span className="max-w-[86vw] whitespace-pre-wrap rounded bg-black/40 px-2 py-0.5 text-center text-[11px] italic text-white/75">
+                          {u.tr}
+                        </span>
+                      )}
                     </div>
                     );
                   })()}
