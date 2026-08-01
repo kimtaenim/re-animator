@@ -255,6 +255,9 @@ export interface Scene {
   // ★프록시 미리보기(스펙 §8②) — 480p 정확 미리보기. 본 굽기(fxUrl)·합성에는 쓰지 않는다.
   //   클라이언트 프리뷰가 '근사'라서 orbit·계층B 를 못 보는 걸 메운다.
   fxProxyUrl?: string;
+  // ★인물 매트(흰=인물/검정=배경 회색조 PNG) — 계층 B(버티고·패럴랙스)가 인물과 배경을
+  //   따로 움직이려면 필요하다. 컷당 한 번만 만들고 재사용한다(다시 구울 때 재과금 방지).
+  matteUrl?: string;
   fx?: { effect: string; strength: number }; // 적용된 후처리(크래시인/아웃·램프·펀치)와 강도
   status: StepStatus; // M1 에선 경계 확정 여부 관리에만 사용
 }

@@ -42,6 +42,8 @@ import { grokVideoFromImage, GROK_VIDEO_COST } from "./grok.mjs";
 import { klingVideoFromImage, KLING_VIDEO_COST } from "./kling.mjs";
 import { minimaxVideoFromImage, MINIMAX_VIDEO_COST, hasMinimax } from "./minimax.mjs";
 import { renderCameraFx } from "./cameraRender.mjs";
+import { presetLayer } from "./cameraKeyframes.mjs";
+import { generateMatte } from "./matte.mjs";
 import { readCutText, readCutTextTiled, prepareOcrImage, readCutTextPrepared } from "./ocr.mjs";
 import { detectRefBox, cropToBox } from "./refbox.mjs";
 import { translateScenes, proofreadScenes, translateScenesMultilang } from "./translate.mjs";
@@ -2509,10 +2511,40 @@ export async function runCameraFx(projectId, payload) {
       const buf = await download(s.videoUrl);
       await writeFile(inp, buf);
 
+      // ★계층 B(버티고·패럴랙스)는 인물 매트가 있어야 굽는다 — 없으면 여기서 만든다.
+      //   매트는 컷 이미지에서 한 번만 만들면 되므로 scene.matteUrl 에 저장해 재사용한다
+      //   (다시 구울 때마다 돈을 쓰지 않는다). 실패하면 그 컷만 스킵되고 잡은 계속된다.
+      let mattePath;
+      if (cw && presetLayer(cw.preset) === "B") {
+        try {
+          let mUrl = s.matteUrl;
+          if (!mUrl) {
+            const src = s.generatedImage || s.originalImage;
+            await log(`컷 ${s.order + 1} 인물 매트 생성 중…`);
+            const { buf: mbuf, cost } = await generateMatte(src, process.env.FAL_KEY, (m) => console.error("[matte]", m));
+            const up = await put(`project/${projectId}/matte/${s.id}-${Date.now()}.png`, mbuf, {
+              access: "public",
+              contentType: "image/png",
+              addRandomSuffix: false,
+            });
+            mUrl = up.url;
+            s.matteUrl = mUrl; // 아래 저장 루프가 씬 필드를 그대로 기록한다
+            try {
+              await recordCost({ projectId, vendor: "fal", model: "matte", costUsd: cost, meta: { kind: "matte", sceneId: s.id } });
+            } catch {}
+          }
+          const mp = join(dir, "matte.png");
+          await writeFile(mp, await download(mUrl));
+          mattePath = mp;
+        } catch (e) {
+          await log(`컷 ${s.order + 1} 매트 실패(이 컷만 건너뜀): ${String(e?.message ?? e).slice(0, 140)}`);
+        }
+      }
+
       let result = { skipped: true, layer: "-" };
       if (cw && cw.preset) {
         result = await renderCameraFx({
-          ff, fp, dir, inPath: inp, outPath: outp, cameraWork: cw,
+          ff, fp, dir, inPath: inp, outPath: outp, cameraWork: cw, mattePath,
           onLog: (m) => console.error("[camerafx]", m),
         });
       }
@@ -2550,8 +2582,10 @@ export async function runCameraFx(projectId, payload) {
         } else {
           delete t2.fxProxyUrl; // 카메라워크 없음 = 프록시도 없음
         }
+        if (s.matteUrl) t2.matteUrl = s.matteUrl; // 이번에 만든 매트 보존(다시 만들지 않게)
         await saveProject(p2);
       } else if (p2 && t2) {
+        if (s.matteUrl) t2.matteUrl = s.matteUrl;
         if (result.skipped) {
           // 후처리 없음 → 원본 클립 사용. 낡은 fxUrl 무효화(안 지우면 미리보기가 옛 fx 를 보여줌).
           delete t2.fxUrl;

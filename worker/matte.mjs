@@ -1,0 +1,56 @@
+// ============================================================================
+// 인물 매트(알파) 생성 — 계층 B(버티고 달리줌·패럴랙스)를 실제로 굽기 위한 전제.
+// ----------------------------------------------------------------------------
+// 계층 B 는 인물과 배경을 서로 다른 궤적으로 움직인다. 그러려면 "어디까지가 인물인가"를
+// 알아야 하고, 그게 매트(흰=인물, 검정=배경인 회색조 PNG)다.
+//
+// ★자체 학습·정교한 세그멘테이션을 만들지 않는다(사용자 지침: 얼굴 크롭 때와 같은 실용주의).
+//   이미 쓰고 있는 fal 에 배경 제거 모델이 있으므로 그걸로 컷 이미지의 알파를 얻고,
+//   알파 채널만 뽑아 회색조 매트로 저장한다. 실패하면 그 컷만 매트 없이 스킵된다(전체 중단 없음).
+//
+// 모델은 env 로 교체 가능(FAL_MODEL_MATTE). 기본은 배경 제거 결과가 RGBA 로 오는 모델.
+//   input  { image_url }
+//   output { image: { url } }  또는 { images: [{ url }] }
+// ============================================================================
+
+import sharp from "sharp";
+
+const FAL_MATTE = process.env.FAL_MODEL_MATTE || "fal-ai/birefnet/v2";
+export const MATTE_COST = Number(process.env.FAL_MATTE_COST || 0.01);
+
+/**
+ * 컷 이미지에서 인물 매트(회색조 PNG)를 만든다.
+ * @param {string} imageUrl 공개 URL(컷 이미지)
+ * @param {string} key FAL_KEY
+ * @param {(m:string)=>void} [onLog]
+ * @returns {Promise<{ buf: Buffer, cost: number }>} buf = 흰(인물)/검정(배경) PNG
+ */
+export async function generateMatte(imageUrl, key, onLog) {
+  if (!key) throw new Error("FAL_KEY 없음 — 매트(인물 분리)를 만들 수 없습니다");
+  if (!imageUrl) throw new Error("매트를 만들 이미지가 없습니다");
+
+  const r = await fetch(`https://fal.run/${FAL_MATTE}`, {
+    method: "POST",
+    headers: { authorization: `Key ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({ image_url: imageUrl }),
+    signal: AbortSignal.timeout(120_000), // 워커는 한 번에 한 잡 — 외부 호출엔 항상 타임아웃
+  });
+  if (!r.ok) throw new Error(`fal 매트 ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
+  const d = await r.json();
+  const url = d.image?.url || d.images?.[0]?.url || d.output?.image?.url;
+  if (!url) throw new Error(`fal 매트 빈 응답: ${JSON.stringify(d).slice(0, 160)}`);
+
+  const ir = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!ir.ok) throw new Error(`매트 다운로드 실패 ${ir.status}`);
+  const cut = Buffer.from(await ir.arrayBuffer());
+
+  // 배경이 지워진 RGBA → 알파 채널만 뽑아 회색조 매트로. 알파가 없으면(모델이 이미 마스크를
+  // 돌려준 경우) 그대로 회색조 변환해서 쓴다.
+  const meta = await sharp(cut).metadata();
+  const buf = meta.hasAlpha
+    ? await sharp(cut).ensureAlpha().extractChannel("alpha").toColourspace("b-w").png().toBuffer()
+    : await sharp(cut).toColourspace("b-w").png().toBuffer();
+
+  onLog?.(`인물 매트 생성(${meta.width}x${meta.height}, ${meta.hasAlpha ? "알파" : "회색조"} 기준)`);
+  return { buf, cost: MATTE_COST };
+}
