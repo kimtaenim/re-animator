@@ -8,7 +8,7 @@
 
 **배포 HEAD = `7e334f2`** (확인: `git log origin/main --oneline -1`). push = Vercel(앱)+Render(워커) 자동 배포.
 **워커 BUILD 태그로 배포 반영을 확인한다** — 로그 첫 줄 `[worker] BUILD = ...`. 커밋마다 갱신할 것.
-**★파일은 반드시 절대경로 `C:\myappse-animator\...` 로 확인하라.** (형제 프로젝트 `C:\myappsninews-maker21` 과 모델이 완전히 다름.)
+**★파일은 반드시 절대경로 `C:\myapps\re-animator\...` 로 확인하라.** (형제 프로젝트 `C:\myapps\aninews-maker21` 과 모델이 완전히 다름.)
 
 ## 사용자 상태 — 매우 중요
 2주 넘게 납품이 막혀 크게 분노한 상태. **"지시를 무시한다", "매번 네가 에러를 만든다"** 가 핵심 불만이고 둘 다 사실이었다.
