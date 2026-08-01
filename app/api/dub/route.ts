@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 
 // POST — M6 더빙(TTS) 잡 적재. 대사(화자 목소리)·내레이션(나레이터 목소리)을 오디오로.
 export async function POST(req: NextRequest) {
-  let body: { projectId?: string; sceneIds?: string[] };
+  let body: { projectId?: string; sceneIds?: string[]; lang?: string; force?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -24,6 +24,9 @@ export async function POST(req: NextRequest) {
     : undefined;
   const payload: Record<string, unknown> = {};
   if (sceneIds && sceneIds.length) payload.sceneIds = sceneIds;
+  // ★언어별 더빙(§10) — lang 이 오면 그 언어 트랙(tracks[lang])에 오디오를 채운다.
+  //   작업 언어를 바꾸지 않고도 일본어판·영어판 더빙을 각각 만들 수 있다.
+  if (typeof body.lang === "string" && /^[a-z]{2,5}$/.test(body.lang)) payload.lang = body.lang;
   const now = Date.now();
   const job: Job = {
     id: randomUUID(),

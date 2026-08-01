@@ -38,6 +38,14 @@ function frameDesc(project) {
 
 // ★ 목적: 원화에 최대한 가깝게. 묘사 기반 재해석이 아니라 '충실 재현 + 글씨 제거 +
 // 크기 맞춤'. 화풍 지정(stylePrompt)이 있을 때만 덧붙인다.
+// ★캐스팅 정본 레퍼런스 설명 — 전체 재생성·마스크 재생성이 같은 문구를 쓴다(단일 원천).
+//   "정체성/디자인만 참고, 이 컷의 상태(피·상처·표정)는 그대로" 가 핵심.
+export const CAST_REF_NOTE =
+  "The additional reference image(s) show the CANONICAL look of the character(s) in this panel (the project's character ontology). " +
+  "Keep each character's face structure, hairstyle, outfit design and colors CONSISTENT with those references. " +
+  "BUT reproduce THIS panel's own state exactly as drawn — blood, wounds, dirt, sweat, tears, bruises, expression, damage, lighting and pose stay as in this panel. " +
+  "Do NOT clean up, neutralize, or override this panel's state with the reference; the references are ONLY for base identity and design.";
+
 export function buildRegenPrompt(scene, project, nRefs = 0) {
   const cut = scene.cut ?? {};
   let p =
@@ -60,12 +68,7 @@ export function buildRegenPrompt(scene, project, nRefs = 0) {
   // 주요 인물·피사체는 왜곡 없이 충실히. 모든 출력이 같은 프레임 크기.
   p += ` Compose the result to completely fill ${frameDesc(project)}, edge to edge. If the source panel has a different shape (e.g. a tall vertical webtoon panel), naturally extend the background and setting to fill the whole frame — do NOT stretch, squash, or distort the subject; keep characters and drawing faithful, placed sensibly within the frame. There must be NO black bars, white space, empty margins, borders, vignette, or gradient fade at any edge — the entire frame is finished illustration. Every output must share this exact same frame size.`;
   // ★캐스팅 정본 레퍼런스 — 인물 '정체성/디자인'만 일관되게, 이 컷의 '상태'(피·상처·표정 등)는 그대로.
-  if (nRefs > 0)
-    p +=
-      " The additional reference image(s) show the CANONICAL look of the character(s) in this panel (the project's character ontology). " +
-      "Keep each character's face structure, hairstyle, outfit design and colors CONSISTENT with those references. " +
-      "BUT reproduce THIS panel's own state exactly as drawn — blood, wounds, dirt, sweat, tears, bruises, expression, damage, lighting and pose stay as in this panel. " +
-      "Do NOT clean up, neutralize, or override this panel's state with the reference; the references are ONLY for base identity and design.";
+  if (nRefs > 0) p += ` ${CAST_REF_NOTE}`;
   const style = String(project.stylePrompt || "").trim();
   if (style) p += ` Style note: ${style}.`;
   return p.slice(0, 2600);
@@ -280,15 +283,23 @@ export async function buildMaskInputs(scene, imgBuf, project, model) {
 }
 
 // 마스크 재생성(OpenAI images/edits) — 원본 컷 보존 + 여백은 아웃페인팅 + 글씨 자리 지움.
-export async function regenSceneMasked(scene, imgBuf, project, key, model) {
+export async function regenSceneMasked(scene, imgBuf, project, key, model, refBufs = []) {
   const { composed, openaiMask, prompt, TW, TH, hasFill } = await buildMaskInputs(scene, imgBuf, project, model);
   // 채울 곳(여백·글씨)이 하나도 없으면(비율 일치+글자 없음) 모델 호출 불필요.
   if (!hasFill) return { buf: await fitBuffer(composed, project), cost: 0 };
   const form = new FormData();
   form.append("model", model);
   form.append("image", new Blob([composed], { type: "image/png" }), "cut.png");
+  // ★★캐스팅 정본(얼굴) 레퍼런스 — 마스크 모드에도 넣는다.
+  //   예전엔 전체 재생성(full)에만 넣어서, 마스크 모드로 그리면 채워지는 영역의 인물 얼굴을
+  //   모델이 지어냈다(사용자: 캐릭터 지정했는데 없는 얼굴을 만든다). gpt-image edits 는
+  //   image 필드를 여러 번 붙이면 다중 입력으로 받는다(전체 재생성 경로와 동일 방식).
+  for (let i = 0; i < refBufs.length && i < 2; i++) {
+    const rb = await downscaleForApi(refBufs[i], 1024);
+    form.append("image", new Blob([rb], { type: "image/png" }), `ref${i}.png`);
+  }
   form.append("mask", new Blob([openaiMask], { type: "image/png" }), "mask.png");
-  form.append("prompt", prompt);
+  form.append("prompt", refBufs.length ? `${prompt} ${CAST_REF_NOTE}` : prompt);
   form.append("size", `${TW}x${TH}`);
   form.append("n", "1");
   form.append("quality", REGEN_QUALITY);

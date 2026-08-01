@@ -1985,6 +1985,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     const all = ids.length > 0 && ids.every((id) => selForVideo.has(id));
     setSelForVideo(all ? new Set(selForVideo.size ? [...selForVideo].filter((id) => !ids.includes(id)) : []) : new Set([...selForVideo, ...ids]));
   }
+  // ★영상이 안 만들어졌거나 실패한 컷만 마저 생성 — 3단계에만 있던 기능을 4단계에도 넣는다.
+  //   잡이 중간에 끊기거나(12분 측·OOM) 일부만 된 경우 전체를 다시 돌려 돈·시간을 버리지 않게.
+  function videoMissing() {
+    const ids = project.scenes
+      .filter((s) => s.generatedImage && inSection(s) && !s.videoUrl)
+      .map((s) => s.id);
+    if (ids.length === 0) return;
+    markVidPending(ids);
+    runVideoJob(ids);
+  }
   function videoSelected() {
     if (selForVideo.size === 0) return;
     const ids = [...selForVideo];
@@ -2146,7 +2156,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
 
-  async function runDubJob(sceneIds?: string[]) {
+  // lang 을 주면 그 언어 트랙에 더빙을 채운다(작업 언어 무관, §10).
+  async function runDubJob(sceneIds?: string[], lang?: string) {
     if (dubbing || dubStartingRef.current) return; // ★동기 가드 — 상태(dubbing)는 fetch 후에야 켜져서 그 틈의 재클릭을 막지 못함
     dubStartingRef.current = true;
     setError("");
@@ -2157,7 +2168,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       const r = await fetch("/api/dub", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, ...(ids ? { sceneIds: ids } : {}) }),
+        body: JSON.stringify({ projectId: project.id, ...(ids ? { sceneIds: ids } : {}), ...(lang ? { lang } : {}) }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "더빙 실패");
@@ -3572,6 +3583,22 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 </button>
               );
             })()}
+            {(() => {
+              // 안 된 것이 '일부' 일 때만 보여준다(전부거나 없으면 전체 버튼과 같음).
+              const cands = project.scenes.filter((s) => s.generatedImage && inSection(s));
+              const missing = cands.filter((s) => !s.videoUrl).length;
+              if (missing === 0 || missing === cands.length) return null;
+              return (
+                <button
+                  onClick={videoMissing}
+                  disabled={busy || sceneRunning}
+                  className="rounded-md border border-[var(--accent)] px-3 py-2 text-sm font-medium text-[var(--accent)] disabled:opacity-50"
+                  title="아직 영상이 없거나 실패한 컷만 마저 생성"
+                >
+                  안 된 것만 {missing}개
+                </button>
+              );
+            })()}
             {selForVideo.size > 0 && (
               <button
                 onClick={videoSelected}
@@ -4610,12 +4637,21 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     <span key={lg} className="flex items-center gap-1">
                       <button
                         type="button"
+                        onClick={() => runDubJob(undefined, lg)}
+                        disabled={busy || dubbing}
+                        className="rounded border border-[var(--accent)] px-2 py-1 text-[var(--accent)] disabled:opacity-40 hover:bg-[var(--panel-2)]"
+                        title="① 먼저 이 언어로 더빙합니다. 이걸 안 하면 합성 시 소리가 원문(원어)로 나갑니다."
+                      >
+                        {dubbing ? "더빙 중…" : "① 더빙"}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => runComposeJob(lg)}
                         disabled={busy || composeRunning || !project.scenes.some((x) => x.videoUrl)}
                         className="rounded bg-[var(--accent)] px-2.5 py-1 font-medium text-white disabled:opacity-40"
                         title={`${label} 더빙·자막으로 최종 합성(파일명에 ${lg} 표시)`}
                       >
-                        {label}판 합성
+                        ② {label}판 합성
                       </button>
                       {done && (
                         <a href={done} target="_blank" rel="noreferrer" className="rounded border border-[var(--ok)] px-2 py-1 text-[var(--ok)] hover:brightness-110">

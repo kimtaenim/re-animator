@@ -1559,6 +1559,52 @@ async function refBoxFor(c, refBuf, key, model, projectId, log) {
   return box;
 }
 
+// ★캐스팅 정본 레퍼런스 수집(단일 원천) — 이 컷에 나오는 캐릭터(casting sceneIds)의 대표
+//   이미지를 모은다. 실사 초상 우선, 없으면 대표 컷에서 '인물 영역만 크롭'(대표 컷을 통째로
+//   넣으면 그 컷 구도까지 따라가는 사고가 있었다). 컷의 '인물 참고 끄기'면 빈 배열.
+//   ★모든 재생성 경로(전체·마스크·Flux)가 이 함수를 쓴다 — 예전엔 전체 경로에만 있어서
+//   다른 경로로 그리면 얼굴을 지어냈다.
+async function collectCastRefs(s, p, key, VLM_MODEL, projectId, log) {
+  const bufs = [];
+  const urls = [];
+  if (s.cut?.noCastRef) return { bufs, urls };
+  for (const c of p.cast ?? []) {
+    if (bufs.length >= 3) break;
+    if (!(c.sceneIds ?? []).includes(s.id)) continue; // 이 컷에 나오는 인물만
+    let refUrl = c.realImage;
+    if (!refUrl) {
+      const rs = (p.scenes ?? []).find((x) => x.id === c.refSceneId && x.id !== s.id);
+      refUrl = rs?.generatedImage || rs?.originalImage;
+    }
+    if (!refUrl) {
+      await log?.(`[진단] 컷 ${s.order + 1} ${c.label ?? c.id}: 참고이미지 없음(대표 컷 미지정) — 얼굴을 지어낼 수 있음`);
+      continue;
+    }
+    try {
+      let rb = await download(refUrl);
+      let how = "실사초상";
+      if (!c.realImage) {
+        const box = await refBoxFor(c, rb, key, VLM_MODEL, projectId, log);
+        if (box) {
+          rb = await cropToBox(rb, box);
+          how = "대표컷 인물크롭";
+        } else {
+          how = "대표컷 전체(크롭 실패)";
+        }
+      }
+      bufs.push(rb);
+      urls.push(refUrl); // Flux 는 URL 로 받는다(image_urls)
+      await log?.(`[진단] 컷 ${s.order + 1} 참고이미지 ← ${c.label ?? c.id}: ${how} ${String(refUrl).split("/").pop()}`);
+    } catch (e) {
+      await log?.(`[진단] 컷 ${s.order + 1} ${c.label ?? c.id} 참고이미지 실패: ${String(e?.message ?? e).slice(0, 60)}`);
+    }
+  }
+  if (!bufs.length && (s.cut?.type === "person" || s.cut?.type === "action")) {
+    await log?.(`[진단] 컷 ${s.order + 1}: 인물 컷인데 참고이미지 0개 — 캐스팅에서 이 컷에 인물이 배정됐는지 확인하세요`);
+  }
+  return { bufs, urls };
+}
+
 export async function runRegen(projectId, payload) {
   await resetProgress(projectId);
   const log = async (m) => {
@@ -1659,52 +1705,25 @@ export async function runRegen(projectId, payload) {
               const imgBuf = await download(s.originalImage);
               ({ buf, cost } = await regenSceneMaskedFal(s, imgBuf, p, falKey));
             } else {
-              ({ buf, cost } = await regenSceneFal(s, p, falKey));
+              // ★Flux 도 캐스팅 정본을 넣는다 — kontext 는 1장만 받아 레퍼런스를 못 넣었고,
+              //   그래서 Flux 로 그리면 모델이 얼굴을 지어냈다. 레퍼런스가 있으면 다중 이미지
+              //   모델(image_urls)로 전환된다(fal.mjs). URL 로 넘기므로 다운로드 불필요.
+              const { urls: refUrls } = await collectCastRefs(s, p, key, VLM_MODEL, projectId, log);
+              ({ buf, cost } = await regenSceneFal(s, p, falKey, refUrls));
             }
           } else {
             const imgBuf = await download(s.originalImage);
+            // ★★캐스팅 정본 레퍼런스는 '모든 재생성 경로'에 넣는다 —
+            //   예전엔 전체 재생성(full·gpt-image)에만 넣어서, 마스크 모드나 Flux 로 그리면
+            //   레퍼런스가 아예 안 들어가 모델이 얼굴을 지어냈다(사용자: 캐릭터 지정했는데
+            //   없는 얼굴을 만든다). 여기서 한 번 모아 두 경로가 같이 쓴다.
+            const { bufs: refBufs, urls: refUrls } = await collectCastRefs(s, p, key, VLM_MODEL, projectId, log);
             if (mode === "mask") {
-              ({ buf, cost } = await regenSceneMasked(s, imgBuf, p, key, openaiModel));
+              ({ buf, cost } = await regenSceneMasked(s, imgBuf, p, key, openaiModel, refBufs));
             } else {
-              // ★캐스팅 정본 레퍼런스(온톨로지) — 이 컷에 나오는 캐릭터(casting sceneIds)의 대표
-              //   이미지(실사 초상 우선, 없으면 대표 컷의 재생성/원본, 자기 컷 제외)를 넣어 정체성·
-              //   디자인을 일관되게. 상태(피·상처·표정)는 프롬프트로 컷 우선. 컷 '인물 참고 끄기'면 스킵.
-              const refBufs = [];
-              if (!s.cut?.noCastRef) {
-                for (const c of p.cast ?? []) {
-                  if (refBufs.length >= 3) break;
-                  if (!(c.sceneIds ?? []).includes(s.id)) continue; // 이 컷에 나오는 인물만
-                  let refUrl = c.realImage;
-                  if (!refUrl) {
-                    const rs = (p.scenes ?? []).find((x) => x.id === c.refSceneId && x.id !== s.id);
-                    refUrl = rs?.generatedImage || rs?.originalImage;
-                  }
-                  if (refUrl) {
-                    try {
-                      let rb = await download(refUrl);
-                      // ★대표 컷을 통째로 넣으면 그 컷의 구도·내용까지 모델에 흘러들어, 다른 컷을
-                      //   재생성해도 대표 컷(대개 1~2번)을 닮은 그림이 나온다(확정된 사고 원인).
-                      //   실사 초상은 이미 얼굴 위주라 그대로, 대표 컷은 인물 영역만 크롭해 보낸다.
-                      let how = "실사초상";
-                      if (!c.realImage) {
-                        const box = await refBoxFor(c, rb, key, VLM_MODEL, projectId, log);
-                        if (box) {
-                          rb = await cropToBox(rb, box);
-                          how = "대표컷 인물크롭";
-                        } else {
-                          how = "대표컷 전체(크롭 실패)";
-                        }
-                      }
-                      refBufs.push(rb);
-                      await log(
-                        `[진단] 컷 ${s.order + 1} 참고이미지 ← ${c.label ?? c.id}: ${how} ${String(refUrl).split("/").pop()}`
-                      );
-                    } catch {}
-                  }
-                }
-              }
               ({ buf, cost } = await regenScene(s, imgBuf, p, key, openaiModel, refBufs));
             }
+            void refUrls;
           }
           costTotal += cost;
           const { url } = await put(
@@ -2566,7 +2585,11 @@ export async function runDub(projectId, payload) {
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
   const cast = p.cast ?? [];
   const narrator = p.narratorVoice || null;
-  const workingLang = (p.workingLanguage || "").trim(); // ★작업 언어(§10) — 있으면 그 언어 번역을 더빙(원문 대신)
+  // ★★언어별 더빙(§10) — payload.lang 이 오면 그 언어로 더빙한다(작업 언어 무시).
+  //   예전에는 더빙이 project.workingLanguage 만 봐서, "일본어판 합성"을 눌러도 일본어 오디오가
+  //   없으면 원문(중국어) 오디오로 폴백됐다 — 자막만 일본어, 소리는 중국어(사용자 보고).
+  //   이제 언어를 직접 받아 그 언어 트랙에 오디오를 채울 수 있다.
+  const workingLang = (payload?.lang != null ? String(payload.lang) : (p.workingLanguage || "")).trim();
   const speed = Math.max(0.5, Math.min(2, Number(p.dubSpeed) || 1.2)); // 말 속도 배수(기본 1.2배)
   const only =
     Array.isArray(payload?.sceneIds) && payload.sceneIds.length ? new Set(payload.sceneIds) : null;

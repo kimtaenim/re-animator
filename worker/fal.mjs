@@ -16,6 +16,11 @@
 import { buildRegenPrompt, buildMaskInputs, fitBuffer } from "./regen.mjs";
 
 const FAL_EDIT = process.env.FAL_MODEL_EDIT || "fal-ai/flux-pro/kontext";
+// ★★캐릭터 레퍼런스용 다중 이미지 모델(문서 확인: image_urls 배열을 받는다).
+//   kontext 는 입력 이미지가 1장뿐이라 캐스팅 정본(얼굴)을 넣을 자리가 없었다 →
+//   Flux 로 재생성하면 모델이 얼굴을 지어냈다(사용자: 캐릭터 지정했는데 없는 얼굴을 만든다).
+//   레퍼런스가 있을 때만 이 모델로 바꿔 보낸다(없으면 기존 kontext 그대로 = 회귀 0).
+const FAL_EDIT_MULTI = process.env.FAL_MODEL_EDIT_MULTI || "fal-ai/flux-pro/kontext/max/multi";
 const FAL_FILL = process.env.FAL_MODEL_FILL || "fal-ai/flux-pro/v1/fill";
 const FAL_COST = Number(process.env.FAL_IMAGE_COST || 0.05);
 
@@ -46,17 +51,22 @@ async function downloadFit(url, project) {
 }
 
 // 전체(새로 그리기) — 원본 컷(Blob URL) + 프롬프트로 Flux Kontext 편집.
-export async function regenSceneFal(scene, project, key) {
+export async function regenSceneFal(scene, project, key, refUrls = []) {
   if (!key) throw new Error("FAL_KEY 없음");
-  const url = await callFal(
-    FAL_EDIT,
-    {
-      prompt: buildRegenPrompt(scene, project),
-      image_url: scene.originalImage,
-      aspect_ratio: falAspect(project),
-    },
-    key
-  );
+  // 캐스팅 정본(얼굴) URL 들 — 있으면 다중 이미지 모델로, 첫 장이 이 컷·뒤가 레퍼런스.
+  const refs = (refUrls || []).filter((u) => typeof u === "string" && u).slice(0, 2);
+  const input = refs.length
+    ? {
+        prompt: buildRegenPrompt(scene, project, refs.length),
+        image_urls: [scene.originalImage, ...refs],
+        aspect_ratio: falAspect(project),
+      }
+    : {
+        prompt: buildRegenPrompt(scene, project),
+        image_url: scene.originalImage,
+        aspect_ratio: falAspect(project),
+      };
+  const url = await callFal(refs.length ? FAL_EDIT_MULTI : FAL_EDIT, input, key);
   return { buf: await downloadFit(url, project), cost: FAL_COST };
 }
 
