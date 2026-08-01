@@ -157,26 +157,59 @@ const LANG_NAMES = { ja: "일본어(Japanese)", en: "영어(English)", ko: "한�
 const MAX_OUT = Number(process.env.TRANSLATE_MAX_TOKENS || 8000);
 
 // 잘린 JSON 에서 완성된 객체들만 건져 배열로. 실패하면 [].
-function salvageItems(raw) {
+// 파싱된 값에서 '번역 항목'(i 를 가진 객체)만 꺼낸다. {"t":[…]} 처럼 감싸여 있어도 펼친다.
+function collect(o, out, depth = 0) {
+  if (!o || typeof o !== "object" || depth > 4) return;
+  if (Array.isArray(o)) {
+    for (const e of o) collect(e, out, depth + 1);
+    return;
+  }
+  if (o.i !== undefined) {
+    out.push(o);
+    return;
+  }
+  for (const v of Object.values(o)) if (v && typeof v === "object") collect(v, out, depth + 1);
+}
+
+// ★export = 테스트용(scripts/test-translate-parse.mjs). 이 파서가 조용히 0줄을 돌려주는 바람에
+//   "번역을 몇 번을 돌려도 같은 줄이 안 채워진다" 가 몇 주간 반복됐다 → 테스트로 못박는다.
+export function salvageItems(raw) {
   const out = [];
-  // {"i":..,..} 형태의 완결된 객체만 정규식 없이 괄호 균형으로 스캔.
-  let depth = 0;
-  let start = -1;
-  for (let i = 0; i < raw.length; i++) {
-    const ch = raw[i];
-    if (ch === "{") {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === "}") {
-      depth--;
-      if (depth === 0 && start >= 0) {
-        const chunk = raw.slice(start, i + 1);
-        try {
-          const o = JSON.parse(chunk);
-          if (o && typeof o === "object" && !Array.isArray(o)) out.push(o);
-        } catch {}
-        start = -1;
+  const text = String(raw ?? "");
+  // ① 통째로 파싱되면 그걸 쓴다 — 정상 응답 {"t":[…]} 은 여기서 다 꺼내진다.
+  //   ★예전 파서는 '바깥 괄호가 depth 0 으로 닫히는 객체' 만 담았다. 그래서
+  //     (a) 정상 응답이면 i 없는 바깥 객체 하나만 담겨 호출측이 전부 버렸고
+  //     (b) 응답이 잘리면 바깥 괄호가 안 닫혀 아무것도 못 건졌다.
+  //     결국 모델이 배열만 돌려준 우연한 경우에만 동작했다 = "번역이 들쭉날쭉".
+  try {
+    collect(JSON.parse(text.replace(/```(?:json)?/gi, "").trim()), out);
+  } catch {}
+  if (out.length) return out;
+
+  // ② 통째 파싱이 안 되면(잘림·설명 섞임) 중첩 깊이와 무관하게 '완결된 객체' 를 전부 긁는다.
+  //   문자열 안의 중괄호는 건너뛴다(대사에 { } 가 있어도 깨지지 않게).
+  const stack = [];
+  const seen = new Set();
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      i++;
+      while (i < text.length && text[i] !== '"') {
+        if (text[i] === "\\") i++;
+        i++;
       }
+      continue;
+    }
+    if (ch === "{") stack.push(i);
+    else if (ch === "}" && stack.length) {
+      const s = stack.pop();
+      try {
+        const o = JSON.parse(text.slice(s, i + 1));
+        if (o && typeof o === "object" && !Array.isArray(o) && o.i !== undefined && !seen.has(o.i)) {
+          seen.add(o.i);
+          out.push(o);
+        }
+      } catch {}
     }
   }
   return out;
