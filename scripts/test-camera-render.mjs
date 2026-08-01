@@ -90,7 +90,19 @@ try {
   const rb = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: join(dir, "b.mp4"), cameraWork: resolveCameraWork("parallax_push", { duration_s: 3 }) });
   ok(rb.skipped && rb.layer === "B", "parallax_push(계층 B): 매트 미구현 스킵");
   const rc = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: join(dir, "c.mp4"), cameraWork: resolveCameraWork("orbit", { duration_s: 3 }) });
-  ok(rc.skipped && rc.layer === "C", "orbit(계층 C): I2V 위임 스킵");
+  ok(rc.skipped && rc.layer === "C", "orbit(계층 C): 후처리 성분 없으면 스킵(궤도는 I2V)");
+
+  // ── 4) ★오빗 + 줌 동시 적용(사용자 지정) — 궤도는 I2V, 줌은 후처리로 실제로 구워져야 한다 ──
+  const orbitZoom = { ...resolveCameraWork("orbit", { duration_s: 3 }), zoom_rate_pct_per_s: 12, zoom_accel: 3 };
+  const oz = join(dir, "oz.mp4");
+  const rz = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: oz, cameraWork: orbitZoom });
+  ok(!rz.skipped, "orbit+줌: 스킵하지 않고 굽는다");
+  await stat(oz);
+  const [ozd] = await probe(oz, "format=duration");
+  ok(Math.abs(Number(ozd) - 3) < 0.3, `orbit+줌 출력 길이 ~3s (실제 ${Number(ozd).toFixed(2)})`);
+  const psz = await capture(ff, ["-hide_banner", "-i", oz, "-i", clip, "-lavfi", "psnr", "-f", "null", "-"]);
+  const avgz = psz.match(/average:([0-9.]+|inf)/);
+  ok(avgz && avgz[1] !== "inf", `orbit+줌이 화면을 실제로 변경(psnr average=${avgz?.[1]})`);
 } finally {
   await rm(dir, { recursive: true, force: true }).catch(() => {});
 }

@@ -77,7 +77,9 @@ export default function CameraWorkEditor({
   const cwKey = JSON.stringify(cw ?? {});
   // ★프록시가 있으면 그걸 그대로 재생한다 — 이미 카메라워크가 구워진 '정확' 영상이라
   //   오버레이(근사 변환)를 얹지 않는다. orbit·계층B 도 이 경로로 실제 결과를 볼 수 있다.
-  const liveVideo = !!videoUrl && hover && layer !== "C";
+  // ★오빗도 실영상 위에 프리뷰한다 — 궤도는 이미 그 영상에 들어 있고(I2V), 여기 얹는 것은
+  //   후처리 줌·드리프트다. 예전엔 layer C 를 통째로 막아 오빗 컷은 미리보기가 아예 없었다.
+  const liveVideo = !!videoUrl && hover;
   const showProxy = !!proxyUrl && hover;
 
   // Web Animations 프리뷰 — cameraWork/대상(이미지↔실영상) 바뀌면 재생성(즉시 반영).
@@ -87,7 +89,9 @@ export default function CameraWorkEditor({
     if (!el) return;
     const start = () => {
       el.getAnimations().forEach((a) => a.cancel());
-      if (!cw || layer === "C") return; // orbit: 클라이언트 프리뷰 불가
+      if (!cw) return;
+      // ★오빗: 궤도 자체는 근사할 수 없지만(그건 영상에 이미 있음), 후처리 줌·드리프트는
+      //   그대로 미리 볼 수 있다. 테이블에 main 트랙이 없으면(후처리 성분 0) 아무것도 안 한다.
       const rw = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth || 1280;
       const rh = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight || 720;
       const table = buildKeyframeTable(cw, { fps: 24, refWidth: rw, refHeight: rh });
@@ -133,7 +137,14 @@ export default function CameraWorkEditor({
             자동
           </span>
         )}
-        {layer === "C" && <span className="text-[var(--warn,#c90)]" title="orbit 은 2D 후처리로 불가 — I2V 위임. 클라이언트 미리보기 없이 프록시 렌더가 필요합니다.">프록시 렌더 필수</span>}
+        {layer === "C" && (
+          <span
+            className="text-[var(--warn,#c90)]"
+            title="궤도(오빗)는 영상 생성(I2V)이 만듭니다. 여기서 준 줌·드리프트·흔들림은 후처리로 그 위에 얹혀 굽습니다 — 미리보기의 줌은 실제와 같고, 궤도는 생성된 영상에 이미 들어 있습니다."
+          >
+            궤도=생성 · 줌=후처리
+          </span>
+        )}
         {layer === "B" && <span className="text-[var(--muted)]" title="인물/배경 매트가 준비되면 2레이어로 굽습니다(현재 프리뷰는 근사).">계층 B · 매트 준비 후 굽기</span>}
       </div>
 
@@ -153,7 +164,15 @@ export default function CameraWorkEditor({
             <video ref={vidRef} key={videoUrl} src={videoUrl} muted loop playsInline preload="metadata" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
           )}
           <span className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/55 px-1 text-[9px] text-white/85">
-            {layer === "C" ? "orbit — 굽기/생성 후 확인" : videoUrl ? (hover ? "실영상 · 굽기 전 미리보기" : "▶ 올리면 실영상") : "정지 이미지 근사"}
+            {videoUrl
+              ? hover
+                ? layer === "C"
+                  ? "실영상(궤도 포함) · 줌은 근사"
+                  : "실영상 · 굽기 전 미리보기"
+                : "▶ 올리면 실영상"
+              : layer === "C"
+                ? "궤도는 영상 생성 후 보입니다 · 줌만 근사"
+                : "정지 이미지 근사"}
           </span>
         </div>
       )}
@@ -168,7 +187,9 @@ export default function CameraWorkEditor({
         ))}
       </select>
 
-      {preset !== "static" && layer !== "C" && (
+      {/* ★오빗(layer C)도 슬라이더를 연다 — '오빗 + 줌' 동시 지정(사용자 지정).
+          궤도는 영상 생성(I2V)이, 줌·드리프트·흔들림은 후처리가 담당한다. */}
+      {preset !== "static" && (
         <div className="flex flex-col gap-1">
           <Slider label="길이" value={cw?.duration_s ?? 3.5} min={0.5} max={12} step={0.5} suffix="s" onChange={(v) => set({ duration_s: v })} />
           {/* ★줌 폭을 ±40%/s 까지 — 가속만 올리고 폭이 작으면 "확 들어가는" 느낌이 안 난다.
@@ -231,9 +252,11 @@ export default function CameraWorkEditor({
         <button
           type="button"
           onClick={onApply}
-          disabled={busy || applying || layer === "B" || layer === "C" || preset === "static"}
+          // ★오빗도 '줌 등 후처리 성분이 있으면' 굽는다(궤도는 이미 영상에 있음). 성분이 0 이면
+          //   워커가 스킵하므로 눌러도 손해는 없지만, 버튼은 열어 둔다(기능을 감추지 않는다).
+          disabled={busy || applying || layer === "B" || preset === "static"}
           title={
-            layer === "C" ? "orbit 은 I2V 위임 — 후처리 굽기 대상 아님(프록시 렌더 필요)"
+            layer === "C" ? "오빗의 줌·드리프트·흔들림을 실제 픽셀에 굽습니다(궤도는 생성된 영상에 이미 있습니다). 줌을 0 으로 두면 구울 게 없어 그대로 둡니다."
             : layer === "B" ? "인물/배경 매트 준비 후 굽기 지원"
             : preset === "static" ? "정지는 굽지 않습니다(원본 사용)"
             : "이 카메라워크를 실제 픽셀에 굽습니다(컷당 ~20-40초). 굽고 나면 미리보기가 최종 픽셀입니다."

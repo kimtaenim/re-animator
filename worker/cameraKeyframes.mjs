@@ -149,12 +149,23 @@ export function buildKeyframeTable(cw, opts = {}) {
   const tracks = {};
   let maxScale = 1;
 
-  // 계층 C(orbit): 후처리 카메라 없음 — 빈 테이블(프롬프트 경로가 담당).
+  // 계층 C(orbit): 궤도 자체는 I2V(영상 생성)가 만든다 — 후처리로 흉내낼 수 없다.
+  // ★단 '오빗 + 줌' 은 같이 갈 수 있다(사용자 지정): 궤도는 I2V, 줌·드리프트·흔들림은 후처리.
+  //   그래서 후처리 성분이 하나라도 있으면 계층 A 와 똑같이 테이블을 만든다(미리보기·굽기 가능).
+  //   아무 성분도 없으면 예전처럼 빈 테이블 = 굽기 스킵(불필요한 재인코딩 방지).
   if (layer === "C") {
-    return {
-      version: CAM_TABLE_VERSION, preset, duration_s: dur, fps, frames,
-      layer, refWidth: refW, refHeight: refH, tracks: {}, maxScale: 1,
-    };
+    const hasPost =
+      (Number(cw.zoom_rate_pct_per_s) || 0) !== 0 ||
+      (Number(cw.drift_px_per_s?.x) || 0) !== 0 ||
+      (Number(cw.drift_px_per_s?.y) || 0) !== 0 ||
+      (Number(cw.shake_amp_px) || 0) > 0 ||
+      (Number(cw.start_zoom) || 1) > 1;
+    if (!hasPost) {
+      return {
+        version: CAM_TABLE_VERSION, preset, duration_s: dur, fps, frames,
+        layer, refWidth: refW, refHeight: refH, tracks: {}, maxScale: 1,
+      };
+    }
   }
 
   // 줌 궤적: start → end. rate(%/s) × dur = 총 변화율.
@@ -235,7 +246,8 @@ export function buildKeyframeTable(cw, opts = {}) {
     const [cxA, cyA] = clampCenter(cx, cy, scale);
     maxScale = Math.max(maxScale, scale);
 
-    if (layer === "A") {
+    if (layer === "A" || layer === "C") {
+      // 계층 C 가 여기 온다 = '오빗 + 후처리 줌'. 궤도는 I2V, 줌/드리프트는 이 main 트랙이 담당.
       mainKeys.push({ t: round4(t), off: round6(off), scale: round6(scale), cx: round6(cxA), cy: round6(cyA) });
     } else {
       // 계층 B: character = 위 궤적. background = 배경만 추가 스케일(역방향은 bgDelta 음수).
@@ -250,7 +262,7 @@ export function buildKeyframeTable(cw, opts = {}) {
     }
   }
 
-  if (layer === "A") {
+  if (layer === "A" || layer === "C") {
     tracks.main = { keys: mainKeys };
   } else {
     tracks.character = { keys: charKeys };

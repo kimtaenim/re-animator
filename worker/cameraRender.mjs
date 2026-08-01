@@ -54,10 +54,15 @@ export async function renderCameraFx(o) {
   const log = (m) => onLog?.(m);
   const layer = presetLayer(cameraWork.preset);
 
-  // 계층 C(orbit): 후처리 없음 — 카메라는 I2V 프롬프트가 담당.
+  // 계층 C(orbit): 궤도는 I2V 가 만든다. ★단 줌·드리프트·흔들림을 같이 준 경우(오빗+줌)에는
+  //   그 성분만 후처리로 얹는다 — buildKeyframeTable 이 main 트랙을 만들어 준다(없으면 스킵).
   if (layer === "C") {
-    log?.(`orbit(계층 C) — 후처리 카메라 없음(I2V 위임)`);
-    return { skipped: true, layer, upscale: false, maxScale: 1 };
+    const probe0 = buildKeyframeTable(cameraWork, { fps: 24 });
+    if (!probe0.tracks?.main?.keys?.length) {
+      log?.(`orbit(계층 C) — 후처리 성분 없음, 궤도는 I2V 위임(스킵)`);
+      return { skipped: true, layer, upscale: false, maxScale: 1 };
+    }
+    log?.(`orbit + 후처리 줌 — 궤도는 I2V, 줌·드리프트는 여기서 굽는다`);
   }
   // 계층 B: 인물/배경 매트 미구현 → 현재는 미지원(온디맨드 매트 후). 안전하게 스킵.
   if (layer === "B") {
