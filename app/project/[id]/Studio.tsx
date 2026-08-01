@@ -1697,6 +1697,32 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 배역 목소리를 ElevenLabs 로 지정한 뒤 더빙하세요.
               </span>
             )}
+            {/* ★★언어별 더빙 — 더빙은 4단계 기능인데 언어별 버튼을 5단계에만 뒀던 게 잘못이었다.
+                여기(4단계 언어 바)에서 바로 그 언어로 더빙한다. 작업 언어를 바꾸지 않아도 된다.
+                결과는 bubble.tracks[lang].audioUrl 에 들어가고, 5단계 언어별 합성이 그걸 쓴다. */}
+            {(
+              <div className="w-full flex flex-wrap items-center gap-1.5 border-t border-[var(--border)] pt-1.5">
+                <span className="font-semibold text-[var(--accent)]">🎙 언어별 더빙</span>
+                {(project.targetLanguages ?? []).map((lg) => {
+                  const label = LANGUAGES.find((l) => l.id === lg)?.label ?? lg;
+                  return (
+                    <button
+                      key={lg}
+                      type="button"
+                      onClick={() => runDubJob(undefined, lg)}
+                      disabled={busy || dubbing}
+                      className="rounded bg-[var(--accent)] px-2.5 py-1 font-medium text-white disabled:opacity-40"
+                      title={`${label} 번역문으로 더빙합니다. 이걸 해야 ${label}판 합성에서 소리가 ${label}로 나갑니다.`}
+                    >
+                      {dubbing ? "더빙 중…" : `${label} 더빙`}
+                    </button>
+                  );
+                })}
+                <span className="text-[10px] text-[var(--muted)]">
+                  ※ 먼저 🌐 지금 번역 채우기 → 여기서 그 언어 더빙 → 5단계에서 그 언어판 합성
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -3279,22 +3305,27 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   </button>
                 );
               })()}
-              {selForRegen.size > 0 && (
-                <button
-                  onClick={regenSelected}
-                  disabled={busy || regenRunning}
-                  className="rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  선택 {selForRegen.size}개 생성
-                </button>
-              )}
+              {/* ★항상 보인다(선택 0개면 비활성) — 숨기면 기능이 있는지도 알 수 없다. */}
+              <button
+                onClick={regenSelected}
+                disabled={busy || regenRunning || selForRegen.size === 0}
+                title={
+                  selForRegen.size === 0
+                    ? "컷을 골라 체크하면 그 컷만 다시 그립니다"
+                    : "고른 컷만 (다시) 그리기 — 이미 그려졌어도 새로 만듭니다"
+                }
+                className="rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+              >
+                선택 {selForRegen.size}개 다시 생성
+              </button>
               {(() => {
-                // 일부만 그려진 상태에서만 노출 — 안 됐거나 실패한 컷만 마저.
+                // ★숨기지 않는다 — '일부일 때만' 조건은 내가 임의로 넣은 것이었고, 전부 실패하면
+                //   정작 필요한 버튼이 사라졌다. 안 된 게 하나라도 있으면 항상 보인다.
                 const cands = project.scenes.filter(
                   (s) => s.originalImage && s.cut?.type !== "text"
                 );
                 const missing = cands.filter((s) => !s.generatedImage).length;
-                if (missing === 0 || missing === cands.length) return null;
+                if (missing === 0) return null;
                 return (
                   <button
                     onClick={regenMissing}
@@ -3584,10 +3615,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               );
             })()}
             {(() => {
-              // 안 된 것이 '일부' 일 때만 보여준다(전부거나 없으면 전체 버튼과 같음).
+              // ★숨기지 않는다 — 예전엔 '일부일 때만' 보이게 했는데, 그건 내가 임의로 넣은
+              //   조건이었고 전부 실패했을 때 정작 필요한 버튼이 사라졌다(사용자 지적).
+              //   안 된 게 하나라도 있으면 항상 보인다.
               const cands = project.scenes.filter((s) => s.generatedImage && inSection(s));
               const missing = cands.filter((s) => !s.videoUrl).length;
-              if (missing === 0 || missing === cands.length) return null;
+              if (missing === 0) return null; // 전부 됐으면 누를 게 없다
               return (
                 <button
                   onClick={videoMissing}
@@ -3599,15 +3632,21 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 </button>
               );
             })()}
-            {selForVideo.size > 0 && (
-              <button
-                onClick={videoSelected}
-                disabled={busy}
-                className="rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-              >
-                선택 {selForVideo.size}개 생성
-              </button>
-            )}
+            {/* ★항상 보인다 — 선택이 0개면 비활성으로 두되 버튼 자체는 드러낸다.
+                예전엔 선택했을 때만 나타나서 '선택 재생성이 있는지'조차 알 수 없었다.
+                이미 영상이 있는 컷을 골라 누르면 그 컷들만 '다시' 생성된다. */}
+            <button
+              onClick={videoSelected}
+              disabled={busy || selForVideo.size === 0}
+              title={
+                selForVideo.size === 0
+                  ? "컷을 골라 체크하면 그 컷만 다시 생성합니다"
+                  : "고른 컷만 (다시) 생성 — 이미 영상이 있어도 새로 만듭니다"
+              }
+              className="rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+            >
+              선택 {selForVideo.size}개 다시 생성
+            </button>
             <button
               onClick={() => {
                 const ids = project.scenes.filter((s) => s.generatedImage && inSection(s)).map((s) => s.id);
@@ -4635,15 +4674,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   const label = LANGUAGES.find((l) => l.id === lg)?.label ?? lg;
                   return (
                     <span key={lg} className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => runDubJob(undefined, lg)}
-                        disabled={busy || dubbing}
-                        className="rounded border border-[var(--accent)] px-2 py-1 text-[var(--accent)] disabled:opacity-40 hover:bg-[var(--panel-2)]"
-                        title="① 먼저 이 언어로 더빙합니다. 이걸 안 하면 합성 시 소리가 원문(원어)로 나갑니다."
-                      >
-                        {dubbing ? "더빙 중…" : "① 더빙"}
-                      </button>
+                      {/* 더빙 버튼은 4단계(더빙이 있는 단계)로 옮겼다 — 5단계는 합성만. */}
                       <button
                         type="button"
                         onClick={() => runComposeJob(lg)}
@@ -4651,7 +4682,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         className="rounded bg-[var(--accent)] px-2.5 py-1 font-medium text-white disabled:opacity-40"
                         title={`${label} 더빙·자막으로 최종 합성(파일명에 ${lg} 표시)`}
                       >
-                        ② {label}판 합성
+                        {label}판 합성
                       </button>
                       {done && (
                         <a href={done} target="_blank" rel="noreferrer" className="rounded border border-[var(--ok)] px-2 py-1 text-[var(--ok)] hover:brightness-110">
