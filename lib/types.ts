@@ -135,6 +135,8 @@ export interface AudioSuggestion {
   enabled?: boolean; // insert_line 은 창작이라 on/off 관리(기본 on). sfx/vocal 은 항상 on.
   ko?: string; // 한국어 병기(§10 — 작업자 이해용, 산출물 제외)
   audioUrl?: string; // 생성된 오디오 Blob URL(§6 경로)
+  gen?: "sfx" | "tts"; // 어떻게 만들었나 — 효과음(언어 무관) / 목소리로 읽음(언어 종속)
+  lang?: string; // 목소리로 읽었을 때 그 언어("" = 원어). 합성이 언어가 맞을 때만 섞는다.
 }
 
 export interface CutOntology {

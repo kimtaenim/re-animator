@@ -106,7 +106,9 @@ function normalizeNarration(cut) {
 
 // 이 컷의 '오디오 유닛'(재생 순서) — 말풍선(대사·내레이션·효과음) audioUrl + 그 자막 텍스트.
 // sx/sy = 이 줄의 자막 위치(0~1 중심). 화자가 번갈아 말하면 줄마다 다르게 지정됨.
-function audioUnits(cut, workingLang) {
+// ★export = 테스트용(scripts/test-language-tracks.mjs). 이 함수의 언어 규칙이 몇 번이나
+//   되돌아가 "일본어판인데 중국어 소리" 를 냈다 → 규칙을 테스트로 못박는다.
+export function audioUnits(cut, workingLang) {
   normalizeNarration(cut);
   const units = [];
   for (const b of cut?.bubbles ?? []) {
@@ -118,7 +120,18 @@ function audioUnits(cut, workingLang) {
     //   재더빙을 안 한 줄에서 자막 일본어 + 소리 중국어가 됐다(사용자: 더빙·자막 언어 에러).
     //   → 번역 오디오가 있으면 번역 자막을, 없으면(원문 오디오를 쓰므로) 원문 자막을 쓴다.
     const useTrack = !!tr?.audioUrl;
-    const audioUrl = useTrack ? tr.audioUrl : b.audioUrl; // 줄을 잃지 않게 원문 오디오로 폴백
+    // ★★언어판(workingLang 지정)에서는 원어 오디오·원문 자막으로 폴백하지 않는다.
+    //   예전에는 그 언어 음성이 없으면 원문(중국어) 음성과 원문 자막을 대신 넣었다 —
+    //   그래서 "일본어판인데 대사 더빙도 영상 자막도 중국어" 가 나왔다(사용자 반복 보고).
+    //   번역은 있는데 음성만 없는 줄: 그 언어 자막을 유지하고 소리는 '무음' 으로 둔다
+    //   (중국어 소리를 섞느니 그 줄만 조용한 게 낫다 — 더빙을 다시 돌리면 채워진다).
+    if (workingLang && !isSfx && !useTrack) {
+      const t2 = (tr?.text || "").trim();
+      if (t2 && !b.noSubtitle)
+        units.push({ audioUrl: null, silent: true, subText: t2, sx: b.subtitleX, sy: b.subtitleY });
+      continue; // 번역조차 없으면 그 줄은 이 언어판에 넣지 않는다(원문 유출 금지)
+    }
+    const audioUrl = useTrack ? tr.audioUrl : b.audioUrl;
     const pairedText = useTrack ? (tr.text || b.text || "") : (b.text || "");
     if (audioUrl)
       units.push({
@@ -216,8 +229,14 @@ export async function runCompose(projectId, payload) {
     const hasAudio = (p.scenes ?? []).some((sc) =>
       (sc.cut?.bubbles ?? []).some((b) => (b.tracks?.[outLang]?.audioUrl || "").trim())
     );
+    // ★예전엔 여기서 "소리는 원문으로 나갑니다" 라고 경고만 하고 중국어 음성을 실어 보냈다.
+    //   이제 원어 폴백이 없으므로, 그 언어 음성이 하나도 없으면 무음 영상이 나온다 —
+    //   그런 걸 납품물로 만들어 주지 않는다. 무엇이 없는지 말하고 멈춘다.
     if (!hasAudio)
-      await log(`⚠ ${outLang} 더빙 오디오가 없습니다 — 자막만 ${outLang}, 소리는 원문으로 나갑니다. 4단계 🎙 ${outLang} 더빙 먼저.`);
+      throw new Error(
+        `${outLang} 더빙 음성이 하나도 없습니다 — 지금 합성하면 소리 없는 영상이 됩니다. ` +
+          `4단계 '🎙 전체 더빙 생성' 을 먼저 돌려주세요(원어 음성은 언어판에 넣지 않습니다).`
+      );
   }
   // 자막 씬(무성영화 카드, text 컷)은 영상 없이도 합성 대상 — 검은 배경+카드로 직접 렌더.
   const isCardScene = (s) => !s.videoUrl && s.cut?.type === "text" && subtitleUnits(s.cut, workingLang).length > 0;
@@ -250,6 +269,22 @@ export async function runCompose(projectId, payload) {
       const caps = []; // { text, start, end }
       let acc = 0;
       for (const au of audioUnits(s.cut, workingLang)) {
+        // ★음성이 없는 줄(그 언어 더빙 미완) — 원어 소리를 섞지 않고 그 길이만큼 무음을 넣는다.
+        //   자막은 그대로 나가고 타이밍도 유지된다. 픽셀 연산 없음(오디오 전용, OOM 무관).
+        if (au.silent) {
+          const chars = String(au.subText || "").replace(/\s/g, "").length;
+          const sd = Math.max(1.2, Math.min(8, chars * 0.14));
+          const sp2 = join(dir, `sil${i}_${aPaths.length}.m4a`);
+          try {
+            await run(FFMPEG, ["-y", "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+              "-t", sd.toFixed(2), "-c:a", "aac", "-b:a", "64k", sp2]);
+            aPaths.push(sp2);
+            const start = acc;
+            acc += sd;
+            if (au.subText) caps.push({ text: au.subText, start, end: acc, sx: au.sx, sy: au.sy });
+          } catch {}
+          continue;
+        }
         const ext = au.audioUrl.includes(".wav") ? "wav" : "mp3";
         const ap = join(dir, `a${i}_${aPaths.length}.${ext}`);
         try {
@@ -278,8 +313,14 @@ export async function runCompose(projectId, payload) {
       //   호출 수를 늘리지 않는다. 오디오 전용 필터라 픽셀 연산도 없다. 컷당 2개까지만.
       const sfxPaths = []; // { path, timing }
       if (!isCard) {
+        // ★오디오 제안 중 '목소리로 읽은 것' 은 언어가 맞을 때만 섞는다.
+        //   예전에는 vocal_reaction("gasp of shock" 같은 영어 서술)을 TTS 로 읽혀 저장했고,
+        //   그게 언어와 무관하게 최종 영상에 섞였다 → 일본어판에서 영어·원어 음성이 튀어나온다.
+        //   효과음(sfx)과 '효과음으로 만든 발성'(gen==="sfx")은 언어 무관이라 그대로 사용.
+        const sugOk = (g) =>
+          g.type === "sfx" || g.gen === "sfx" || (g.lang ?? "") === workingLang;
         const cand = [
-          ...(s.cut?.audioSuggestions ?? []).filter((g) => g && g.enabled !== false && g.audioUrl).map((g) => ({ url: g.audioUrl, timing: g.timing })),
+          ...(s.cut?.audioSuggestions ?? []).filter((g) => g && g.enabled !== false && g.audioUrl && sugOk(g)).map((g) => ({ url: g.audioUrl, timing: g.timing })),
           ...((s.cut?.sfxAudioUrl || "").trim() ? [{ url: s.cut.sfxAudioUrl, timing: "start" }] : []),
         ].slice(0, 2);
         for (const it of cand) {

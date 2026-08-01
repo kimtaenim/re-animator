@@ -118,6 +118,10 @@ export function cleanAudioSuggestions(raw: unknown): AudioSuggestion[] | undefin
       if (s.enabled === false) sug.enabled = false;
       if (typeof s.ko === "string") sug.ko = s.ko.slice(0, 300);
       if (typeof s.audioUrl === "string") sug.audioUrl = s.audioUrl; // 생성 오디오 보존
+      // ★어떻게(gen: 효과음/목소리)·어느 언어(lang)로 만든 오디오인지 — 화이트리스트에서 빠지면
+      //   앱이 저장할 때 사라지고, 합성이 '일본어판에 영어 음성' 을 다시 섞게 된다.
+      if (s.gen === "sfx" || s.gen === "tts") sug.gen = s.gen;
+      if (typeof s.lang === "string") sug.lang = s.lang.slice(0, 5);
       return sug;
     })
     .slice(0, 8);

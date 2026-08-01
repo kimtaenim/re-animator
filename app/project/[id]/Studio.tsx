@@ -2416,7 +2416,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     // ★작업 언어(§10) 자막 — 미리보기도 최종 합성(compose.mjs)과 동일하게 그 언어 번역을 보여준다.
     //   예전엔 미리보기가 항상 원문(b.text)만 써서 "일본어 자막이 안 나온다"(미리보기)가 됐다.
     //   그 언어 번역이 아직 없으면 원문으로 폴백(빈 화면 방지).
-    const wl = (project.workingLanguage || "").trim();
+    // ★기준을 더빙과 통일한다(dubLang) — 예전엔 자막만 '작업 언어' 를 봐서, 대상 언어를 일본어로
+    //   켜고 일본어로 더빙해도 작업 언어를 따로 안 바꿨으면 자막은 계속 원문(중국어)이 떴다.
+    const wl = dubLang;
     if (cut?.bubbles?.length)
       for (const b of cut.bubbles) {
         if (b.speakerId === SFX_SPEAKER || b.noSubtitle) continue;
@@ -2519,11 +2521,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // lang 을 주면 그 언어 오디오·자막으로 합성해 언어별 파일을 만든다(§10). 없으면 작업 언어.
   async function runComposeJob(lang?: string) {
     setError("");
+    // ★언어를 안 넘긴 '그냥 합성' 도 더빙과 같은 언어로 나간다(dubLang).
+    //   예전엔 합성만 project.workingLanguage 를 봐서, 일본어로 더빙해 놓고 합성하면
+    //   자막·소리가 원문(중국어)인 파일이 나왔다 — 사용자: "여전히 중국어로 뜬다".
+    const useLang = (lang ?? dubLang).trim();
     try {
       const r = await fetch("/api/compose", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, ...(lang ? { lang } : {}) }),
+        body: JSON.stringify({ projectId: project.id, ...(useLang ? { lang: useLang } : {}) }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "합성 실패");

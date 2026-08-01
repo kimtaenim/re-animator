@@ -2716,7 +2716,10 @@ export async function runDub(projectId, payload) {
     for (let si = 0; si < sugs.length; si++) {
       const sg = sugs[si];
       if (!sg || sg.enabled === false || !(sg.text || "").trim()) continue; // 끈 삽입 대사·빈 것 스킵
-      if (!force && (sg.audioUrl || "").trim()) { alreadyDone++; continue; }
+      // 이미 오디오가 있어도 '지금 언어와 다른 방식/다른 언어로 만든 것' 이면 다시 만든다.
+      //   (예전 vocal_reaction 은 영어 서술을 목소리로 읽어 저장했다 — 그대로 두면 최종에 안 섞이고 버려진다.)
+      const sugStale = sg.type !== "sfx" && sg.gen !== "sfx" && (sg.lang ?? null) !== workingLang;
+      if (!force && (sg.audioUrl || "").trim() && !sugStale) { alreadyDone++; continue; }
       // ★vocal_reaction(헐떡임·한숨 같은 비언어 발성)은 '대사' 가 아니다. TTS 로 보내면
       //   "gasp of shock" 같은 영어 설명문을 목소리가 그대로 읽는다 → 효과음 경로로 만든다.
       if (sg.type === "sfx" || sg.type === "vocal_reaction") {
@@ -2796,7 +2799,13 @@ export async function runDub(projectId, payload) {
             { access: "public", contentType, addRandomSuffix: false }
           );
           if (u.kind === "sug_sfx" || u.kind === "sug_voice") {
-            if (u.s.cut?.audioSuggestions?.[u.sugIdx]) u.s.cut.audioSuggestions[u.sugIdx].audioUrl = url; // 오디오 제안(§6)
+            // ★어떻게·어느 언어로 만들었는지 남긴다 — 합성이 '일본어판에 영어 음성' 을 안 섞게.
+            const sg2 = u.s.cut?.audioSuggestions?.[u.sugIdx];
+            if (sg2) {
+              sg2.audioUrl = url; // 오디오 제안(§6)
+              sg2.gen = u.kind === "sug_sfx" ? "sfx" : "tts";
+              sg2.lang = u.kind === "sug_sfx" ? "" : workingLang;
+            }
           } else if (u.kind === "bubble" && u.lang && u.s.cut?.bubbles?.[u.idx]) {
             // 작업 언어 더빙 → 그 언어 트랙에 저장(§10). 원문 audioUrl 은 보존.
             const bb = u.s.cut.bubbles[u.idx];
