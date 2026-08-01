@@ -235,17 +235,29 @@ export async function translateToLanguages(texts, langs) {
 export async function translateScenesMultilang(scenes, langs) {
   if (!langs?.length) return { translated: 0, cost: 0 };
   const items = []; // { b, text }
+  let copied = 0; // 번역할 글자가 없어 원문을 그대로 채운 줄(…·!? 등)
   for (const s of scenes ?? []) {
     for (const b of s?.cut?.bubbles ?? []) {
       if (!b || b.speakerId === "__sfx__") continue;
       const t = (b.text || "").trim();
       if (!t) continue;
       const need = langs.some((l) => !(b.tracks?.[l]?.text)); // 하나라도 빠진 언어 있으면 대상
-      if (need) items.push({ b, text: t });
+      if (!need) continue;
+      // ★번역할 '글자' 가 없는 줄(…, !?, ♪ 같은 기호·문장부호뿐)은 모델이 빈 값을 돌려준다.
+      //   그러면 tracks 가 영영 안 채워지고, 그 줄 때문에 더빙이 "번역이 아직 없어요" 로 계속
+      //   막혔다(사용자: 번역을 몇 번이나 다시 돌려도 같은 자리). 번역할 게 없으므로 원문을
+      //   그대로 채운다 — 조용한 '원문 폴백' 이 아니라, 문자가 없는 줄에 한정된 명시 규칙이다.
+      if (!/[\p{Letter}\p{Number}]/u.test(t)) {
+        b.tracks = b.tracks || {};
+        for (const l of langs) if (!b.tracks[l]?.text) b.tracks[l] = { ...(b.tracks[l] || {}), text: t, status: "copied" };
+        copied++;
+        continue;
+      }
+      items.push({ b, text: t });
     }
   }
-  if (!items.length) return { translated: 0, cost: 0 };
-  let translated = 0;
+  if (!items.length) return { translated: copied, cost: 0 };
+  let translated = copied;
   let cost = 0;
   // ★덩어리 크기를 언어 수로 나눈다 — 50줄 × 2언어면 출력이 max_tokens 를 넘겨 잘렸다.
   //   (잘리면 그 덩어리 전체가 버려져 번역이 들쭉날쭉해졌다 = 사용자 보고의 원인.)

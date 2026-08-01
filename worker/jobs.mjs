@@ -2609,6 +2609,47 @@ export async function runDub(projectId, payload) {
     .sort((a, b) => a.order - b.order)
     .filter((s) => !only || only.has(s.id));
 
+  // ★★그 언어 번역이 빠진 줄은 '여기서' 채우고 이어서 더빙한다.
+  //   예전에는 "번역이 아직 없어요 — 4단계 'ja로 만들기' 를 누르세요" 라며 사람에게 되던졌다.
+  //   그런데 그 버튼도 결국 같은 번역 잡을 부르는 것뿐이라, 사용자는 번역을 몇 번씩 다시
+  //   돌리면서도 같은 자리에서 막혔다(빠진 줄이 남아 있으면 더빙이 또 거부).
+  //   더빙 잡이 스스로 빠진 줄만 번역하면 이 왕복 자체가 없어진다.
+  if (workingLang) {
+    const lacks = (b) =>
+      b && b.speakerId !== "__sfx__" && (b.text || "").trim() && !((b.tracks?.[workingLang]?.text || "").trim());
+    const need = scenes.filter((s) => (s.cut?.bubbles ?? []).some(lacks));
+    if (need.length) {
+      const n = need.reduce((a, s) => a + (s.cut?.bubbles ?? []).filter(lacks).length, 0);
+      await log(`${workingLang} 번역이 빠진 ${n}줄 — 더빙 전에 여기서 채웁니다`);
+      try {
+        const { translated } = await translateScenesMultilang(need, [workingLang]);
+        await log(`${workingLang} 번역 ${translated}줄 채움 — 이어서 더빙합니다`);
+        // 번역만이라도 즉시 저장한다(더빙이 뒤에서 실패해도 번역은 남게). 저장 규약: fresh 재읽기 후
+        // 인덱스+원문이 일치하는 말풍선의 tracks 만 얹는다.
+        if (translated > 0) {
+          const pf = await getProject(projectId);
+          if (pf) {
+            const byId = new Map(need.map((s) => [s.id, s.cut]));
+            pf.scenes = (pf.scenes ?? []).map((fresh) => {
+              const cut = byId.get(fresh.id);
+              if (!cut || !fresh.cut) return fresh;
+              const bubbles = (fresh.cut.bubbles ?? []).map((fb, i) => {
+                const nb = (cut.bubbles ?? [])[i];
+                if (!nb || (nb.text ?? "") !== (fb.text ?? "") || !nb.tracks) return fb;
+                return { ...fb, tracks: { ...(fb.tracks || {}), ...nb.tracks } };
+              });
+              return { ...fresh, cut: { ...fresh.cut, bubbles } };
+            });
+            await saveProject(pf);
+          }
+        }
+      } catch (e) {
+        // 번역이 실패해도 이미 번역된 줄은 더빙한다(전부 막지 않는다).
+        await log(`${workingLang} 번역 실패(있는 줄만 더빙): ${String(e?.message ?? e).slice(0, 140)}`);
+      }
+    }
+  }
+
   // 화자 id → 목소리. charId면 그 캐릭터(voice+provider), null/미지정이면 나레이터.
   const resolve = (speakerId) => {
     if (speakerId) {
@@ -2697,8 +2738,10 @@ export async function runDub(projectId, payload) {
   if (!units.length) {
     // ★언어별 더빙인데 그 언어 번역이 없어서 대상이 0이면, 그걸 정확히 말한다.
     if (workingLang && missingLang > 0) {
+      // ★여기까지 왔다는 건 위에서 '빠진 줄 번역' 을 이미 시도했는데도 안 채워졌다는 뜻이다.
+      //   그러니 "번역 버튼을 누르세요"(같은 일을 또 시키는 안내) 대신 실제 상태를 말한다.
       throw new Error(
-        `${workingLang} 번역이 아직 없어요(${missingLang}줄) — 4단계 '${workingLang}로 만들기' 를 누르면 번역부터 자동으로 됩니다`
+        `${workingLang} 번역이 ${missingLang}줄 비어 있어 더빙할 게 없습니다 — 번역을 자동으로 시도했지만 채우지 못했습니다(위 진행 로그의 번역 실패 사유 확인). 번역 API 키·응답 문제일 수 있습니다`
       );
     }
     if (alreadyDone > 0) {
