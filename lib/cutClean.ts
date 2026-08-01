@@ -54,6 +54,11 @@ export function cleanCameraWork(raw: unknown): CameraWork | undefined {
   if (sa !== undefined) cw.shake_amp_px = sa;
   const sd = clampNum(r.shake_damp, 0, 20);
   if (sd !== undefined) cw.shake_damp = sd;
+  // ★가속 줌·흔들림 속도 — 화이트리스트에서 빠지면 저장 시 사라진다(이 프로젝트 단골 사고).
+  const za = clampNum(r.zoom_accel, 0, 4);
+  if (za !== undefined) cw.zoom_accel = za;
+  const sh = clampNum(r.shake_hz, 0, 30);
+  if (sh !== undefined) cw.shake_hz = sh;
   const sz = clampNum(r.start_zoom, 1, 3);
   if (sz !== undefined) cw.start_zoom = sz;
   return cw;

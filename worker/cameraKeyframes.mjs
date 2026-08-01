@@ -37,6 +37,8 @@
  * @property {number} [shake_seed]               셰이크 시드(양쪽 동일 궤적). 0/undefined = 셰이크 없음
  * @property {number} [shake_amp_px]             셰이크 진폭(px, ref 기준). 기본 0
  * @property {number} [shake_damp]               셰이크 감쇠(1/s, exp(-damp*t)). 0=감쇠 없음(등진폭)
+ * @property {number} [shake_hz]                 흔들리는 속도(초당 흔들림 수). 0=프레임마다(가장 빠른 진동)
+ * @property {number} [zoom_accel]               ★가속 줌: 0=일정, 클수록 느리게 시작→급가속(p=t^(1+accel))
  * @property {number} [start_zoom]               시작 줌 배율(기본 1.0). pull_out 은 >1 로 시작
  *
  * @typedef {Object} CameraState  한 시점의 crop 창 상태(정규화)
@@ -172,6 +174,18 @@ export function buildKeyframeTable(cw, opts = {}) {
   const shakeAmpY = ((Number(cw.shake_amp_px) || 0)) / refH;
   const shakeDamp = Number(cw.shake_damp) || 0;
   const rng = shakeSeed ? mulberry32(shakeSeed) : null;
+  // ★흔들림 속도(Hz) — 0/미지정이면 예전처럼 '프레임마다' 지터(가장 빠른 진동).
+  //   값을 주면 그 빈도로만 흔들리게 미리 샘플을 뽑아 보간한다(느린 흔들림 표현 가능).
+  const shakeHz = Math.max(0, Number(cw.shake_hz) || 0);
+  const shakeSamplesX = [];
+  const shakeSamplesY = [];
+  if (rng && shakeHz > 0) {
+    const n = Math.max(2, Math.ceil(dur * shakeHz) + 2);
+    for (let k = 0; k < n; k++) {
+      shakeSamplesX.push(rng() * 2 - 1);
+      shakeSamplesY.push(rng() * 2 - 1);
+    }
+  }
 
   // 계층 B: 배경 트랙은 인물 트랙 대비 bg_scale_delta_pct_per_s 만큼 스케일 가감.
   const bgDelta = Number(cw.bg_scale_delta_pct_per_s) || 0;
@@ -186,7 +200,11 @@ export function buildKeyframeTable(cw, opts = {}) {
   for (let i = 0; i < frames; i++) {
     const t = (i / (frames - 1 || 1)) * dur;
     const off = frames > 1 ? i / (frames - 1) : 0;
-    const p = ease(easing, off); // 가감속된 진행
+    // ★가속 줌(zoom_accel) — "느리게 시작해서 뒤로 갈수록 급격히 빨라지는" 줌.
+    //   0 = 기존 easing 그대로, 값이 클수록 초반이 더 느리고 후반이 더 급하다(p = off^(1+accel)).
+    //   push_in/crash_zoom 의 핵심 표현이라 프리셋 기본값 + 슬라이더로 조절한다.
+    const accel = Number(cw.zoom_accel) || 0;
+    const p = accel > 0 ? Math.pow(off, 1 + accel) : ease(easing, off); // 가감속된 진행
 
     // 인물(=주) 줌·중심
     const scale = startZoom + (endZoom - startZoom) * p;
@@ -194,7 +212,17 @@ export function buildKeyframeTable(cw, opts = {}) {
     let cy = 0.5 + driftTotY * p;
 
     // 셰이크: 프레임마다 소비(시드 결정적). 감쇠 exp(-damp*t).
-    if (rng) {
+    // ★shake_hz 를 주면 '흔들리는 속도'(초당 흔들림 수)를 조절한다 — 미리 뽑아둔 샘플 사이를
+    //   보간해서 느린 흔들림(낮은 Hz)~빠른 진동(높은 Hz)까지 만든다. 없으면 기존(프레임마다).
+    if (rng && shakeHz > 0) {
+      const env = shakeDamp > 0 ? Math.exp(-shakeDamp * t) : 1;
+      const u = t * shakeHz;
+      const k = Math.min(shakeSamplesX.length - 2, Math.floor(u));
+      const f = u - Math.floor(u);
+      const lerp = (a, b, r) => a + (b - a) * r;
+      cx += lerp(shakeSamplesX[k], shakeSamplesX[k + 1], f) * shakeAmpX * env;
+      cy += lerp(shakeSamplesY[k], shakeSamplesY[k + 1], f) * shakeAmpY * env;
+    } else if (rng) {
       const env = shakeDamp > 0 ? Math.exp(-shakeDamp * t) : 1;
       cx += (rng() * 2 - 1) * shakeAmpX * env;
       cy += (rng() * 2 - 1) * shakeAmpY * env;
@@ -346,12 +374,17 @@ export function needsUpscale(table, outputHeight = 720) {
 export const CAMERA_PRESETS = {
   // ★"뮤직비디오보다 더 거칠게"(사용자 지정) — 줌·팬 더 빠르게 + 손각도 그레인(핸드헬드 흔들) 얹음.
   //   ★lib/cameraKeyframes.mjs 와 동일 값 유지(단일 소스 규칙 — 두 복제본이 어긋나면 프리뷰≠굽기).
-  push_in: { zoom_rate_pct_per_s: 8, drift_px_per_s: { x: 12, y: -8 }, shake_seed: 2, shake_amp_px: 5, shake_damp: 0, easing: "easeInOut" }, // 거칠게 파고드는 푸시
+  // ★흔들림(shake_amp_px)은 기본 0 — 사용자 지정. 예전엔 push/pan/crash 에 핸드헬드 그레인을
+  //   기본으로 넣어 "모든 화면이 흔들린다" 가 됐다. 흔들림이 필요하면 슬라이더로 올린다.
+  //   push_in 의 핵심은 흔들림이 아니라 '가속 줌'(zoom_accel) 이다.
+  push_in: { zoom_rate_pct_per_s: 8, zoom_accel: 1.6, drift_px_per_s: { x: 12, y: -8 }, shake_seed: 2, shake_amp_px: 0, shake_hz: 6, shake_damp: 0, easing: "easeInOut" }, // 느리게 시작해 급가속하는 푸시
   pull_out: { zoom_rate_pct_per_s: -8, start_zoom: 1.5, easing: "easeOut" }, // 확 빠지는 리빌
-  pan: { zoom_rate_pct_per_s: 2, start_zoom: 1.55, drift_px_per_s: { x: 60, y: 0 }, shake_seed: 3, shake_amp_px: 5, shake_damp: 0, easing: "easeInOut" }, // 빠른 휘두르는 트래킹 팬
+  // 팬: 방향·속도는 drift_px_per_s(x=가로, y=세로)로 지정한다. 양수 x=오른쪽으로 흐름,
+  //   음수 x=왼쪽. y 도 같은 규칙(음수=위). 가속도 zoom_accel 로 팬 진행에 함께 걸린다.
+  pan: { zoom_rate_pct_per_s: 2, start_zoom: 1.55, drift_px_per_s: { x: 60, y: 0 }, shake_seed: 3, shake_amp_px: 0, shake_hz: 6, shake_damp: 0, easing: "easeInOut" }, // 트래킹 팬
   static: { zoom_rate_pct_per_s: 0, easing: "linear" },
-  shake: { zoom_rate_pct_per_s: 0, start_zoom: 1.15, shake_seed: 1, shake_amp_px: 24, shake_damp: 0, easing: "linear" }, // 거친 핸드헬드
-  crash_zoom: { zoom_rate_pct_per_s: 15, shake_seed: 4, shake_amp_px: 8, shake_damp: 0, easing: "easeIn" }, // 최대치로 파고드는 크래시 + 임팩트 흔들
+  shake: { zoom_rate_pct_per_s: 0, start_zoom: 1.15, shake_seed: 1, shake_amp_px: 24, shake_hz: 10, shake_damp: 0, easing: "linear" }, // 거친 핸드헬드(이 프리셋만 기본 흔들림)
+  crash_zoom: { zoom_rate_pct_per_s: 15, zoom_accel: 2.4, shake_seed: 4, shake_amp_px: 0, shake_hz: 8, shake_damp: 0, easing: "easeIn" }, // 급가속으로 때려박는 크래시
   whip: { zoom_rate_pct_per_s: 0, easing: "linear" }, // 전환 속성(§2), 후처리는 전환 경로
   parallax_push: { zoom_rate_pct_per_s: 6.0, bg_scale_delta_pct_per_s: 4.0, drift_px_per_s: { x: 10, y: 0 }, easing: "easeInOut" },
   vertigo: { zoom_rate_pct_per_s: 1.5, bg_scale_delta_pct_per_s: -14, easing: "easeInOut" }, // 강한 달리줌

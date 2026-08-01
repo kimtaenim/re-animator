@@ -200,8 +200,10 @@ export interface CameraWork {
   bg_scale_delta_pct_per_s?: number; // 계층 B: 배경 추가/역방향 스케일 속도(%p/s)
   easing?: CameraEasing;
   shake_seed?: number; // 시드 PRNG(양쪽 동일 궤적)
-  shake_amp_px?: number;
+  shake_amp_px?: number; // 흔들림 진폭(px). ★기본 0 — 흔들림은 켤 때만 (사용자 지정)
   shake_damp?: number;
+  shake_hz?: number; // 흔들리는 속도(초당 흔들림 수). 0=프레임마다(가장 빠른 진동)
+  zoom_accel?: number; // ★가속 줌: 0=일정, 클수록 '느리게 시작 → 급가속'(p = t^(1+accel))
   start_zoom?: number; // pull_out 은 >1 로 시작
 }
 

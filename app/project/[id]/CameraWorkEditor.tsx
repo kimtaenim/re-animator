@@ -180,9 +180,25 @@ export default function CameraWorkEditor({
           {layer === "B" && (
             <Slider label="배경 델타" value={cw?.bg_scale_delta_pct_per_s ?? 0} min={-10} max={10} step={0.5} suffix="%p/s" onChange={(v) => set({ bg_scale_delta_pct_per_s: v })} />
           )}
-          {/* 흔들 진폭(핸드헬드 그레인) — shake 뿐 아니라 push/pan/crash 에도 노출해 '거칠기'를 직접 조절·제거. */}
+          {/* ★가속 줌 — 사용자 지정 "느리다가 갑자기 빨라지는 가속도 줌이 제일 중요".
+              0=일정 속도, 클수록 초반이 더 느리고 후반이 더 급하다. 팬에도 같이 걸린다. */}
+          {(preset === "push_in" || preset === "pull_out" || preset === "crash_zoom" || preset === "pan") && (
+            <Slider
+              label="가속"
+              value={cw?.zoom_accel ?? 0}
+              min={0}
+              max={4}
+              step={0.1}
+              onChange={(v) => set({ zoom_accel: v })}
+            />
+          )}
+          {/* 흔들 진폭 — ★기본 0. 예전엔 push/pan/crash 에 기본으로 들어가 '모든 화면이 흔들렸다'. */}
           {(preset === "shake" || preset === "push_in" || preset === "pan" || preset === "crash_zoom") && (
             <Slider label="흔들 진폭" value={cw?.shake_amp_px ?? 0} min={0} max={40} step={1} suffix="px" onChange={(v) => set({ shake_amp_px: v, shake_seed: cw?.shake_seed || 1 })} />
+          )}
+          {/* 흔들 속도(Hz) — 낮으면 느리게 출렁, 높으면 잔진동. 0=프레임마다(가장 빠름). */}
+          {(preset === "shake" || preset === "push_in" || preset === "pan" || preset === "crash_zoom") && (
+            <Slider label="흔들 속도" value={cw?.shake_hz ?? 0} min={0} max={20} step={0.5} suffix="Hz" onChange={(v) => set({ shake_hz: v, shake_seed: cw?.shake_seed || 1 })} />
           )}
         </div>
       )}
