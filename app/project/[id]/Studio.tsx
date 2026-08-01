@@ -1795,6 +1795,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 <span className="w-full text-[10px] text-[var(--muted)]">
                   아래 🎙 전체 더빙 생성 하나면 번역 → 더빙까지 됩니다. 끝나면 5단계에서 합성하세요.
                 </span>
+                {/* ★어느 빌드가 떠 있는지 화면에 박는다 — "새 앱이냐 옛 앱이냐" 를 매번 추측하느라
+                    시간을 버렸다. 배포가 반영됐는지 여기 SHA 로 즉시 확인한다. */}
+                <span className="w-full font-mono text-[9px] text-[var(--muted)] opacity-70">
+                  앱 {(process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7)} · 더빙·자막 언어{" "}
+                  {dubLang || "원어"} · 대상 {(project.targetLanguages ?? []).join(",") || "없음"} · 작업언어{" "}
+                  {project.workingLanguage || "원어"}
+                </span>
               </div>
             )}
           </div>
@@ -2382,7 +2389,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   type Bub = NonNullable<NonNullable<Project["scenes"][number]["cut"]>["bubbles"]>[number];
   const bubbleAudio = (b: Bub, lang?: string): string => {
     const lg = (lang ?? dubLang).trim(); // 기본 = 더빙 언어(원어 더빙을 안 만드므로 여기도 같은 기준)
-    return (lg && (b.tracks?.[lg]?.audioUrl || "").trim()) || b.audioUrl || "";
+    // ★더빙 언어가 정해져 있으면 원어(중국어) 음성으로 폴백하지 않는다.
+    //   폴백하면 일본어 더빙이 안 된 줄에서 중국어가 들리고, 화면상 🔊(초록)이라 '됐다' 로 보인다
+    //   — 사용자가 "여전히 중국어 음성" 이라고 한 것이 이것이다. 안 된 줄은 🔇 로 보여야 한다.
+    if (lg) return (b.tracks?.[lg]?.audioUrl || "").trim();
+    return b.audioUrl || "";
   };
   // 씬 오디오 전체 재생 — 말풍선(대사·내레이션·효과음) audioUrl 순서대로. 효과음도 소리로 재생.
   function playSceneAudio(s: Project["scenes"][number], lang?: string) {
@@ -2423,6 +2434,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       for (const b of cut.bubbles) {
         if (b.speakerId === SFX_SPEAKER || b.noSubtitle) continue;
         const langText = wl ? (b.tracks?.[wl]?.text || "").trim() : "";
+        // ★미리보기 = 결과. 합성이 그 언어 번역이 없는 줄을 언어판에서 빼므로 미리보기도 뺀다.
+        //   예전엔 원문(중국어)으로 폴백해서, 미리보기에 중국어 자막이 떴다(=결과와도 달랐다).
+        if (wl && !langText) continue;
         const t = langText || (b.text || "").trim();
         if (t) units.push({ text: t, sx: b.subtitleX, sy: b.subtitleY, tr: (b.translation || "").trim() || undefined });
       }
