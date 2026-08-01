@@ -99,7 +99,9 @@ export default function CameraWorkEditor({
       if (!track) return;
       const kfs = toWebKeyframes(track).map((k) => ({ offset: k.offset, transform: k.transform, transformOrigin: k.transformOrigin }));
       if (kfs.length < 2) return;
-      el.animate(kfs, { duration: Math.max(300, (cw.duration_s || 3) * 1000), iterations: Infinity, easing: "linear", fill: "both" });
+      // ★한 번만 재생하고 마지막 프레임에서 멈춘다 — 최종 결과와 같은 동작(사용자 지적:
+      //   "왜 줌이 반복 실행되지"). 다시 보려면 마우스를 뗐다 올리거나 값을 바꾸면 된다.
+      el.animate(kfs, { duration: Math.max(300, (cw.duration_s || 3) * 1000), iterations: 1, easing: "linear", fill: "both" });
     };
     if (liveVideo) {
       const v = el as HTMLVideoElement;
@@ -160,8 +162,9 @@ export default function CameraWorkEditor({
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img ref={imgRef} src={imageUrl} alt="camera preview" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
+          {/* ★loop 제거 — 카메라 애니메이션과 함께 한 번만 재생하고 멈춘다(최종 결과와 동일). */}
           {liveVideo && (
-            <video ref={vidRef} key={videoUrl} src={videoUrl} muted loop playsInline preload="metadata" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
+            <video ref={vidRef} key={videoUrl} src={videoUrl} muted playsInline preload="metadata" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
           )}
           <span className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/55 px-1 text-[9px] text-white/85">
             {videoUrl
