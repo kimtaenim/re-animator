@@ -2675,7 +2675,7 @@ export async function runDub(projectId, payload) {
     // ★언어별 더빙인데 그 언어 번역이 없어서 대상이 0이면, 그걸 정확히 말한다.
     if (workingLang && missingLang > 0) {
       throw new Error(
-        `${workingLang} 번역이 없어 더빙할 게 없어요(${missingLang}줄) — 🌐 '지금 번역 채우기' 를 먼저 하세요`
+        `${workingLang} 번역이 아직 없어요(${missingLang}줄) — 4단계 '${workingLang}로 만들기' 를 누르면 번역부터 자동으로 됩니다`
       );
     }
     if (alreadyDone > 0) {
@@ -2764,7 +2764,7 @@ export async function runDub(projectId, payload) {
   } catch {}
   await log(
     `더빙 완료: 생성 ${ok}개${skipped ? `, 목소리 미배정 스킵 ${skipped}개` : ""}` +
-      (missingLang ? `, ${workingLang} 번역 없어 원문으로 더빙 ${missingLang}줄 — 🌐 지금 번역 채우기 후 다시 더빙하면 그 언어로 바뀝니다` : "")
+      (missingLang ? `, ${workingLang} 번역 없는 ${missingLang}줄은 건너뜀` : "")
   );
   return ok;
 }

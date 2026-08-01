@@ -211,7 +211,7 @@ export async function runCompose(projectId, payload) {
     );
     if (!has)
       throw new Error(
-        `${outLang} 번역이 하나도 없어요 — 4단계에서 🌐 '지금 번역 채우기' 를 먼저 하세요(그 다음 ${outLang} 더빙 → 합성)`
+        `${outLang} 번역이 아직 없어요 — 4단계에서 '${outLang}로 만들기' 를 누르면 번역·더빙이 한 번에 됩니다`
       );
     const hasAudio = (p.scenes ?? []).some((sc) =>
       (sc.cut?.bubbles ?? []).some((b) => (b.tracks?.[outLang]?.audioUrl || "").trim())

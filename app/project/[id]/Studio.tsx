@@ -1625,7 +1625,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
   }
   // 🌐 번역만 다시 — 재추출 없이 대상 언어 번역을 채운다. 끝나면 프로젝트를 다시 읽어 반영.
-  async function runTranslateJob() {
+  // 성공하면 true, 실패하면 false — 호출측(makeLanguage)이 이어서 진행할지 판단한다.
+  async function runTranslateJob(): Promise<boolean> {
     setError("");
     setTranslating(true);
     try {
@@ -1654,10 +1655,38 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       if (pd?.ok && pd.project?.scenes) {
         setProject((prev) => ({ ...prev, scenes: pd.project.scenes }));
       }
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "번역 실패");
+      return false;
     } finally {
       setTranslating(false);
+    }
+  }
+
+  // ★★"○○로 만들기" — 번역 → 더빙을 한 버튼으로 잇는다.
+  //   순서를 사람이 외우고 세 버튼을 차례로 누르게 하는 건 잘못된 설계였다(사용자 지적).
+  //   번역이 이미 다 돼 있으면 번역은 건너뛰고 더빙만 한다.
+  async function makeLanguage(lang: string) {
+    setError("");
+    try {
+      // 1) 이 언어 번역이 덜 됐으면 먼저 채운다.
+      const need = projectRef.current.scenes.some((sc) =>
+        (sc.cut?.bubbles ?? []).some(
+          (b) => b.speakerId !== SFX_SPEAKER && (b.text || "").trim() && !(b.tracks?.[lang]?.text || "").trim()
+        )
+      );
+      if (need) {
+        if (!(projectRef.current.targetLanguages ?? []).includes(lang)) {
+          await toggleTargetLanguage(lang); // 대상 언어가 꺼져 있으면 켠다
+        }
+        const okTr = await runTranslateJob();
+        if (!okTr) return; // 번역 실패하면 더빙으로 넘어가지 않는다
+      }
+      // 2) 그 언어로 더빙(번역 없는 줄은 워커가 건너뛴다).
+      await runDubJob(undefined, lang);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : `${lang} 만들기 실패`);
     }
   }
 
@@ -1702,43 +1731,37 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 결과는 bubble.tracks[lang].audioUrl 에 들어가고, 5단계 언어별 합성이 그걸 쓴다. */}
             {(
               <div className="w-full flex flex-wrap items-center gap-1.5 border-t border-[var(--border)] pt-1.5">
-                <span className="font-semibold text-[var(--accent)]">🎙 언어별 더빙</span>
+                <span className="font-semibold text-[var(--accent)]">🎬 언어판 만들기</span>
                 {(project.targetLanguages ?? []).map((lg) => {
                   const label = LANGUAGES.find((l) => l.id === lg)?.label ?? lg;
+                  let total = 0, tr = 0, au = 0;
+                  for (const sc of project.scenes)
+                    for (const b of sc.cut?.bubbles ?? []) {
+                      if (b.speakerId === SFX_SPEAKER || !(b.text || "").trim()) continue;
+                      total++;
+                      if ((b.tracks?.[lg]?.text || "").trim()) tr++;
+                      if ((b.tracks?.[lg]?.audioUrl || "").trim()) au++;
+                    }
+                  const done = total > 0 && au === total;
                   return (
-                    <button
-                      key={lg}
-                      type="button"
-                      onClick={() => runDubJob(undefined, lg)}
-                      disabled={busy || dubbing}
-                      className="rounded bg-[var(--accent)] px-2.5 py-1 font-medium text-white disabled:opacity-40"
-                      title={`${label} 번역문으로 더빙합니다. 이걸 해야 ${label}판 합성에서 소리가 ${label}로 나갑니다.`}
-                    >
-                      {dubbing ? "더빙 중…" : `${label} 더빙`}
-                    </button>
+                    <span key={lg} className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => makeLanguage(lg)}
+                        disabled={busy || dubbing || translating}
+                        className="rounded bg-[var(--accent)] px-2.5 py-1 font-medium text-white disabled:opacity-40"
+                        title={`${label} 번역이 없으면 채우고, 이어서 ${label}로 더빙합니다. 한 번만 누르면 됩니다.`}
+                      >
+                        {translating ? "번역 중…" : dubbing ? "더빙 중…" : done ? `${label} 다시 만들기` : `${label}로 만들기`}
+                      </button>
+                      <span className={`text-[10px] ${done ? "text-[var(--ok)]" : "text-[var(--muted)]"}`}>
+                        번역 {tr}/{total} · 더빙 {au}/{total}
+                      </span>
+                    </span>
                   );
                 })}
-                {/* ★언어별 진행 상태를 숫자로 드러낸다 — 번역·더빙이 실제로 채워졌는지
-                    눌러보지 않고 알 수 있어야 한다(자막·소리가 원문으로 나오는 사고 방지). */}
                 <span className="w-full text-[10px] text-[var(--muted)]">
-                  {(project.targetLanguages ?? []).map((lg) => {
-                    const label = LANGUAGES.find((l) => l.id === lg)?.label ?? lg;
-                    let total = 0, tr = 0, au = 0;
-                    for (const sc of project.scenes)
-                      for (const b of sc.cut?.bubbles ?? []) {
-                        if (b.speakerId === SFX_SPEAKER || !(b.text || "").trim()) continue;
-                        total++;
-                        if ((b.tracks?.[lg]?.text || "").trim()) tr++;
-                        if ((b.tracks?.[lg]?.audioUrl || "").trim()) au++;
-                      }
-                    const ok = tr === total && total > 0;
-                    return (
-                      <span key={lg} className={`mr-3 ${ok ? "" : "text-[var(--danger)]"}`}>
-                        {label}: 번역 {tr}/{total} · 더빙 {au}/{total}
-                      </span>
-                    );
-                  })}
-                  <span>※ 번역 채우기 → 그 언어 더빙 → 5단계 그 언어판 합성</span>
+                  버튼 하나로 번역 → 더빙까지 됩니다. 끝나면 5단계에서 그 언어판을 합성하세요.
                 </span>
               </div>
             )}
@@ -1773,19 +1796,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           );
         })}
         <span className="text-[var(--muted)]">· 한국어는 항상 병기</span>
-        {/* ★이미 추출을 끝낸 프로젝트를 위한 길 — 예전엔 다국어 번역이 '추출' 안에서만 돌아서,
-            켜도 tracks 가 영영 비어 있고 채우려면 전 컷 재추출(재OCR·재업로드)뿐이었다. */}
-        {(project.targetLanguages?.length ?? 0) > 0 && (
-          <button
-            type="button"
-            onClick={runTranslateJob}
-            disabled={translating}
-            className="rounded border border-[var(--accent)] px-2 py-0.5 text-[var(--accent)] hover:bg-[var(--panel-2)] disabled:opacity-50"
-            title="지금 있는 대사를 선택한 언어로 번역해 채웁니다. 텍스트만 다루므로 빠르고 쌉니다(재추출 불필요)."
-          >
-            {translating ? "번역 중…" : "🌐 지금 번역 채우기"}
-          </button>
-        )}
+        {/* ★'지금 번역 채우기' 버튼은 없앴다 — 번역은 중간 단계일 뿐인데 사용자가 그걸 알고
+            따로 눌러야 했다(내가 만든 잘못된 단계). 이제 "○○로 만들기" 가 번역이 덜 됐으면
+            알아서 채우고 더빙까지 잇는다. runTranslateJob 은 그 안에서만 호출된다. */}
       </div>
     );
   }
@@ -4696,10 +4709,23 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       {/* 더빙 버튼은 4단계(더빙이 있는 단계)로 옮겼다 — 5단계는 합성만. */}
                       <button
                         type="button"
-                        onClick={() => runComposeJob(lg)}
+                        onClick={async () => {
+                          // ★번역·더빙이 덜 돼 있으면 알아서 먼저 채우고 합성한다 —
+                          //   사용자가 순서를 외워 세 번 누르게 하지 않는다.
+                          const missing = projectRef.current.scenes.some((sc) =>
+                            (sc.cut?.bubbles ?? []).some(
+                              (b) =>
+                                b.speakerId !== SFX_SPEAKER &&
+                                (b.text || "").trim() &&
+                                !(b.tracks?.[lg]?.audioUrl || "").trim()
+                            )
+                          );
+                          if (missing) await makeLanguage(lg);
+                          await runComposeJob(lg);
+                        }}
                         disabled={busy || composeRunning || !project.scenes.some((x) => x.videoUrl)}
                         className="rounded bg-[var(--accent)] px-2.5 py-1 font-medium text-white disabled:opacity-40"
-                        title={`${label} 더빙·자막으로 최종 합성(파일명에 ${lg} 표시)`}
+                        title={`${label} 판을 만듭니다 — 번역·더빙이 덜 돼 있으면 먼저 채우고 합성합니다.`}
                       >
                         {label}판 합성
                       </button>
@@ -4713,7 +4739,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                 })}
               </div>
               <div className="mt-1.5 text-[10px] text-[var(--muted)]">
-                ※ 그 언어 번역·더빙이 먼저 채워져 있어야 합니다(🌐 지금 번역 채우기 → 더빙).
+                ※ 번역·더빙이 덜 돼 있으면 이 버튼이 알아서 먼저 채우고 합성합니다.
               </div>
             </div>
           )}
