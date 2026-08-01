@@ -2716,10 +2716,10 @@ export async function runDub(projectId, payload) {
     for (let si = 0; si < sugs.length; si++) {
       const sg = sugs[si];
       if (!sg || sg.enabled === false || !(sg.text || "").trim()) continue; // 끈 삽입 대사·빈 것 스킵
-      // 이미 오디오가 있어도 '지금 언어와 다른 방식/다른 언어로 만든 것' 이면 다시 만든다.
-      //   (예전 vocal_reaction 은 영어 서술을 목소리로 읽어 저장했다 — 그대로 두면 최종에 안 섞이고 버려진다.)
-      const sugStale = sg.type !== "sfx" && sg.gen !== "sfx" && (sg.lang ?? null) !== workingLang;
-      if (!force && (sg.audioUrl || "").trim() && !sugStale) { alreadyDone++; continue; }
+      // ★이미 오디오가 있으면 다시 만들지 않는다 — 돈이 드는 호출이다.
+      //   (언어가 안 맞는 예전 제안 음성은 합성에서 제외되므로 소리로 새어나가지 않는다.
+      //    다시 만들고 싶으면 그 컷에서 '이 컷 더빙' 을 누르면 된다 = 사용자가 비용을 결정.)
+      if (!force && (sg.audioUrl || "").trim()) { alreadyDone++; continue; }
       // ★vocal_reaction(헐떡임·한숨 같은 비언어 발성)은 '대사' 가 아니다. TTS 로 보내면
       //   "gasp of shock" 같은 영어 설명문을 목소리가 그대로 읽는다 → 효과음 경로로 만든다.
       if (sg.type === "sfx" || sg.type === "vocal_reaction") {
@@ -2765,6 +2765,8 @@ export async function runDub(projectId, payload) {
   let skipped = 0;
   const skippedWho = new Set(); // 목소리 미배정 화자(진단용)
   const fails = []; // ★TTS 실패 사유(줄마다) — 하나도 못 만들면 이걸 그대로 사용자에게 보여준다
+  let ttsChars = 0; // 실제로 합성한 글자 수(비용의 근거 — 사용자가 "얼마 쓰는지" 볼 수 있게)
+  let sfxGens = 0; // 효과음 생성 건수(글자 수와 과금 방식이 다름)
   for (let i = 0; i < units.length; i += C) {
     const chunk = units.slice(i, i + C);
     await Promise.all(
@@ -2775,6 +2777,7 @@ export async function runDub(projectId, payload) {
             // 효과음 — 한글 의성어를 영어 사운드 묘사로 바꿔 ElevenLabs Sound Effects.
             const desc = await sfxToEnglish(u.text, process.env.OPENAI_API_KEY);
             audio = await synthSfx(desc);
+            sfxGens++;
           } else if (!u.voice) {
             skipped++;
             // ★어느 '줄' 인지까지 남긴다 — 예전엔 "내레이터(나레이터 목소리 미지정)" 라고만 해서,
@@ -2790,6 +2793,7 @@ export async function runDub(projectId, payload) {
             return;
           } else {
             audio = await synthesize(u.voice.provider, u.voice.id, u.text, speed, u.emotion, u.lang || "");
+            ttsChars += String(u.text || "").length;
           }
           const { buf, ext, contentType } = audio;
           const slot = u.idx ?? u.sugIdx;
@@ -2865,10 +2869,26 @@ export async function runDub(projectId, payload) {
   );
   await saveProject(p2);
   try {
-    await recordCost({ projectId, vendor: "tts", model: "dub", costUsd: 0, meta: { kind: "dub", ok, skipped } });
+    // ★예전엔 costUsd 를 무조건 0 으로 박아, 더빙을 몇 번을 돌려도 화면 '추정 제작비' 가
+    //   움직이지 않았다 → 사용자가 얼마를 쓰는지 볼 방법이 없었다.
+    //   단가는 요금제마다 달라 내가 지어내지 않는다: env 로 넣으면 금액이 잡히고,
+    //   없으면 최소한 '글자 수·건수' 라는 사실을 기록해 남긴다.
+    const perK = Number(process.env.TTS_COST_PER_1K_CHARS || 0); // 예: 0.20 (USD/1000자)
+    const perSfx = Number(process.env.SFX_COST_PER_GEN || 0); // 예: 0.02 (USD/건)
+    const costUsd = (ttsChars / 1000) * perK + sfxGens * perSfx;
+    await recordCost({
+      projectId,
+      vendor: "tts",
+      model: `dub${workingLang ? `-${workingLang}` : ""}`,
+      costUsd,
+      meta: { kind: "dub", ok, skipped, ttsChars, sfxGens, lang: workingLang || "src" },
+    });
   } catch {}
   await log(
-    `${workingLang ? `${workingLang} ` : ""}더빙 완료: 생성 ${ok}개${skipped ? `, 목소리 미배정 스킵 ${skipped}개` : ""}` +
+    `${workingLang ? `${workingLang} ` : ""}더빙 완료: 생성 ${ok}개(음성 ${ttsChars}자` +
+      (sfxGens ? `, 효과음 ${sfxGens}건` : "") +
+      `)${alreadyDone ? `, 이미 있어 건너뜀 ${alreadyDone}개(비용 0)` : ""}` +
+      `${skipped ? `, 목소리 미배정 스킵 ${skipped}개` : ""}` +
       (fails.length ? `, 실패 ${fails.length}개` : "") +
       (missingLang ? `, ${workingLang} 번역 없는 ${missingLang}줄은 건너뜀` : "")
   );
