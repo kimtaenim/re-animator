@@ -58,6 +58,8 @@ export function cleanCameraWork(raw: unknown): CameraWork | undefined {
   // ★가속 줌·흔들림 속도 — 화이트리스트에서 빠지면 저장 시 사라진다(이 프로젝트 단골 사고).
   const za = clampNum(r.zoom_accel, 0, 12);
   if (za !== undefined) cw.zoom_accel = za;
+  const ah = clampNum(r.accel_hold, 0, 0.9);
+  if (ah !== undefined) cw.accel_hold = ah;
   const sh = clampNum(r.shake_hz, 0, 30);
   if (sh !== undefined) cw.shake_hz = sh;
   const sz = clampNum(r.start_zoom, 1, 3);

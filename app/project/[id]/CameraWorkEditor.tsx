@@ -209,14 +209,27 @@ export default function CameraWorkEditor({
           {/* ★버티고(달리줌)·패럴랙스도 같은 진행값을 쓰므로 가속이 그대로 걸린다(사용자 지정) —
               슬라이더가 안 보여서 조절을 못 했을 뿐이다. */}
           {preset !== "whip" && preset !== "shake" && (
-            <Slider
-              label="가속"
-              value={cw?.zoom_accel ?? 0}
-              min={0}
-              max={12}
-              step={0.5}
-              onChange={(v) => set({ zoom_accel: v })}
-            />
+            <>
+              {/* ★정지 구간 — 지수 가속만으로는 움직임이 끝 10% 에 몰려 뒷부분이 짧다(사용자 지적).
+                  0.5 면 "앞 절반 정지 · 뒤 절반에 줌 전체". 구간을 사람이 직접 나눈다. */}
+              <Slider
+                label="정지 구간"
+                value={cw?.accel_hold ?? 0}
+                min={0}
+                max={0.9}
+                step={0.05}
+                suffix="비율"
+                onChange={(v) => set({ accel_hold: v })}
+              />
+              <Slider
+                label="가속"
+                value={cw?.zoom_accel ?? 0}
+                min={0}
+                max={12}
+                step={0.5}
+                onChange={(v) => set({ zoom_accel: v })}
+              />
+            </>
           )}
           {/* 흔들 진폭 — ★기본 0. 예전엔 push/pan/crash 에 기본으로 들어가 '모든 화면이 흔들렸다'. */}
           {(preset === "shake" || preset === "push_in" || preset === "pan" || preset === "crash_zoom") && (

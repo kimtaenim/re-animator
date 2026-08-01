@@ -39,6 +39,7 @@
  * @property {number} [shake_damp]               셰이크 감쇠(1/s, exp(-damp*t)). 0=감쇠 없음(등진폭)
  * @property {number} [shake_hz]                 흔들리는 속도(초당 흔들림 수). 0=프레임마다(가장 빠른 진동)
  * @property {number} [zoom_accel]               ★가속 줌: 0=일정, 클수록 느리게 시작→급가속(p=t^(1+accel))
+ * @property {number} [accel_hold]               ★정지 구간 비율(0~0.9). 0.5=앞 절반 정지, 뒤 절반에서 줌 전체
  * @property {number} [start_zoom]               시작 줌 배율(기본 1.0). pull_out 은 >1 로 시작
  *
  * @typedef {Object} CameraState  한 시점의 crop 창 상태(정규화)
@@ -214,8 +215,12 @@ export function buildKeyframeTable(cw, opts = {}) {
     // ★가속 줌(zoom_accel) — "느리게 시작해서 뒤로 갈수록 급격히 빨라지는" 줌.
     //   0 = 기존 easing 그대로, 값이 클수록 초반이 더 느리고 후반이 더 급하다(p = off^(1+accel)).
     //   push_in/crash_zoom 의 핵심 표현이라 프리셋 기본값 + 슬라이더로 조절한다.
+    // ★정지 구간(accel_hold) — 지수 곡선만으로는 움직임이 '끝 10%' 에 몰려 뒷부분이 너무 짧다
+    //   (사용자 지적). hold=0.5 면 앞 절반은 완전히 멈춰 있고, 뒤 절반에서 줌 전체가 일어난다.
     const accel = Number(cw.zoom_accel) || 0;
-    const p = accel > 0 ? Math.pow(off, 1 + accel) : ease(easing, off); // 가감속된 진행
+    const hold = clamp(Number(cw.accel_hold) || 0, 0, 0.9);
+    const off2 = hold > 0 ? (off <= hold ? 0 : (off - hold) / (1 - hold)) : off;
+    const p = accel > 0 ? Math.pow(off2, 1 + accel) : ease(easing, off2); // 가감속된 진행
 
     // 인물(=주) 줌·중심
     const scale = startZoom + (endZoom - startZoom) * p;
@@ -389,14 +394,14 @@ export const CAMERA_PRESETS = {
   // ★흔들림(shake_amp_px)은 기본 0 — 사용자 지정. 예전엔 push/pan/crash 에 핸드헬드 그레인을
   //   기본으로 넣어 "모든 화면이 흔들린다" 가 됐다. 흔들림이 필요하면 슬라이더로 올린다.
   //   push_in 의 핵심은 흔들림이 아니라 '가속 줌'(zoom_accel) 이다.
-  push_in: { zoom_rate_pct_per_s: 12, zoom_accel: 4, drift_px_per_s: { x: 12, y: -8 }, shake_seed: 2, shake_amp_px: 0, shake_hz: 6, shake_damp: 0, easing: "easeInOut" }, // 거의 멈춰 있다가 확 파고드는 푸시
+  push_in: { zoom_rate_pct_per_s: 12, zoom_accel: 1.5, accel_hold: 0.5, drift_px_per_s: { x: 12, y: -8 }, shake_seed: 2, shake_amp_px: 0, shake_hz: 6, shake_damp: 0, easing: "easeInOut" }, // 앞 절반 정지 → 뒤 절반에서 파고든다
   pull_out: { zoom_rate_pct_per_s: -8, start_zoom: 1.5, easing: "easeOut" }, // 확 빠지는 리빌
   // 팬: 방향·속도는 drift_px_per_s(x=가로, y=세로)로 지정한다. 양수 x=오른쪽으로 흐름,
   //   음수 x=왼쪽. y 도 같은 규칙(음수=위). 가속도 zoom_accel 로 팬 진행에 함께 걸린다.
   pan: { zoom_rate_pct_per_s: 2, start_zoom: 1.55, drift_px_per_s: { x: 60, y: 0 }, shake_seed: 3, shake_amp_px: 0, shake_hz: 6, shake_damp: 0, easing: "easeInOut" }, // 트래킹 팬
   static: { zoom_rate_pct_per_s: 0, easing: "linear" },
   shake: { zoom_rate_pct_per_s: 0, start_zoom: 1.15, shake_seed: 1, shake_amp_px: 24, shake_hz: 10, shake_damp: 0, easing: "linear" }, // 거친 핸드헬드(이 프리셋만 기본 흔들림)
-  crash_zoom: { zoom_rate_pct_per_s: 30, zoom_accel: 8, shake_seed: 4, shake_amp_px: 0, shake_hz: 8, shake_damp: 0, easing: "easeIn" }, // 멈춘 듯하다 마지막에 한 번에 때려박는 크래시
+  crash_zoom: { zoom_rate_pct_per_s: 30, zoom_accel: 2, accel_hold: 0.6, shake_seed: 4, shake_amp_px: 0, shake_hz: 8, shake_damp: 0, easing: "easeIn" }, // 60% 정지 → 40% 구간에 때려박는 크래시
   whip: { zoom_rate_pct_per_s: 0, easing: "linear" }, // 전환 속성(§2), 후처리는 전환 경로
   // 계층 B 도 같은 진행값(p)을 쓰므로 가속이 그대로 걸린다 — 달리줌도 '거의 멈췄다 확' 이 된다.
   parallax_push: { zoom_rate_pct_per_s: 6.0, zoom_accel: 3, bg_scale_delta_pct_per_s: 4.0, drift_px_per_s: { x: 10, y: 0 }, easing: "easeInOut" },
