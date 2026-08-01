@@ -140,7 +140,7 @@ async function tick(types) {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log("[worker] BUILD = fixes-v18 (언어별 더빙을 4단계로 · 선택/안된것만 항상 노출)");
+console.log("[worker] BUILD = lang-guard-v19 (번역 없으면 원문으로 조용히 더빙·합성하던 폴백 차단 + 언어별 진행 표시)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);

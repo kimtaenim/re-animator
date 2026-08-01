@@ -203,6 +203,22 @@ export async function runCompose(projectId, payload) {
   //   payload.lang 없으면 기존대로 project.workingLanguage 사용(회귀 0).
   const outLang = payload?.lang != null ? String(payload.lang).trim() : null;
   const workingLang = (outLang ?? p.workingLanguage ?? "").trim(); // 자막·오디오 언어
+  // ★★언어판을 요청했는데 그 언어 번역이 하나도 없으면 '전부 원문' 인 파일이 만들어진다 —
+  //   사용자는 일본어판인 줄 알고 받는데 자막·소리가 중국어다(실제 보고). 조용한 폴백을 막는다.
+  if (outLang) {
+    const has = (p.scenes ?? []).some((sc) =>
+      (sc.cut?.bubbles ?? []).some((b) => b.speakerId !== "__sfx__" && (b.tracks?.[outLang]?.text || "").trim())
+    );
+    if (!has)
+      throw new Error(
+        `${outLang} 번역이 하나도 없어요 — 4단계에서 🌐 '지금 번역 채우기' 를 먼저 하세요(그 다음 ${outLang} 더빙 → 합성)`
+      );
+    const hasAudio = (p.scenes ?? []).some((sc) =>
+      (sc.cut?.bubbles ?? []).some((b) => (b.tracks?.[outLang]?.audioUrl || "").trim())
+    );
+    if (!hasAudio)
+      await log(`⚠ ${outLang} 더빙 오디오가 없습니다 — 자막만 ${outLang}, 소리는 원문으로 나갑니다. 4단계 🎙 ${outLang} 더빙 먼저.`);
+  }
   // 자막 씬(무성영화 카드, text 컷)은 영상 없이도 합성 대상 — 검은 배경+카드로 직접 렌더.
   const isCardScene = (s) => !s.videoUrl && s.cut?.type === "text" && subtitleUnits(s.cut, workingLang).length > 0;
   const scenes = (p.scenes ?? [])

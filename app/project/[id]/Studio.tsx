@@ -1718,8 +1718,27 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     </button>
                   );
                 })}
-                <span className="text-[10px] text-[var(--muted)]">
-                  ※ 먼저 🌐 지금 번역 채우기 → 여기서 그 언어 더빙 → 5단계에서 그 언어판 합성
+                {/* ★언어별 진행 상태를 숫자로 드러낸다 — 번역·더빙이 실제로 채워졌는지
+                    눌러보지 않고 알 수 있어야 한다(자막·소리가 원문으로 나오는 사고 방지). */}
+                <span className="w-full text-[10px] text-[var(--muted)]">
+                  {(project.targetLanguages ?? []).map((lg) => {
+                    const label = LANGUAGES.find((l) => l.id === lg)?.label ?? lg;
+                    let total = 0, tr = 0, au = 0;
+                    for (const sc of project.scenes)
+                      for (const b of sc.cut?.bubbles ?? []) {
+                        if (b.speakerId === SFX_SPEAKER || !(b.text || "").trim()) continue;
+                        total++;
+                        if ((b.tracks?.[lg]?.text || "").trim()) tr++;
+                        if ((b.tracks?.[lg]?.audioUrl || "").trim()) au++;
+                      }
+                    const ok = tr === total && total > 0;
+                    return (
+                      <span key={lg} className={`mr-3 ${ok ? "" : "text-[var(--danger)]"}`}>
+                        {label}: 번역 {tr}/{total} · 더빙 {au}/{total}
+                      </span>
+                    );
+                  })}
+                  <span>※ 번역 채우기 → 그 언어 더빙 → 5단계 그 언어판 합성</span>
                 </span>
               </div>
             )}

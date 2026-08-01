@@ -2634,7 +2634,19 @@ export async function runDub(projectId, payload) {
       //   효과음(__sfx__)은 언어 무관. 미설정·번역 없으면 기존대로 원문(b.text) → b.audioUrl.
       const langText = workingLang && b.speakerId !== "__sfx__" ? (b.tracks?.[workingLang]?.text || "").trim() : "";
       const useLang = !!langText;
-      // 번역이 없으면 원문을 더빙한다(줄을 잃지 않는 게 우선). 누락 수는 아래 로그로 알린다.
+      // ★★언어별 더빙(payload.lang)에서 그 언어 번역이 없는 줄은 '건너뛴다' —
+      //   예전엔 원문으로 더빙하려 했는데, 그러면 (a) 일본어 더빙인데 원문 소리가 생기고
+      //   (b) '이미 더빙됨' 판정이 원문 오디오를 봐서 대부분이 스킵되고, 남은 몇 줄이
+      //   화자 미지정이면 "목소리 미배정" 이라는 엉뚱한 에러가 났다(사용자 보고 — 목소리는
+      //   멀쩡히 지정돼 있었다). 진짜 원인은 '그 언어 번역이 없음' 이다.
+      // ★언어가 정해져 있으면(작업 언어든 payload.lang 이든) 그 언어 번역이 없는 줄은 건너뛴다.
+      //   예전엔 payload.lang 일 때만 막아서, 일반 '더빙' 버튼은 작업 언어가 일본어여도 번역이
+      //   없으면 원문(중국어)을 더빙했다 — 더빙을 두 번 눌러도 계속 중국어(사용자 보고).
+      const langDub = !!workingLang;
+      if (langDub && b.speakerId !== "__sfx__" && !useLang) {
+        missingLang++;
+        continue; // 번역 없는 줄은 이 언어 더빙 대상이 아니다
+      }
       if (workingLang && b.speakerId !== "__sfx__" && !useLang) missingLang++;
       const text = useLang ? langText : (b.text || "").trim();
       if (!text) continue;
@@ -2644,7 +2656,7 @@ export async function runDub(projectId, payload) {
         units.push({ s, kind: "sfx", idx: i, text, voice: "__sfx__" }); // 효과음 줄 → 소리 생성
       } else {
         // 화자 null = 내레이터. 캐릭터 대사·내레이션 모두 이 한 경로로만 더빙된다. lang 있으면 그 언어 트랙에 저장.
-        units.push({ s, kind: "bubble", idx: i, text, voice: resolve(b.speakerId), emotion: b.emotion, lang: useLang ? workingLang : "" });
+        units.push({ s, kind: "bubble", idx: i, text, voice: resolve(b.speakerId), spk: b.speakerId ?? null, emotion: b.emotion, lang: useLang ? workingLang : "" });
       }
     }
     // ── 오디오 제안(§6) 생성 — enabled 인 것만. sfx=효과음, vocal_reaction/insert_line=배역 발성(TTS). ──
@@ -2660,18 +2672,27 @@ export async function runDub(projectId, payload) {
     }
   }
   if (!units.length) {
+    // ★언어별 더빙인데 그 언어 번역이 없어서 대상이 0이면, 그걸 정확히 말한다.
+    if (workingLang && missingLang > 0) {
+      throw new Error(
+        `${workingLang} 번역이 없어 더빙할 게 없어요(${missingLang}줄) — 🌐 '지금 번역 채우기' 를 먼저 하세요`
+      );
+    }
     if (alreadyDone > 0) {
       await log(`이미 다 더빙됨(${alreadyDone}줄) — 새로 만들 게 없어요. 바꾼 줄은 '이 컷 더빙'으로.`);
       return 0;
     }
     throw new Error("더빙할 대사·내레이션이 없어요");
   }
+  if (missingLang > 0 && workingLang)
+    await log(`[진단] ${workingLang} 번역 없는 ${missingLang}줄은 건너뜀 — 번역 채우고 다시 더빙하면 포함됩니다`);
 
   await log(`더빙 대상 ${units.length}개 — 목소리 생성 시작`);
   const C = Number(process.env.DUB_CONCURRENCY || 2);
   let done = 0;
   let ok = 0;
   let skipped = 0;
+  const skippedWho = new Set(); // 목소리 미배정 화자(진단용)
   for (let i = 0; i < units.length; i += C) {
     const chunk = units.slice(i, i + C);
     await Promise.all(
@@ -2684,7 +2705,11 @@ export async function runDub(projectId, payload) {
             audio = await synthSfx(desc);
           } else if (!u.voice) {
             skipped++;
-            return; // 목소리 미배정 → 스킵
+            // ★어느 화자가 미배정인지 남긴다 — "이미 지정했는데 왜?" 를 바로 가릴 수 있게.
+            //   spk=null 이면 내레이터(project.narratorVoice 미지정), 값이 있으면 그 캐릭터.
+            const who = u.spk == null ? "내레이터(나레이터 목소리 미지정)" : `캐릭터 id ${String(u.spk).slice(0, 8)}`;
+            skippedWho.add(who);
+            return;
           } else {
             audio = await synthesize(u.voice.provider, u.voice.id, u.text, speed, u.emotion, u.lang || "");
           }
@@ -2720,7 +2745,10 @@ export async function runDub(projectId, payload) {
 
   // 하나도 못 만들고 전부 목소리 미배정으로 스킵됐으면 → 조용히 넘기지 말고 명확히 알린다.
   if (ok === 0 && skipped > 0) {
-    throw new Error(`목소리 미배정 — 캐스팅에서 캐릭터 목소리/나레이터를 먼저 지정하세요 (${skipped}줄 스킵)`);
+    throw new Error(
+      `목소리 미배정 (${skipped}줄) — ${[...skippedWho].join(", ") || "화자 불명"}. ` +
+        `캐스팅에서 그 목소리를 지정하세요.`
+    );
   }
 
   // 저장 — 이번에 만진 씬의 '컷'만 교체(오디오·승격 반영). videoUrl 등 씬의 다른 필드는 최신 것을
