@@ -75,6 +75,25 @@ export async function getProgress(projectId) {
   }
 }
 
+// ── 더빙 전용 진행/진단 로그 ────────────────────────────────────────────────
+// ★왜 별도 키인가: 더빙은 영상 잡과 '병렬'로 걸 수 있어서 공유 진행로그(split:progress)에
+//   쓰면 동영상 진행 표시를 덮어쓴다. 그렇다고 콘솔(Render)에만 남기면 사용자는 왜 안 됐는지
+//   앱에서 볼 방법이 없다 — "일본어 더빙이 안 된다"의 원인을 화면에서 못 본 게 이 때문이다.
+//   → 더빙 잡 전용 리스트에 남기고, /api/job 이 dub 잡일 때 이걸 돌려준다.
+const dubKey = (projectId) => `dub:progress:${projectId}`;
+export async function resetDubLog(projectId) {
+  try {
+    await redis.del(dubKey(projectId));
+  } catch {}
+}
+export async function logDub(projectId, msg) {
+  try {
+    const line = `${new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(11, 23)} ${msg}`;
+    await redis.rpush(dubKey(projectId), line);
+    await redis.expire(dubKey(projectId), 3600);
+  } catch {}
+}
+
 // 행 프로파일 저장(base64 Float32) — 앱이 '그 컷만 분할'을 워커 없이 즉시 계산하게.
 export async function saveRowProfile(projectId, base64) {
   try {

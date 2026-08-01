@@ -1212,11 +1212,17 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   ⚙️
                 </button>
               )}
-              {b.audioUrl ? (
+              {bubbleAudio(b) ? (
                 <button
                   type="button"
-                  onClick={() => playAudio(b.audioUrl!)}
-                  title={isSfx ? "효과음 생성됨 — 듣기" : "더빙됨 — 듣기"}
+                  onClick={() => playAudio(bubbleAudio(b))}
+                  title={
+                    isSfx
+                      ? "효과음 생성됨 — 듣기"
+                      : (project.workingLanguage ?? "") && (b.tracks?.[project.workingLanguage!]?.audioUrl || "").trim()
+                        ? `${LANGUAGES.find((l) => l.id === project.workingLanguage)?.label ?? project.workingLanguage} 더빙 — 듣기`
+                        : "더빙됨 — 듣기"
+                  }
                   className="shrink-0 rounded border border-[var(--ok)] px-1.5 py-1 leading-none text-[var(--ok)] hover:bg-[var(--panel-2)]"
                 >
                   🔊
@@ -1667,7 +1673,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // ★★"○○로 만들기" — 번역 → 더빙을 한 버튼으로 잇는다.
   //   순서를 사람이 외우고 세 버튼을 차례로 누르게 하는 건 잘못된 설계였다(사용자 지적).
   //   번역이 이미 다 돼 있으면 번역은 건너뛰고 더빙만 한다.
-  async function makeLanguage(lang: string) {
+  // 반환값 = 그 언어 더빙까지 실제로 끝났는지. 5단계 언어판 합성이 이걸 보고 진행한다.
+  async function makeLanguage(lang: string): Promise<boolean> {
     setError("");
     try {
       // 1) 이 언어 번역이 덜 됐으면 먼저 채운다.
@@ -1681,12 +1688,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           await toggleTargetLanguage(lang); // 대상 언어가 꺼져 있으면 켠다
         }
         const okTr = await runTranslateJob();
-        if (!okTr) return; // 번역 실패하면 더빙으로 넘어가지 않는다
+        if (!okTr) return false; // 번역 실패하면 더빙으로 넘어가지 않는다
       }
-      // 2) 그 언어로 더빙(번역 없는 줄은 워커가 건너뛴다).
-      await runDubJob(undefined, lang);
+      // 2) 그 언어로 더빙(번역 없는 줄은 워커가 건너뛴다). ★완료까지 기다린다.
+      return await runDubJob(undefined, lang);
     } catch (e) {
       setError(e instanceof Error ? e.message : `${lang} 만들기 실패`);
+      return false;
     }
   }
 
@@ -1757,6 +1765,23 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       <span className={`text-[10px] ${done ? "text-[var(--ok)]" : "text-[var(--muted)]"}`}>
                         번역 {tr}/{total} · 더빙 {au}/{total}
                       </span>
+                      {/* ★그 언어 더빙을 '작업 언어를 바꾸지 않고' 바로 들어본다 — 만들어졌는지
+                          확인할 방법이 앱에 없었다(그래서 "일본어 더빙이 안 된다"를 확인할 수 없었다). */}
+                      {au > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const s = project.scenes.find((sc) =>
+                              (sc.cut?.bubbles ?? []).some((b) => (b.tracks?.[lg]?.audioUrl || "").trim())
+                            );
+                            if (s) playSceneAudio(s, lg);
+                          }}
+                          title={`${label} 더빙 들어보기 — 더빙된 첫 컷을 재생합니다`}
+                          className="rounded border border-[var(--ok)] px-1.5 py-0.5 text-[var(--ok)] hover:bg-[var(--panel-2)]"
+                        >
+                          🔊
+                        </button>
+                      )}
                     </span>
                   );
                 })}
@@ -2066,6 +2091,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [dubbing, setDubbing] = useState(false); // 더빙 잡 진행 중(비디오와 무관)
   const dubPollRef = useRef<ReturnType<typeof setInterval> | null>(null); // 더빙 폴링 인터벌 — 정지 시 중단용
   const dubStartingRef = useRef(false); // 더빙 적재 진행 중(동기 가드) — fetch 도중 재클릭 이중 적재 방지
+  // ★더빙 '완료' 를 기다릴 수 있게 하는 resolver — 예전엔 runDubJob 이 잡을 적재만 하고 즉시
+  //   리턴해서, 5단계 '언어판 합성' 이 더빙이 끝나기 전에 합성을 걸었다(그래서 일본어판에
+  //   일본어 소리가 안 들어갔다). 이제 호출측이 await 로 실제 완료를 기다린다.
+  const dubResolveRef = useRef<((ok: boolean) => void) | null>(null);
   const [dubMsg, setDubMsg] = useState<string | null>(null); // 더빙 완료/실패 안내(잠깐 표시)
   // ── 후처리 줌(postfx) — Grok 원본에 줌 커브를 실픽셀로 굽는 잡. fxUrl 이 미리보기·합성에 쓰임. ──
   async function runFxJob(sceneIds: string[], effect: string, strength: number, openPreviewId?: string) {
@@ -2215,8 +2244,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }
 
   // lang 을 주면 그 언어 트랙에 더빙을 채운다(작업 언어 무관, §10).
-  async function runDubJob(sceneIds?: string[], lang?: string) {
-    if (dubbing || dubStartingRef.current) return; // ★동기 가드 — 상태(dubbing)는 fetch 후에야 켜져서 그 틈의 재클릭을 막지 못함
+  // 반환값 = 더빙이 '실제로 끝났고 성공했는지'. 호출측(언어판 만들기·언어판 합성)이 이걸
+  // 기다려야 순서가 보장된다 — 예전엔 적재만 하고 즉시 리턴해서 합성이 먼저 돌았다.
+  async function runDubJob(sceneIds?: string[], lang?: string): Promise<boolean> {
+    if (dubbing || dubStartingRef.current) return false; // ★동기 가드 — 상태(dubbing)는 fetch 후에야 켜져서 그 틈의 재클릭을 막지 못함
     dubStartingRef.current = true;
     setError("");
     setDubMsg(null);
@@ -2231,15 +2262,26 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "더빙 실패");
       setDubbing(true);
-      pollDubJob(d.jobId as string);
+      dubStartingRef.current = false; // 적재 끝 — 여기서부터는 완료 대기(가드는 dubbing 이 맡는다)
+      return await pollDubJob(d.jobId as string);
     } catch (e) {
       setError(e instanceof Error ? e.message : "더빙 실패");
+      return false;
     } finally {
       dubStartingRef.current = false;
     }
   }
   // 더빙 잡 상태 폴링 → 끝나면 씬(오디오 URL) 새로고침. 비디오 폴링과 별개.
-  function pollDubJob(jobId: string) {
+  // 완료(성공 true / 실패·정지·타임아웃 false)까지 기다릴 수 있도록 Promise 를 돌려준다.
+  function pollDubJob(jobId: string): Promise<boolean> {
+   return new Promise<boolean>((resolveDone) => {
+    dubResolveRef.current = resolveDone;
+    const finish = (okDone: boolean) => {
+      if (dubResolveRef.current) {
+        dubResolveRef.current = null;
+        resolveDone(okDone);
+      }
+    };
     let tries = 0;
     if (dubPollRef.current) clearInterval(dubPollRef.current);
     const iv = setInterval(async () => {
@@ -2273,15 +2315,18 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             const cd = await cr.json();
             if (cd.ok) setCostKrw(cd.krw);
           } catch {}
+          finish(d.status === "done"); // ★프로젝트 재읽기까지 끝난 뒤에 완료 통보(합성이 최신 오디오를 보게)
         }
       } catch {}
       if (tries > 260) {
         clearInterval(iv);
         dubPollRef.current = null;
         setDubbing(false);
+        finish(false);
       }
     }, 3000);
     dubPollRef.current = iv;
+   });
   }
   // 더빙 정지 — 워커는 별도 서버라 프로세스는 못 죽이지만(백그라운드서 끝남), UI 폴링을 멈추고
   //   상태를 풀어 준다(비디오 '중지'와 같은 성격). 이미 만든 오디오는 유지.
@@ -2292,6 +2337,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     }
     setDubbing(false);
     setProgress("");
+    // 기다리던 호출측(언어판 합성 등)에 '완료 못 함'을 알린다 — 안 그러면 영원히 매달린다.
+    if (dubResolveRef.current) {
+      const r = dubResolveRef.current;
+      dubResolveRef.current = null;
+      r(false);
+    }
     setDubMsg("더빙 정지됨 — 이미 만든 줄은 유지돼요(다시 '더빙'으로 이어서)");
     setTimeout(() => setDubMsg(null), 6000);
   }
@@ -2308,10 +2359,22 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       /* ignore */
     }
   }
+  // ★★이 줄에서 '들려줄' 오디오 — 작업 언어가 정해져 있으면 그 언어 트랙 오디오를 먼저 본다.
+  //   예전엔 재생 경로가 b.audioUrl(원어)만 봐서, 일본어 더빙이 성공해도 앱에서 들을 방법이
+  //   없었다(만든 쪽 tracks[lang].audioUrl ↔ 읽는 쪽 b.audioUrl 불일치). 그래서 사용자에겐
+  //   "일본어 더빙이 안 된다"로 보였다. lang 인자를 주면 그 언어를 강제로 듣는다(언어판 확인용).
+  type Bub = NonNullable<NonNullable<Project["scenes"][number]["cut"]>["bubbles"]>[number];
+  const bubbleAudio = (b: Bub, lang?: string): string => {
+    const lg = (lang ?? project.workingLanguage ?? "").trim();
+    return (lg && (b.tracks?.[lg]?.audioUrl || "").trim()) || b.audioUrl || "";
+  };
   // 씬 오디오 전체 재생 — 말풍선(대사·내레이션·효과음) audioUrl 순서대로. 효과음도 소리로 재생.
-  function playSceneAudio(s: Project["scenes"][number]) {
+  function playSceneAudio(s: Project["scenes"][number], lang?: string) {
     const urls: string[] = [];
-    for (const b of s.cut?.bubbles ?? []) if (b.audioUrl) urls.push(b.audioUrl);
+    for (const b of s.cut?.bubbles ?? []) {
+      const u = bubbleAudio(b, lang);
+      if (u) urls.push(u);
+    }
     if (s.cut?.narrationAudioUrl) urls.push(s.cut.narrationAudioUrl);
     if (!urls.length) return;
     let i = 0;
@@ -2327,7 +2390,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }
   // 이 씬에 더빙 오디오가 하나라도 있나(재생 버튼 표시용). 효과음 줄 포함.
   const sceneHasAudio = (s: Project["scenes"][number]) =>
-    (s.cut?.bubbles ?? []).some((b) => b.audioUrl) || !!s.cut?.narrationAudioUrl;
+    (s.cut?.bubbles ?? []).some((b) => bubbleAudio(b)) || !!s.cut?.narrationAudioUrl;
 
   // 자막 '유닛' 배열 — 각 말풍선/내레이션 조각이 별개 박스(겹치지 않게). compose 와 동일 규칙.
   // ★효과음(화자=효과음) 줄은 자막에서 제외(소리일 뿐 캡션 아님).
@@ -4720,7 +4783,13 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                                 !(b.tracks?.[lg]?.audioUrl || "").trim()
                             )
                           );
-                          if (missing) await makeLanguage(lg);
+                          // ★더빙이 '실제로 끝난 뒤' 합성한다 — 예전엔 더빙 잡을 적재만 하고
+                          //   바로 합성을 걸어서, 일본어 오디오가 아직 없는 채로 합성됐다
+                          //   (자막만 일본어·소리는 원문). 실패하면 합성으로 넘어가지 않는다.
+                          if (missing) {
+                            const okDub = await makeLanguage(lg);
+                            if (!okDub) return;
+                          }
                           await runComposeJob(lg);
                         }}
                         disabled={busy || composeRunning || !project.scenes.some((x) => x.videoUrl)}

@@ -21,7 +21,11 @@ process.on("uncaughtException", (e) => {
 const POLL_MS = 3000;
 const JOB_TIMEOUT_MS = 12 * 60 * 1000; // 12분(재생성 배치 여유)
 
-const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen", "video", "compose", "join", "portrait", "dub", "postfx", "camerafx", "sequence", "translate"];
+// ★큐 우선순위(앞에 있는 타입을 먼저 집는다) — 순서가 '소비 관계' 를 따라야 한다.
+//   예전엔 compose/join 이 dub·translate 보다 앞에 있어서, 언어판 만들기처럼 더빙과 합성이
+//   같이 큐에 들어가면 합성이 먼저 실행됐다 → 일본어 더빙 오디오가 없는 채로 합성돼
+//   "자막만 일본어, 소리는 원문" 이 됐다. 합성은 다른 잡의 결과를 먹는 마지막 단계이므로 맨 뒤.
+const TYPES = ["split", "resplit", "splitcut", "mergecut", "extract", "cast", "regen", "video", "portrait", "translate", "dub", "postfx", "camerafx", "sequence", "compose", "join"];
 const JOB_STEP = {
   split: "source",
   resplit: "source",
@@ -140,7 +144,7 @@ async function tick(types) {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log("[worker] BUILD = onebutton-v20 (언어판을 버튼 하나로 — 번역·더빙 자동 연결)");
+console.log("[worker] BUILD = jadub-v21 (더빙 실패를 성공으로 끝내지 않음 + 더빙 전용 로그 + 합성은 맨 뒤)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 for (;;) {
   await tick(TYPES);

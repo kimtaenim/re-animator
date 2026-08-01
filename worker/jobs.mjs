@@ -20,6 +20,8 @@ import {
   saveRowProfile,
   recordCost,
   enqueueJob,
+  logDub,
+  resetDubLog,
 } from "./store.mjs";
 import sharp from "sharp";
 import { computeRowProfile, extractRegion, trimBox } from "./imaging.mjs";
@@ -2579,8 +2581,14 @@ export async function runCameraFx(projectId, payload) {
 
 export async function runDub(projectId, payload) {
   // ★비디오 잡과 '병렬'로 돌 수 있으므로 공유 진행로그(resetProgress/logProgress)·단계 상태를
-  //   건드리지 않는다(그러면 동영상 진행 표시가 깨짐). 진행은 잡 상태로 앱이 추적, 상세는 콘솔.
-  const log = async (m) => console.error("[dub]", m);
+  //   건드리지 않는다(그러면 동영상 진행 표시가 깨짐).
+  // ★단 '콘솔에만' 남기면 사용자는 왜 더빙이 안 됐는지 앱에서 볼 수 없다(=이번 문제).
+  //   더빙 전용 로그 키에 남기고 /api/job(dub 잡)이 그대로 화면에 흘린다.
+  await resetDubLog(projectId);
+  const log = async (m) => {
+    console.error("[dub]", m);
+    await logDub(projectId, m);
+  };
   const p = await getProject(projectId);
   if (!p) throw new Error("프로젝트를 찾을 수 없어요");
   const cast = p.cast ?? [];
@@ -2693,6 +2701,7 @@ export async function runDub(projectId, payload) {
   let ok = 0;
   let skipped = 0;
   const skippedWho = new Set(); // 목소리 미배정 화자(진단용)
+  const fails = []; // ★TTS 실패 사유(줄마다) — 하나도 못 만들면 이걸 그대로 사용자에게 보여준다
   for (let i = 0; i < units.length; i += C) {
     const chunk = units.slice(i, i + C);
     await Promise.all(
@@ -2705,10 +2714,16 @@ export async function runDub(projectId, payload) {
             audio = await synthSfx(desc);
           } else if (!u.voice) {
             skipped++;
-            // ★어느 화자가 미배정인지 남긴다 — "이미 지정했는데 왜?" 를 바로 가릴 수 있게.
-            //   spk=null 이면 내레이터(project.narratorVoice 미지정), 값이 있으면 그 캐릭터.
-            const who = u.spk == null ? "내레이터(나레이터 목소리 미지정)" : `캐릭터 id ${String(u.spk).slice(0, 8)}`;
-            skippedWho.add(who);
+            // ★어느 '줄' 인지까지 남긴다 — 예전엔 "내레이터(나레이터 목소리 미지정)" 라고만 해서,
+            //   내레이터가 없는 작품인데 나레이터 목소리를 지정하라는 엉뚱한 안내가 됐다.
+            //   실제로는 '화자가 지정되지 않은 대사 줄' 이다(화자 미지정=내레이터로 처리되는 구조).
+            //   컷 번호와 대사 앞부분을 주면 사용자가 바로 그 줄로 가서 화자를 고르거나 지울 수 있다.
+            const where = `컷 ${u.s.order + 1} “${String(u.text).replace(/\s+/g, " ").slice(0, 14)}”`;
+            skippedWho.add(
+              u.spk == null
+                ? `${where} — 화자 미지정`
+                : `${where} — ${cast.find((c) => c.id === u.spk)?.label ?? "캐릭터"} 목소리 미지정`
+            );
             return;
           } else {
             audio = await synthesize(u.voice.provider, u.voice.id, u.text, speed, u.emotion, u.lang || "");
@@ -2732,7 +2747,13 @@ export async function runDub(projectId, payload) {
           }
           ok++;
         } catch (e) {
-          await log(`더빙 실패(컷 ${u.s.order + 1}): ${String(e?.message ?? e).slice(0, 120)}`);
+          // ★실패를 '삼키지' 않는다 — 예전엔 여기서 로그만 남기고 넘어가, 모든 줄이 실패해도
+          //   잡은 성공으로 끝났다(화면엔 "✓ 더빙 완료"만 뜨고 원인은 Render 로그에만).
+          //   그게 "일본어 더빙이 안 되는데 이유를 모르겠다" 의 원인이다.
+          const why = String(e?.message ?? e).slice(0, 160);
+          const who = u.voice ? `${u.voice.provider}/${u.voice.name ?? u.voice.id}` : u.kind;
+          fails.push(`컷 ${u.s.order + 1}(${who}): ${why}`);
+          await log(`더빙 실패(컷 ${u.s.order + 1}, ${who}): ${why}`);
         }
       })
     );
@@ -2743,13 +2764,28 @@ export async function runDub(projectId, payload) {
   // 효과음 줄(__sfx__)은 절제해서 사용: 검출된 것만 통제 가능한 줄로 등록되고, 사용자가 남긴 줄만
   // ElevenLabs 효과음으로 생성된다(원치 않으면 편집기에서 삭제). 실패해도 그 줄만 스킵(위 try/catch).
 
-  // 하나도 못 만들고 전부 목소리 미배정으로 스킵됐으면 → 조용히 넘기지 말고 명확히 알린다.
-  if (ok === 0 && skipped > 0) {
-    throw new Error(
-      `목소리 미배정 (${skipped}줄) — ${[...skippedWho].join(", ") || "화자 불명"}. ` +
-        `캐스팅에서 그 목소리를 지정하세요.`
-    );
+  // 하나도 못 만들었으면 → 조용히 '완료' 로 끝내지 말고, 진짜 이유를 그대로 올린다.
+  if (ok === 0) {
+    const langTag = workingLang ? `${workingLang} ` : "";
+    if (fails.length) {
+      // TTS 가 거절한 이유(모델·언어·키·크레딧)를 그대로 보여준다 — 추측하게 만들지 않는다.
+      throw new Error(`${langTag}더빙 실패 ${fails.length}줄 — ${fails.slice(0, 2).join(" / ")}`);
+    }
+    if (skipped > 0) {
+      // ★안내를 정확히 — 화자 미지정 줄은 '나레이터 목소리를 지정하라' 가 아니라
+      //   '그 줄의 화자를 고르거나 줄을 지워라' 가 맞다(내레이터가 없는 작품이 대부분).
+      const noSpeaker = [...skippedWho].some((w) => w.includes("화자 미지정"));
+      throw new Error(
+        `${langTag}더빙 못 한 ${skipped}줄 — ${[...skippedWho].slice(0, 3).join(" / ")}` +
+          (noSpeaker
+            ? `. 그 줄의 화자를 지정하거나(대사 줄의 화자 드롭다운) 대사가 아니면 줄을 지우세요. 내레이터가 없는 작품이면 나레이터 목소리는 지정할 필요 없습니다`
+            : `. 캐스팅에서 그 목소리를 지정하세요`) +
+          (alreadyDone > 0 ? `. (나머지 ${alreadyDone}줄은 이미 더빙돼 있습니다)` : "")
+      );
+    }
   }
+  // 일부만 실패해도 사용자가 알 수 있게 남긴다(잡은 성공 — 만든 것은 유지).
+  if (fails.length) await log(`⚠ ${fails.length}줄 실패 — ${fails[0]}`);
 
   // 저장 — 이번에 만진 씬의 '컷'만 교체(오디오·승격 반영). videoUrl 등 씬의 다른 필드는 최신 것을
   // 유지 → 병렬 비디오 결과를 안 지움. (비디오는 scene.videoUrl 을, 더빙은 scene.cut 을 쓴다.)
@@ -2763,9 +2799,12 @@ export async function runDub(projectId, payload) {
     await recordCost({ projectId, vendor: "tts", model: "dub", costUsd: 0, meta: { kind: "dub", ok, skipped } });
   } catch {}
   await log(
-    `더빙 완료: 생성 ${ok}개${skipped ? `, 목소리 미배정 스킵 ${skipped}개` : ""}` +
+    `${workingLang ? `${workingLang} ` : ""}더빙 완료: 생성 ${ok}개${skipped ? `, 목소리 미배정 스킵 ${skipped}개` : ""}` +
+      (fails.length ? `, 실패 ${fails.length}개` : "") +
       (missingLang ? `, ${workingLang} 번역 없는 ${missingLang}줄은 건너뜀` : "")
   );
+  // 스킵된 줄이 있으면 '어느 줄인지' 까지 남긴다 — 성공한 잡에서도 빠진 줄을 찾을 수 있게.
+  if (skipped > 0) await log(`⚠ 목소리 없어 못 만든 ${skipped}줄: ${[...skippedWho].slice(0, 5).join(" / ")}`);
   return ok;
 }
 
