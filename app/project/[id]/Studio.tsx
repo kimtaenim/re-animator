@@ -2568,6 +2568,27 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     //   예전엔 합성만 project.workingLanguage 를 봐서, 일본어로 더빙해 놓고 합성하면
     //   자막·소리가 원문(중국어)인 파일이 나왔다 — 사용자: "여전히 중국어로 뜬다".
     const useLang = (lang ?? dubLang).trim();
+    // ★★★원터치 — 이 버튼 하나로 결과가 나와야 한다(사용자 지정: "내가 원터치로 확인하고
+    //   그대로 결과만 나오면 된다"). 필요한 선행 작업을 사람이 순서대로 누르지 않는다:
+    //   ① 그 언어 번역·더빙이 빠진 줄이 있으면 채우고(makeLanguage = 번역→더빙, 이미 된 줄은 건너뜀)
+    //   ② 카메라워크가 반영 안 된 컷을 굽고
+    //   ③ 합성한다. 각 단계는 '덜 된 것' 만 하므로 중복 비용이 없다.
+    if (useLang) {
+      const needDub = projectRef.current.scenes.some((s) =>
+        (s.cut?.bubbles ?? []).some(
+          (b) =>
+            b.speakerId !== SFX_SPEAKER &&
+            (b.text || "").trim() &&
+            !(b.tracks?.[useLang]?.audioUrl || "").trim()
+        )
+      );
+      if (needDub) {
+        setDubMsg(`🎙 ${LANGUAGES.find((l) => l.id === useLang)?.label ?? useLang} 더빙이 덜 된 줄을 먼저 채웁니다 — 끝나면 자동으로 이어집니다`);
+        const okLang = await makeLanguage(useLang);
+        setDubMsg(null);
+        if (!okLang) return; // 번역·더빙이 실패하면 반쪽짜리 결과를 만들지 않는다
+      }
+    }
     // ★★'무엇을 굽고 무엇을 안 굽는지' 를 사람이 알 필요가 없어야 한다(사용자 지적).
     //   카메라워크를 정해 놓고 아직 그 설정대로 굽지 않은 컷이 있으면, 합성 전에 알아서 굽는다.
     //   지문(fx.sig)이 지금 설정과 다르면 = 안 구웠거나 설정이 바뀐 것.
@@ -3148,8 +3169,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         if (activeStep === "compose" && approved)
           return (
             <div className={REMOTE}>
-              <button onClick={() => runComposeJob()} disabled={busy || composeRunning} className={P}>
-                {composeRunning ? "합성 중…" : "영상 묶기"}
+              <button onClick={() => runComposeJob()} disabled={busy || composeRunning} className={P} title="덜 된 번역·더빙·카메라 굽기를 알아서 채우고 최종본을 만듭니다.">
+                {composeRunning ? "만드는 중…" : "🎬 최종본 만들기"}
               </button>
               {composeRunning && miniBar()}
               {composeRunning && (
@@ -4841,15 +4862,19 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <div className="mb-3 flex flex-wrap items-center gap-2">
                 <h2 className="text-sm font-semibold">{STEP_LABEL.compose}</h2>
                 <span className="text-xs text-[var(--muted)]">
-                  — 영상 {nVid}개를 하나로 이어붙이기(전환 적용 · 오디오·자막은 나중)
+                  — 영상 {nVid}개로 최종본 만들기. 번역·더빙·카메라 굽기 중 <b>덜 된 것은 알아서</b> 채웁니다.
                 </span>
                 <button
                   onClick={() => runComposeJob()}
                   disabled={busy || composeRunning || nVid === 0}
-                  title={nVid === 0 ? "먼저 4단계에서 동영상을 생성하세요" : ""}
+                  title={
+                    nVid === 0
+                      ? "먼저 4단계에서 동영상을 생성하세요"
+                      : "이 버튼 하나면 됩니다 — 덜 된 번역·더빙을 채우고, 카메라워크가 반영 안 된 컷을 굽고, 최종본을 만듭니다. 이미 된 것은 다시 하지 않습니다."
+                  }
                   className="ml-auto rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
                 >
-                  {composeRunning ? "합성 중…" : project.composedUrl ? "다시 합성" : "영상 묶기"}
+                  {composeRunning ? "만드는 중…" : project.composedUrl ? "🎬 다시 만들기" : "🎬 최종본 만들기"}
                 </button>
               </div>
             );
@@ -4917,31 +4942,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       {/* 더빙 버튼은 4단계(더빙이 있는 단계)로 옮겼다 — 5단계는 합성만. */}
                       <button
                         type="button"
-                        onClick={async () => {
-                          // ★번역·더빙이 덜 돼 있으면 알아서 먼저 채우고 합성한다 —
-                          //   사용자가 순서를 외워 세 번 누르게 하지 않는다.
-                          const missing = projectRef.current.scenes.some((sc) =>
-                            (sc.cut?.bubbles ?? []).some(
-                              (b) =>
-                                b.speakerId !== SFX_SPEAKER &&
-                                (b.text || "").trim() &&
-                                !(b.tracks?.[lg]?.audioUrl || "").trim()
-                            )
-                          );
-                          // ★더빙이 '실제로 끝난 뒤' 합성한다 — 예전엔 더빙 잡을 적재만 하고
-                          //   바로 합성을 걸어서, 일본어 오디오가 아직 없는 채로 합성됐다
-                          //   (자막만 일본어·소리는 원문). 실패하면 합성으로 넘어가지 않는다.
-                          if (missing) {
-                            const okDub = await makeLanguage(lg);
-                            if (!okDub) return;
-                          }
-                          await runComposeJob(lg);
-                        }}
+                        // ★원터치 — 번역·더빙·카메라 굽기 확인은 runComposeJob 안에서 전부 한다.
+                        //   여기서 또 검사하면 같은 판단이 두 곳에 생겨 어긋난다(이 프로젝트의 단골 사고).
+                        onClick={() => runComposeJob(lg)}
                         disabled={busy || composeRunning || !project.scenes.some((x) => x.videoUrl)}
                         className="rounded bg-[var(--accent)] px-2.5 py-1 font-medium text-white disabled:opacity-40"
-                        title={`${label} 판을 만듭니다 — 번역·더빙이 덜 돼 있으면 먼저 채우고 합성합니다.`}
+                        title={`${label}판을 만듭니다 — 번역·더빙·카메라워크 굽기 중 덜 된 것을 알아서 채우고 최종 파일까지 만듭니다. 이미 된 것은 다시 하지 않습니다.`}
                       >
-                        {label}판 합성
+                        {label}판 만들기
                       </button>
                       {done && (
                         <a href={done} target="_blank" rel="noreferrer" className="rounded border border-[var(--ok)] px-2 py-1 text-[var(--ok)] hover:brightness-110">

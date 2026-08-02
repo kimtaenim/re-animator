@@ -114,7 +114,9 @@ export default function CameraWorkEditor({
         if (fgK && fgK.length > 1) fgRef.current.animate(fgK, { duration: dms, iterations: 1, easing: "linear", fill: "both" });
         return;
       }
-      const track = table.tracks.main ?? table.tracks.character; // 매트 없는 계층 B 는 근사(인물 궤적)
+      // 매트가 아직 없는 계층 B: 인물 트랙은 거의 정지라(버티고는 인물 1.5%/s) 그걸 보여주면
+      // "아무 일도 안 일어난다"로 보인다 — 실제로 크게 움직이는 배경 트랙으로 근사한다.
+      const track = table.tracks.main ?? (layer === "B" ? table.tracks.background : null) ?? table.tracks.character;
       if (!track) return;
       const kfs = toKfs(track);
       if (kfs.length < 2) return;
@@ -175,7 +177,7 @@ export default function CameraWorkEditor({
                 : "인물과 배경을 따로 움직입니다. 매트는 처음 구울 때(또는 합성할 때) 자동으로 만들어지고, 그 뒤부터는 미리보기도 2레이어로 보입니다."
             }
           >
-            {matteUrl ? "인물/배경 2레이어 미리보기" : "2레이어 · 매트 생기면 미리보기 정확"}
+            {matteUrl ? "인물/배경 2레이어 미리보기" : "지금은 배경 궤적만 근사 · 한 번 구우면 2레이어로 보입니다"}
           </span>
         )}
       </div>
