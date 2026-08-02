@@ -31,6 +31,16 @@ const CAM_EASINGS = new Set<CameraEasing>(["linear", "easeIn", "easeOut", "easeI
 const clampNum = (v: unknown, lo: number, hi: number): number | undefined =>
   typeof v === "number" && isFinite(v) ? Math.max(lo, Math.min(hi, v)) : undefined;
 
+// 카메라워크 지문 — "이 컷이 지금 설정대로 이미 구워져 있나"를 판단한다.
+// ★worker/jobs.mjs 의 camSig 와 같은 규칙이어야 한다(다르면 매번 다시 굽거나, 바뀐 걸 놓친다).
+export function camSig(cw?: CameraWork | null): string {
+  if (!cw || !cw.preset) return "";
+  const s = JSON.stringify(cw);
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return `${cw.preset}:${h.toString(36)}`;
+}
+
 export function cleanCameraWork(raw: unknown): CameraWork | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const r = raw as Record<string, unknown>;

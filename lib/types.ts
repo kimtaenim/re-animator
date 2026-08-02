@@ -258,7 +258,9 @@ export interface Scene {
   // ★인물 매트(흰=인물/검정=배경 회색조 PNG) — 계층 B(버티고·패럴랙스)가 인물과 배경을
   //   따로 움직이려면 필요하다. 컷당 한 번만 만들고 재사용한다(다시 구울 때 재과금 방지).
   matteUrl?: string;
-  fx?: { effect: string; strength: number }; // 적용된 후처리(크래시인/아웃·램프·펀치)와 강도
+  // 적용된 후처리(크래시인/아웃·램프·펀치)와 강도. sig = 어떤 카메라워크로 구웠는지 지문 —
+  // 설정이 바뀌면 지문이 달라지고, 합성 전에 그 컷만 자동으로 다시 굽는다.
+  fx?: { effect: string; strength: number; sig?: string };
   status: StepStatus; // M1 에선 경계 확정 여부 관리에만 사용
 }
 

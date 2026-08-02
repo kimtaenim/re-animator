@@ -12,6 +12,7 @@ import {
   LANGUAGES,
 } from "@/lib/types";
 import { blankCut } from "@/lib/ontology";
+import { camSig } from "@/lib/cutClean";
 import { splitRuns, wordTokens, toggleWordEmphasis } from "@/lib/emphasis";
 import BoundaryEditor, { type SavedRegion } from "./BoundaryEditor";
 import CastReview from "./CastReview";
@@ -183,6 +184,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   const [regenPending, setRegenPending] = useState<Map<string, string>>(() => new Map()); // 재생성 중인 컷(값=요청시 옛 이미지 url)
   const regenSawRunning = useRef(false); // 재생성 잡이 실제 running 을 거쳤는지(스피너 조기 해제 방지)
   const [selForVideo, setSelForVideo] = useState<Set<string>>(() => new Set()); // 4단계 다중 선택
+  // 5단계(카메라) 다중 선택 — 컷마다 '적용(굽기)'를 따로 누르게 하면 컷 수만큼 클릭이 든다(사용자 지적).
+  const [selForCam, setSelForCam] = useState<Set<string>>(() => new Set());
   // 대사 줄별 '세부(⚙)' 펼침 상태 — 감정·자막위치·순서이동 등 잘 안 만지는 컨트롤을 평소엔 접어둠.
   const [advBub, setAdvBub] = useState<Set<string>>(() => new Set());
   const toggleAdv = (key: string) =>
@@ -2228,16 +2231,21 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
 
   // 카메라 미리보기 탭 — 카메라워크가 지정된 컷들을 한 번에 굽기(camerafx 잡, 다중 sceneIds).
   //   layer A 프리셋만(정지·orbit·계층B 는 굽기 대상 아님). 단일 applyCameraFx 와 같은 잡·폴링.
-  async function bakeAllCamera() {
-    const BAKEABLE = new Set(["push_in", "pull_out", "pan", "shake", "crash_zoom", "whip"]);
-    const ids = scopeSectionIds(
-      projectRef.current.scenes
-        .filter((s) => s.videoUrl && s.cut?.cameraWork && BAKEABLE.has(s.cut.cameraWork.preset))
-        .map((s) => s.id)
-    );
+  // 체크한 컷들을 한 번에 굽는다(잡 1개·sceneIds 다중). 인자가 없으면 카메라워크가 지정된
+  // 컷 전체(섹션 범위)를 대상으로 한다.
+  // ★예전 BAKEABLE 목록에 vertigo/parallax_push/orbit 이 빠져 있어서, 버티고를 골라도
+  //   일괄 굽기 대상에서 조용히 제외됐다(= "작동도 안 해"). 이제 '정지' 만 제외한다.
+  async function bakeAllCamera(only?: string[]): Promise<boolean> {
+    const ids = only?.length
+      ? only
+      : scopeSectionIds(
+          projectRef.current.scenes
+            .filter((s) => s.videoUrl && s.cut?.cameraWork && s.cut.cameraWork.preset !== "static")
+            .map((s) => s.id)
+        );
     if (!ids.length) {
       setError(sec ? "이 섹션에 구울 카메라워크가 없어요." : "구울 카메라워크가 없어요 — 영상 생성된 컷에 카메라워크(정지 제외)를 먼저 정하세요.");
-      return;
+      return false;
     }
     setError("");
     setFxPending((prev) => new Set([...prev, ...ids]));
@@ -2247,6 +2255,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         ids.forEach((id) => n.delete(id));
         return n;
       });
+    // ★완료까지 기다린다(true=성공) — 합성이 '굽기가 끝난 뒤' 돌아야 하기 때문.
     try {
       const r = await fetch("/api/camerafx", {
         method: "POST",
@@ -2255,27 +2264,32 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "카메라워크 적용 실패");
-      const iv = setInterval(async () => {
-        try {
-          const jr = await fetch(`/api/job?id=${d.jobId}`, { cache: "no-store" });
-          const jd = await jr.json();
-          if (jd.ok && (jd.status === "done" || jd.status === "error")) {
-            clearInterval(iv);
-            clearAll();
-            if (jd.status === "error") setError(`카메라워크 실패: ${jd.error ?? ""}`);
-            const pr = await fetch(`/api/project/${project.id}`, { cache: "no-store" });
-            const pd = await pr.json();
-            if (pd.ok) setProject(pd.project);
-          }
-        } catch {}
-      }, 4000);
-      setTimeout(() => {
-        clearInterval(iv);
-        clearAll();
-      }, 10 * 60_000);
+      return await new Promise<boolean>((resolve) => {
+        const done = (okBake: boolean) => {
+          clearInterval(iv);
+          clearTimeout(cap);
+          clearAll();
+          resolve(okBake);
+        };
+        const iv = setInterval(async () => {
+          try {
+            const jr = await fetch(`/api/job?id=${d.jobId}`, { cache: "no-store" });
+            const jd = await jr.json();
+            if (jd.ok && (jd.status === "done" || jd.status === "error")) {
+              if (jd.status === "error") setError(`카메라워크 실패: ${jd.error ?? ""}`);
+              const pr = await fetch(`/api/project/${project.id}`, { cache: "no-store" });
+              const pd = await pr.json();
+              if (pd.ok) setProject(pd.project);
+              done(jd.status === "done");
+            }
+          } catch {}
+        }, 4000);
+        const cap = setTimeout(() => done(false), 20 * 60_000);
+      });
     } catch (e) {
       clearAll();
       setError(e instanceof Error ? e.message : "카메라워크 적용 실패");
+      return false;
     }
   }
 
@@ -2554,6 +2568,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     //   예전엔 합성만 project.workingLanguage 를 봐서, 일본어로 더빙해 놓고 합성하면
     //   자막·소리가 원문(중국어)인 파일이 나왔다 — 사용자: "여전히 중국어로 뜬다".
     const useLang = (lang ?? dubLang).trim();
+    // ★★'무엇을 굽고 무엇을 안 굽는지' 를 사람이 알 필요가 없어야 한다(사용자 지적).
+    //   카메라워크를 정해 놓고 아직 그 설정대로 굽지 않은 컷이 있으면, 합성 전에 알아서 굽는다.
+    //   지문(fx.sig)이 지금 설정과 다르면 = 안 구웠거나 설정이 바뀐 것.
+    const stale = projectRef.current.scenes
+      .filter((s) => s.videoUrl && s.cut?.cameraWork && s.cut.cameraWork.preset !== "static")
+      .filter((s) => (s.fx?.sig ?? "") !== camSig(s.cut!.cameraWork!))
+      .map((s) => s.id);
+    if (stale.length) {
+      setError("");
+      setDubMsg(`🎥 카메라워크가 반영 안 된 ${stale.length}개 컷을 먼저 굽습니다 — 끝나면 자동으로 합성합니다`);
+      const okBake = await bakeAllCamera(stale);
+      setDubMsg(null);
+      if (!okBake) return; // 굽기가 실패하면 합성으로 넘어가지 않는다(반쪽 결과 방지)
+    }
     try {
       const r = await fetch("/api/compose", {
         method: "POST",
@@ -4659,10 +4687,32 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             >
               흔들림 모두 끄기
             </button>
-            {/* 굽기는 각 컷 카드의 '적용(굽기)' — 지금 보고 있는 컷만 굽는다(사용자 지정). */}
-            <span className="rounded border border-[var(--border)] px-2 py-1 text-[10px] text-[var(--muted)]">
-              굽기 = 각 컷의 ‘적용(굽기)’
-            </span>
+            {/* ★체크 → 한 번에 굽기. 컷마다 '적용(굽기)'를 누르면 컷 수만큼 클릭이 든다(사용자 지적). */}
+            <button
+              type="button"
+              onClick={() => {
+                const ids = projectRef.current.scenes.filter((s) => s.videoUrl && inSection(s)).map((s) => s.id);
+                const all = ids.length > 0 && ids.every((id) => selForCam.has(id));
+                setSelForCam(all ? new Set() : new Set(ids));
+              }}
+              className="rounded border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--panel-2)]"
+              title="영상이 있는 컷을 모두 선택/해제합니다."
+            >
+              전체 선택
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const ids = [...selForCam];
+                bakeAllCamera(ids);
+                setSelForCam(new Set());
+              }}
+              disabled={busy || selForCam.size === 0 || fxPending.size > 0}
+              className="rounded bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white disabled:opacity-40"
+              title="체크한 컷들을 한 번에 굽습니다(잡 1개). 컷당 20-40초."
+            >
+              {fxPending.size > 0 ? "굽는 중…" : `🎥 선택 ${selForCam.size}개 굽기`}
+            </button>
           </div>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {project.scenes
@@ -4672,6 +4722,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               .map((s) => (
                 <div key={s.id} className="flex flex-col gap-1.5 rounded border border-[var(--border)] bg-[var(--panel)] p-2">
                   <div className="flex items-center gap-2 text-[11px]">
+                    {/* 굽기 다중 선택 — 체크한 컷들을 위의 '선택 N개 굽기' 로 한 번에. */}
+                    <input
+                      type="checkbox"
+                      checked={selForCam.has(s.id)}
+                      disabled={!s.videoUrl}
+                      onChange={(e) =>
+                        setSelForCam((prev) => {
+                          const n = new Set(prev);
+                          e.target.checked ? n.add(s.id) : n.delete(s.id);
+                          return n;
+                        })
+                      }
+                      title={s.videoUrl ? "이 컷을 굽기 목록에 넣기" : "영상이 없어 굽기 대상이 아닙니다"}
+                    />
                     <span className="font-medium">컷 {s.order + 1}</span>
                     {(s.fxUrl || s.videoUrl) && (
                       <span className="text-[10px] text-[var(--muted)]" title="이 미리보기가 만들어진 시각 — 굽고 나면 바뀝니다">

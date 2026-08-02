@@ -2481,6 +2481,15 @@ export async function runPostfx(projectId, payload) {
 //   수식은 lib/cameraKeyframes.mjs 단일 소스, 렌더는 worker/cameraRender.mjs(sendcmd).
 //   기존 runPostfx(effect/strength 프리셋)는 그대로 유지 — 이 잡은 새 cameraWork 경로.
 //   skip(정지/orbit/계층B/무cameraWork) → fxUrl 해제(원본 클립 사용). 저장은 fresh 머지.
+// 카메라워크 지문 — 이 설정으로 이미 구웠는지 판단용(앱 lib/camSig 와 같은 규칙이어야 한다).
+export function camSig(cw) {
+  if (!cw || !cw.preset) return "";
+  const s = JSON.stringify(cw);
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return `${cw.preset}:${h.toString(36)}`;
+}
+
 export async function runCameraFx(projectId, payload) {
   await resetProgress(projectId);
   const log = async (m) => {
@@ -2586,10 +2595,13 @@ export async function runCameraFx(projectId, payload) {
         await saveProject(p2);
       } else if (p2 && t2) {
         if (s.matteUrl) t2.matteUrl = s.matteUrl;
+        // ★어떤 설정으로 구웠는지 지문을 남긴다 — 앱이 '이 컷은 지금 설정대로 구워져 있나'를
+        //   판단해 자동으로 다시 굽는다(사용자가 '뭘 굽고 뭘 안 굽는지' 외우지 않게).
+        const sig = camSig(cw);
         if (result.skipped) {
           // 후처리 없음 → 원본 클립 사용. 낡은 fxUrl 무효화(안 지우면 미리보기가 옛 fx 를 보여줌).
           delete t2.fxUrl;
-          delete t2.fx;
+          t2.fx = { effect: "cam:none", strength: 0, sig }; // 지문은 남긴다(= 다시 구울 필요 없음)
         } else {
           const { url } = await put(`project/${projectId}/cam-${s.order}-${Date.now()}.mp4`, createReadStream(outp), {
             access: "public",
@@ -2597,7 +2609,7 @@ export async function runCameraFx(projectId, payload) {
             addRandomSuffix: false,
           });
           t2.fxUrl = url;
-          t2.fx = { effect: `cam:${cw.preset}`, strength: 0 };
+          t2.fx = { effect: `cam:${cw.preset}`, strength: 0, sig };
         }
         await saveProject(p2);
       }
