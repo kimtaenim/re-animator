@@ -113,9 +113,18 @@ export async function PUT(req: NextRequest) {
         yEnd: Math.max(0, Math.min(total, Math.round(r.yEnd))),
         cut: cleanCut(r.cut),
       };
-      if (r.xStart != null && r.xEnd != null && r.xEnd > r.xStart) {
-        reg.xStart = Math.round(r.xStart);
-        reg.xEnd = Math.round(r.xEnd);
+      // ★한쪽만 조정한 좌우 크롭도 저장 — 예전엔 양쪽 값이 다 있어야만 저장해서, 왼쪽
+      //   핸들만 끌어 여백을 지우면 저장 때 크롭이 통째로 버려지고, 0.9초 뒤 편집기가
+      //   서버 값으로 재동기화되며 여백이 '스스로 되살아났다'(사용자 보고: 좌우 폭을
+      //   줄여도 자꾸 여백이 다시 생김). 빠진 쪽은 캔버스 끝으로 채운다.
+      if (r.xStart != null || r.xEnd != null) {
+        const W = project.virtualCanvas!.refWidth;
+        const L = Math.max(0, Math.round(r.xStart ?? 0));
+        const R = Math.min(W, Math.round(r.xEnd ?? W));
+        if (R > L && (L > 0 || R < W)) {
+          reg.xStart = L;
+          reg.xEnd = R;
+        }
       }
       return reg;
     })
