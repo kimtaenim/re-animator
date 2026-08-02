@@ -183,14 +183,22 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
       setLastScopeKey(scopeKey);
       setRegions(scenesToRegions(scopedScenes));
       setSeedIdKey(idKey);
-    } else if (idKey !== seedIdKey) {
-      // 재분할 감지 — 저장 안 된 경계 편집은 죽은 세계의 것이다. 버리고 새 분할로 동기화.
-      console.warn("[G1] 재분할 감지 — 저장 안 된 경계 편집을 버리고 새 분할로 동기화합니다");
-      setLastScenes(scenes);
-      setLastScopeKey(scopeKey);
-      setRegions(scenesToRegions(scopedScenes));
-      setSeedIdKey(idKey);
-      setDirty(false); // 자동저장 예약 해제 — 옛 경계를 다시 쓰지 않는다
+    } else {
+      // ★진짜 재분할(씬 id 가 거의 전부 갈림)일 때만 낡은 편집을 버린다.
+      //   컷 몇 개 나누고 합친 '정상 편집 + 저장 왕복'도 id 가 일부 바뀌므로, 단순 불일치로
+      //   버리면 사용자가 방금 고친 경계(실사례: 14컷→15컷 수동 정정)를 날려버린다.
+      //   기준: 기존에 보던 id 중 30% 미만만 살아남았을 때 = 세계가 갈아엎어진 것.
+      const seedIds = new Set(seedIdKey.split(",").filter(Boolean));
+      const survivors = scopedScenes.filter((s) => seedIds.has(s.id)).length;
+      const rebuiltWorld = seedIds.size > 0 && survivors / seedIds.size < 0.3;
+      if (idKey !== seedIdKey && rebuiltWorld) {
+        console.warn("[G1] 재분할 감지 — 저장 안 된 경계 편집을 버리고 새 분할로 동기화합니다");
+        setLastScenes(scenes);
+        setLastScopeKey(scopeKey);
+        setRegions(scenesToRegions(scopedScenes));
+        setSeedIdKey(idKey);
+        setDirty(false); // 자동저장 예약 해제 — 옛 경계를 다시 쓰지 않는다
+      }
     }
   }
 
