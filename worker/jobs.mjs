@@ -1652,6 +1652,16 @@ async function collectCastRefs(s, p, key, VLM_MODEL, projectId, log) {
   const bufs = [];
   const urls = [];
   if (s.cut?.noCastRef) return { bufs, urls };
+  // ★레퍼런스는 '그림에 인물이 보이는 컷'에만 — 인물 배정(sceneIds)에는 목소리만 나오는
+  //   컷(하늘·풍경에 화면 밖 대사)도 포함된다. 그런 컷에 얼굴 정본을 넣으면, 특히 내용
+  //   프롬프트까지 비어 있을 때 모델이 레퍼런스 인물을 '내용'으로 삼아 컷을 갈아치운다
+  //   (실사례 2026-08-02: 구름 하늘 컷이 남자 뒷목 클로즈업으로 재생성됨).
+  //   분류가 그림에서 본 인물(cut.characters)이 없고 타입도 인물 무관(사물·텍스트)이면 제외.
+  const visibleChars = s.cut?.characters?.length ?? 0;
+  if (visibleChars === 0 && (s.cut?.type === "object" || s.cut?.type === "text")) {
+    await log?.(`[진단] 컷 ${s.order + 1}: 그림에 인물 없음(${s.cut?.type}) — 인물 참고이미지 제외`);
+    return { bufs, urls };
+  }
   for (const c of p.cast ?? []) {
     if (bufs.length >= 3) break;
     if (!(c.sceneIds ?? []).includes(s.id)) continue; // 이 컷에 나오는 인물만
