@@ -977,9 +977,23 @@ export async function runExtract(projectId, payload) {
   //   내레이션 밴드 재예약(addGapTextRegions)은 경계 계산이라 전체 기준으로 그대로 두고,
   //   무거운 작업(추출·업로드·OCR·연출·교정·번역)만 선택 범위로 좁힌다.
   const selIds = Array.isArray(payload?.sceneIds) && payload.sceneIds.length ? new Set(payload.sceneIds) : null;
-  const work = selIds ? scenes.filter((s) => selIds.has(s.id)) : scenes;
+  let work = selIds ? scenes.filter((s) => selIds.has(s.id)) : scenes;
   if (work.length === 0) throw new Error("선택한 섹션에 컷이 없어요");
   if (selIds) await log(`섹션 작업: 컷 ${work.length}개만 처리(회분 전체 ${scenes.length}개)`);
+  // ★버튼 하나 원칙(사용자 인터페이스 지침) — 섹션 없이 통째로 들어와도 사람이 먼저 뭘
+  //   나눌 필요 없게, 여기서 8컷씩 자동 분절해 이어달리기한다. 추출의 안전 분절은 서사
+  //   섹션과 별개라 UI 섹션(sectionStarts)은 건드리지 않는다. 통째 실행(실측 501/512MB)이
+  //   죽음의 조건이었으므로, '나눠져 있지 않으면 통째로 돈다'는 경로 자체를 없앤다.
+  if (!selIds && !(Array.isArray(payload?.nextSections) && payload.nextSections.length) && work.length > 10) {
+    const CHUNK = Math.max(4, Number(process.env.EXTRACT_CHUNK || 8));
+    const ids = work.map((s) => s.id);
+    const chunks = [];
+    for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+    const first = new Set(chunks[0]);
+    work = work.filter((s) => first.has(s.id));
+    payload = { ...(payload ?? {}), nextSections: chunks.slice(1) };
+    await log(`자동 분절: ${ids.length}컷 → ${chunks.length}묶음(${CHUNK}컷씩) 이어달리기 — 묶음마다 저장`);
+  }
 
   await log(`소스 ${files.length}개 다운로드…`);
   const buffers = [];
