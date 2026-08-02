@@ -4413,7 +4413,14 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             type="button"
                             onClick={() => {
                               setOpenTreeCut(cutOpen ? null : s.id);
-                              if (!cutOpen) setOpenScene(s.id); // ④ 카드가 접힌 채로 나오지 않게 같이 펼친다
+                              if (!cutOpen) {
+                                setOpenScene(s.id); // ④ 카드가 접힌 채로 나오지 않게 같이 펼친다
+                                // ★컷을 열면 이미지가 없을 때 재생성 자동 시작(사용자 지정) —
+                                //   버튼을 또 누르게 하지 않는다. 이미 생성됐거나 진행 중이면 안 건드림.
+                                if (hasRegen && !s.generatedImage && !regenPending.has(s.id) && !busy && !regenRunning) {
+                                  regenOne(s.id);
+                                }
+                              }
                             }}
                             className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px]"
                           >
