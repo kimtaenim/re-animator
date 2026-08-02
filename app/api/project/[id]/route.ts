@@ -45,6 +45,7 @@ export async function PATCH(
   }
   if (body.narratorVoice !== undefined) {
     const nv = body.narratorVoice;
+    const prevId = project.narratorVoice?.id ?? "";
     project.narratorVoice =
       nv && typeof nv.id === "string" && nv.id
         ? {
@@ -53,6 +54,18 @@ export async function PATCH(
             name: String(nv.name || nv.id).slice(0, 60),
           }
         : undefined; // null → 해제
+    // ★내레이터 목소리가 바뀌면 내레이션 줄(화자 null)의 기존 더빙을 무효화 —
+    //   더빙 증분이 '소리 있음'만 보므로, 안 지우면 옛 목소리가 영영 남는다(캐스트와 동일 규칙).
+    if ((project.narratorVoice?.id ?? "") !== prevId) {
+      for (const s of project.scenes ?? []) {
+        for (const b of s.cut?.bubbles ?? []) {
+          if (b.speakerId == null) {
+            b.audioUrl = undefined;
+            if (b.tracks) for (const t of Object.values(b.tracks)) if (t) t.audioUrl = undefined;
+          }
+        }
+      }
+    }
     changed = true;
   }
   if (typeof body.dubSpeed === "number" && body.dubSpeed > 0) {

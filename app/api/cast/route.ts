@@ -128,6 +128,26 @@ export async function PUT(req: NextRequest) {
     });
   }
 
+  // ★목소리가 바뀐 캐릭터의 기존 더빙을 무효화 — 더빙 증분 판정은 '소리 있음'만 보므로,
+  //   무효화하지 않으면 목소리를 바꿔도 옛 목소리 소리가 영영 남는다(사용자 보고:
+  //   "목소리 바꾼 다음 더빙 다시 누르게 안 돼 있어"). 지우면 다음 더빙 일괄이 그 줄만
+  //   새 목소리로 다시 만든다(변경 없는 화자 줄은 그대로 = 비용 최소).
+  {
+    const prevVoice = new Map((project.cast ?? []).map((c) => [c.id, c.voice ?? ""]));
+    const changed = new Set(
+      clean.filter((c) => prevVoice.has(c.id) && (prevVoice.get(c.id) ?? "") !== (c.voice ?? "")).map((c) => c.id)
+    );
+    if (changed.size) {
+      for (const s of project.scenes) {
+        for (const b of s.cut?.bubbles ?? []) {
+          if (b.speakerId && changed.has(b.speakerId)) {
+            b.audioUrl = undefined;
+            if (b.tracks) for (const t of Object.values(b.tracks)) if (t) t.audioUrl = undefined;
+          }
+        }
+      }
+    }
+  }
   project.cast = clean;
 
   const castIds = new Set(clean.map((c) => c.id));
