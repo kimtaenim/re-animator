@@ -406,7 +406,8 @@ export const CAMERA_PRESETS = {
   // ★흔들림(shake_amp_px)은 기본 0 — 사용자 지정. 예전엔 push/pan/crash 에 핸드헬드 그레인을
   //   기본으로 넣어 "모든 화면이 흔들린다" 가 됐다. 흔들림이 필요하면 슬라이더로 올린다.
   //   push_in 의 핵심은 흔들림이 아니라 '가속 줌'(zoom_accel) 이다.
-  push_in: { zoom_rate_pct_per_s: 12, zoom_accel: 1.5, accel_hold: 0.5, drift_px_per_s: { x: 12, y: -8 }, shake_seed: 2, shake_amp_px: 0, shake_hz: 6, shake_damp: 0, easing: "easeInOut" }, // 앞 절반 정지 → 뒤 절반에서 파고든다
+  // ★드리프트 기본 0 — 밀어들어가는데 옆으로도 흐르면 화면이 한쪽으로 치우친다(사용자 지적).
+  push_in: { zoom_rate_pct_per_s: 12, zoom_accel: 1.5, accel_hold: 0.5, drift_px_per_s: { x: 0, y: 0 }, shake_seed: 2, shake_amp_px: 0, shake_hz: 6, shake_damp: 0, easing: "easeInOut" }, // 앞 절반 느리게 → 뒤 절반에서 파고든다(정면)
   pull_out: { zoom_rate_pct_per_s: -8, start_zoom: 1.5, easing: "easeOut" }, // 확 빠지는 리빌
   // 팬: 방향·속도는 drift_px_per_s(x=가로, y=세로)로 지정한다. 양수 x=오른쪽으로 흐름,
   //   음수 x=왼쪽. y 도 같은 규칙(음수=위). 가속도 zoom_accel 로 팬 진행에 함께 걸린다.
