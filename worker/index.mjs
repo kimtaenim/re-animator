@@ -177,7 +177,7 @@ process.on("SIGTERM", () => {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log(`[worker] BUILD = mem-v40 (Node 버전 고정 20 — runtime:node 라 Dockerfile 고정이 무효였음) node ${process.version}`);
+console.log(`[worker] BUILD = mem-v41 (실측 501/512MB 벼랑 — 대사읽기 준비 끝나면 raw 캐시 즉시 비움) node ${process.version}`);
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 await markCurrentDead("워커가 재시작되어 잡이 중단됨(메모리 초과 또는 재배포) — 다시 시작해 주세요");
 for (;;) {

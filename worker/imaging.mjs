@@ -127,6 +127,14 @@ let _rawStats = { files: 0, bytes: 0, decodes: 0 }; // 관측용(잡 진행 로�
 export function rawCacheStats() {
   return { ..._rawStats, mb: Math.round(_rawStats.bytes / 1048576) };
 }
+// ★캐시 즉시 비우기 — 실측(2026-08-02 분할 로그): 대사 읽기 준비가 다 끝난 뒤에도 raw
+//   151MB 가 상주한 채 rss 501/512MB 로 벼랑 끝 통과. 더 쓸 일 없는 시점에 호출해 피크를
+//   깎는다. 캐시일 뿐이라 이후 다시 필요하면 재디코드될 뿐, 정확성엔 영향 없음.
+export function clearRawCache(fileBuffers) {
+  const cache = _fileRawCache.get(fileBuffers);
+  if (cache) cache.clear();
+  _rawStats = { files: 0, bytes: 0, decodes: _rawStats.decodes };
+}
 
 async function fileRawAt(canvas, fileBuffers, idx) {
   let cache = _fileRawCache.get(fileBuffers);

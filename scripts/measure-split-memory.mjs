@@ -5,7 +5,7 @@
 //   node scripts/measure-split-memory.mjs <파일수> <파일높이px> [컷수]
 // env: RAW_CACHE_MB(캐시 예산, 기본 160), OCR 준비 보유는 실제와 동일(48MB·4개).
 import sharp from "../worker/node_modules/sharp/lib/index.js";
-import { computeRowProfile, extractRegion, trimBox, rawCacheStats } from "../worker/imaging.mjs";
+import { computeRowProfile, extractRegion, trimBox, rawCacheStats, clearRawCache } from "../worker/imaging.mjs";
 import { prepareOcrImage } from "../worker/ocr.mjs";
 
 if (process.env.SHARP_NOCACHE) sharp.cache(false); // libvips 연산 캐시 영향 측정용
@@ -88,6 +88,7 @@ for (const r of regions) {
     .finally(() => { held -= img.length; inflight.delete(p); });
   inflight.add(p);
 }
+clearRawCache(files); // runSplit 과 동일 — 준비 끝나면 raw 캐시는 짐(실측 501MB 피크의 주범)
 await Promise.all([...inflight]);
 say(`OCR 준비/보유 ${NCUTS}컷 완료 · raw캐시 ${rawCacheStats().mb}MB(${rawCacheStats().files}개)`);
 

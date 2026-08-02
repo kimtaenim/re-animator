@@ -24,7 +24,7 @@ import {
   resetDubLog,
 } from "./store.mjs";
 import sharp from "sharp";
-import { computeRowProfile, extractRegion, trimBox, rawCacheStats } from "./imaging.mjs";
+import { computeRowProfile, extractRegion, trimBox, rawCacheStats, clearRawCache } from "./imaging.mjs";
 
 // ★메모리 관측 한 줄 — 진행 로그(사용자가 앱에서 보는 그 로그)에 그대로 찍는다.
 //   OOM 은 재현 순간의 숫자가 없으면 영영 추측이다. 로그를 달라고 하지 말고 스스로 남긴다.
@@ -805,6 +805,9 @@ export async function runSplit(projectId) {
         await log(`대사 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%) · ${memLine()}`);
       }
     }
+    // ★준비(이미지 추출)가 전부 끝났다 — 이제 raw 캐시(파일당 수십 MB)는 짐이다. 실측: 이걸
+    //   들고 마지막 응답들을 기다리던 순간이 rss 501/512MB 피크였다. 응답 대기 전에 비운다.
+    clearRawCache(buffers);
     await Promise.all([...inflight]); // 남은 호출 마무리
     const withText = scenes.filter((s) => (s.cut?.bubbles ?? []).some((b) => (b.text || "").trim())).length;
     await log(`대사 읽기 완료 — ${withText}/${scenes.length}컷에서 글자 확보 · ${memLine()}`);
