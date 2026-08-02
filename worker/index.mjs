@@ -145,36 +145,41 @@ async function tick(types) {
   }
 }
 
-// ★좀비 잡 정리(부팅 시 1회) — 인스턴스가 통째로 죽으면(Render 메모리 초과 재시작·재배포)
+// ★좀비 잡 정리 — 인스턴스가 통째로 죽으면(Render 메모리 초과 재시작·재배포)
 //   돌던 잡이 Redis 에 "running" 으로 영원히 남아 화면이 '진행 중'에서 멈춘다(=먹통).
-//   위에서 남긴 worker:current 를 보고 그 잡을 에러로 확정 + 단계·진행로그에 사유를 남긴다.
+//   worker:current 를 보고 그 잡을 에러로 확정 + 단계·진행로그에 사유를 남긴다.
 //   조용한 실패 금지: 죽었으면 죽었다고 화면에 말한다.
-async function sweepZombieJob() {
+async function markCurrentDead(dead) {
   try {
     const cur = await redis.get("worker:current");
     if (cur?.jobId) {
-      const dead = "워커가 재시작되어 잡이 중단됨(메모리 초과 또는 재배포) — 다시 시작해 주세요";
       try { await updateJob(cur.jobId, { status: "error", error: dead }); } catch {}
       try {
         if (!["dub", "postfx", "camerafx", "sequence", "translate"].includes(cur.type))
           await failStep(cur.projectId, dead, JOB_STEP[cur.type] ?? "source");
       } catch {}
-      try { await logProgress(cur.projectId, `[중단] ${cur.type} 잡이 워커 재시작으로 죽었습니다 — ${dead}`); } catch {}
-      console.log(`[worker] 좀비 잡 정리: ${cur.type} job=${cur.jobId} → error 확정`);
+      try { await logProgress(cur.projectId, `[중단] ${cur.type} — ${dead}`); } catch {}
+      console.log(`[worker] 잡 중단 확정: ${cur.type} job=${cur.jobId} — ${dead}`);
     }
     await redis.del("worker:current");
   } catch (e) {
-    console.error("[worker] 좀비 잡 정리 실패(계속 실행):", e?.message ?? e);
+    console.error("[worker] 잡 중단 확정 실패(계속 실행):", e?.message ?? e);
   }
 }
+// 재배포/재시작(SIGTERM)이 오면 '그 순간' 바로 중단을 화면에 알린다 — 다음 부팅까지 기다리지 않게.
+// (부팅 시 sweep 은 SIGKILL 등 예고 없는 죽음의 안전망으로 계속 유지.)
+process.on("SIGTERM", () => {
+  markCurrentDead("재배포/재시작으로 잡이 중단됨 — 잠시 후 다시 시작해 주세요")
+    .finally(() => process.exit(0));
+});
 
 // ★메모리 빡빡한 워커라 잡은 '한 번에 하나만' 처리한다(병렬 X → OOM 방지). 더빙 UI 는
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log("[worker] BUILD = mem-v37 (좀비 잡 정리 — 워커 재시작 시 '영원히 진행 중' 차단)");
+console.log("[worker] BUILD = mem-v39 (분할 메모리 실측 수정 — 디코드 전 방출·순차 디코드·sharp 캐시 끔 + SIGTERM 즉시 중단 표시)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
-await sweepZombieJob();
+await markCurrentDead("워커가 재시작되어 잡이 중단됨(메모리 초과 또는 재배포) — 다시 시작해 주세요");
 for (;;) {
   await tick(TYPES);
   await new Promise((r) => setTimeout(r, POLL_MS));

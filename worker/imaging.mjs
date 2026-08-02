@@ -7,12 +7,18 @@
 
 import sharp from "sharp";
 
+// ★libvips 연산 캐시 끔 — 우리 워크로드는 매번 다른 버퍼를 디코드하므로 캐시 적중이 거의
+//   없는데, 캐시가 직전 디코드 결과(대형 raw)를 붙들어 피크만 올린다. 실측(measure-split-memory)
+//   383→368MB. compose/join 은 이 모듈을 로드하지 않으므로 영향 없음.
+sharp.cache(false);
+
 // 한 파일 → refWidth 정규화 후 그레이스케일 → 행별 "표준편차(평탄도)" 프로파일.
 // std 가 낮으면 그 행은 거의 단색 → 흰/검/단색 배경 무관하게 거터 후보.
 // (흰-비율 방식은 검은 거터를 못 잡아 오분할됨 — 색무관 평탄도로 대체.)
 // 반환: { profile: Float32Array(정규화높이), normHeight }.
 export async function computeRowProfile(buf, refWidth) {
-  const { data, info } = await sharp(buf)
+  // sequentialRead: 행 스트리밍 디코드 — 원본 raw 전체를 출력과 동시에 들지 않는다(피크 절감).
+  const { data, info } = await sharp(buf, { sequentialRead: true })
     .resize({ width: refWidth }) // 폭 정규화(높이 비례). 기준폭 일치가 좌표계 통일의 핵심.
     .greyscale()
     .raw()
@@ -134,7 +140,22 @@ async function fileRawAt(canvas, fileBuffers, idx) {
     cache.set(idx, hit);
     return hit;
   }
-  const { data, info } = await sharp(fileBuffers[idx])
+  // ★방출은 디코드 '전에' — 실측(scripts/measure-split-memory.mjs)에서 피크는 상주 캐시와
+  //   '통째 디코드 순간의 임시 버퍼(원본해상도+정규화 raw)'가 겹치는 순간이었다. 디코드 후에
+  //   비우면 그 겹침이 이미 일어난 뒤라 예산이 피크를 못 깎는다(410→404MB 로 사실상 무효였음).
+  //   메타데이터(헤더만 읽음, 싸다)로 새 raw 크기를 추정해, 자리를 먼저 비우고 디코드한다.
+  const totalBytes = () => [...cache.values()].reduce((n, r) => n + r.data.length, 0);
+  try {
+    const meta = await sharp(fileBuffers[idx]).metadata();
+    const estH = Math.round((meta.height ?? 0) * (canvas.refWidth / (meta.width || canvas.refWidth)));
+    const estBytes = canvas.refWidth * Math.max(1, estH) * 3;
+    while (cache.size > 0 && (cache.size >= RAW_CACHE_MAX || totalBytes() + estBytes > RAW_CACHE_BYTES)) {
+      cache.delete(cache.keys().next().value); // 오래된 것 먼저 방출
+    }
+  } catch {}
+  // sequentialRead: 입력 PNG 를 행 단위로 흘려 디코드 — 입력 전체 raw(원본폭×높이)를
+  //   출력과 '동시에' 들고 있지 않게 한다(통짜 대형 파일에서 디코드 순간 피크의 절반).
+  const { data, info } = await sharp(fileBuffers[idx], { sequentialRead: true })
     .resize({ width: canvas.refWidth })
     .removeAlpha()
     .raw()
@@ -142,10 +163,9 @@ async function fileRawAt(canvas, fileBuffers, idx) {
   const rec = { data, width: info.width, height: info.height };
   cache.set(idx, rec);
   _rawStats.decodes++;
-  // 방출 — 개수(기존)와 바이트 예산(신규) 둘 다 지키되, 최소 1개(지금 넣은 것)는 남긴다.
-  const totalBytes = () => [...cache.values()].reduce((n, r) => n + r.data.length, 0);
+  // 안전망 — 추정이 빗나가도 예산 초과 상주는 남기지 않는다(지금 넣은 1개는 유지).
   while (cache.size > 1 && (cache.size > RAW_CACHE_MAX || totalBytes() > RAW_CACHE_BYTES)) {
-    cache.delete(cache.keys().next().value); // 오래된 것 방출
+    cache.delete(cache.keys().next().value);
   }
   _rawStats = { files: cache.size, bytes: totalBytes(), decodes: _rawStats.decodes };
   return rec;
