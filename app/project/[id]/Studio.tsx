@@ -18,13 +18,13 @@ import BoundaryEditor, { type SavedRegion } from "./BoundaryEditor";
 import CastReview from "./CastReview";
 import CameraWorkEditor from "./CameraWorkEditor";
 
+// ★단계 번호 제거(사용자 지정) — 3·4·5 탭이 사라져 번호가 건너뛰며 오히려 혼란.
 const STEP_LABEL: Record<StepKind, string> = {
-  source: "1. 소스 · 컷 분할",
-  cast: "2. 캐스팅",
-  regen: "3. 이미지 재생성",
-  scene: "4. 동영상 생성 및 더빙",
-  // ★카메라 미리보기가 5단계, 합성이 6단계다(사용자 지정) — 실제 작업 순서와 번호를 맞춘다.
-  compose: "6. 합성",
+  source: "소스 · 컷 분할",
+  cast: "캐스팅",
+  regen: "이미지 재생성",
+  scene: "동영상 생성 및 더빙",
+  compose: "합성",
 };
 
 // 카메라 워크 프리셋 — 고르면 그 컷 모션 프롬프트(영문)를 이 문구로 채운다.

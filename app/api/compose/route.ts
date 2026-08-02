@@ -29,14 +29,17 @@ export async function POST(req: NextRequest) {
   const sceneIds = Array.isArray(body.sceneIds) ? body.sceneIds.filter((x): x is string => typeof x === "string") : null;
   const sectionKey = body.sectionKey != null ? String(body.sectionKey) : null;
   // ★언어별 출력(§10) — lang 이 오면 그 언어 오디오·자막으로 합성하고 파일명에 언어코드를 붙인다.
-  const lang = typeof body.lang === "string" && /^[a-z]{2,5}$/.test(body.lang) ? body.lang : null;
+  //   ★lang:"" 는 '원어판 명시'로 통과시켜야 한다(dub 라우트와 동일 규칙) — 예전 정규식이 "" 를
+  //   버려서, 대상 언어가 설정된 프로젝트는 원어판 합성이 불가능했다.
+  const lang =
+    typeof body.lang === "string" && (body.lang === "" || /^[a-z]{2,5}$/.test(body.lang)) ? body.lang : null;
 
   const now = Date.now();
   const job: Job = {
     id: randomUUID(),
     type: mode === "join" ? "join" : "compose",
     projectId,
-    payload: mode === "join" ? {} : { ...(sceneIds ? { sceneIds } : {}), ...(sectionKey ? { sectionKey } : {}), ...(lang ? { lang } : {}) },
+    payload: mode === "join" ? {} : { ...(sceneIds ? { sceneIds } : {}), ...(sectionKey ? { sectionKey } : {}), ...(lang != null ? { lang } : {}) },
     status: "queued",
     createdAt: now,
     updatedAt: now,

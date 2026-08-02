@@ -150,6 +150,10 @@ async function renderLayerB(o) {
   const [W, H] = await probe(o.fp, inPath, "stream=width,height");
   const [fpsRaw] = await probeRaw(o.fp, inPath, "stream=r_frame_rate");
   const fps = parseFps(fpsRaw) || 24;
+  // ★매트(정지 이미지 루프)는 '클립 실제 길이'만큼 늘려야 한다 — duration_s+2 로만 자르면
+  //   그보다 긴 클립(예: Kling 10초)이 shortest 에 의해 6초로 잘린 채 저장돼 뒷부분이 소실됐다.
+  const [clipDurRaw] = await probeRaw(o.fp, inPath, "format=duration");
+  const matteDur = Math.max(Number(clipDurRaw) || 0, dur0(cameraWork)) + 0.5;
   const table = buildKeyframeTable(cameraWork, { fps, refWidth: W, refHeight: H });
   const bgTr = table.tracks.background;
   const chTr = table.tracks.character;
@@ -162,7 +166,11 @@ async function renderLayerB(o) {
     for (const k of tr.keys) {
       const c = toPixelCrop({ scale: k.scale, cx: k.cx, cy: k.cy }, W, H, { even: true });
       if (!first) first = c;
-      lines.push(`${k.t.toFixed(3)} ${name} w ${c.cropW}, ${name} h ${c.cropH}, ${name} x ${c.x}, ${name} y ${c.y};`);
+      // ★sendcmd 의 target 은 필터 '인스턴스명 전체'(crop@cbg) — 아래 필터 그래프가 crop@cbg 로
+      //   선언하므로 여기도 같아야 한다. 예전엔 cbg 만 써서 모든 명령이 'Function not implemented'
+      //   로 조용히 무시됐고, 버티고·패럴랙스 굽기가 돈·인코딩만 쓰고 정지 클립을 저장했다
+      //   (실측: 타깃 cbg → 첫/끝 프레임 PSNR 49.7dB(정지) / crop@cbg → 10.2dB(정상 무빙)).
+      lines.push(`${k.t.toFixed(3)} crop@${name} w ${c.cropW}, crop@${name} h ${c.cropH}, crop@${name} x ${c.x}, crop@${name} y ${c.y};`);
     }
     return { text: lines.join("\n") + "\n", first };
   };
@@ -187,7 +195,7 @@ async function renderLayerB(o) {
   await run(
     ff,
     ["-hide_banner", "-nostats", "-loglevel", "warning", "-y",
-     "-i", inPath, "-loop", "1", "-framerate", String(fps), "-t", String(dur0(cameraWork)), "-i", mattePath,
+     "-i", inPath, "-loop", "1", "-framerate", String(fps), "-t", String(matteDur), "-i", mattePath,
      "-filter_complex", filter, "-map", "[out]", "-shortest", "-an",
      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
      "-threads", "2", "-movflags", "+faststart", outPath],

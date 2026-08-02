@@ -222,24 +222,28 @@ export async function runCompose(projectId, payload) {
   const workingLang = (outLang ?? p.workingLanguage ?? "").trim() || (outLang === "" ? "" : (p.targetLanguages ?? [])[0] || "");
   // ★★언어판을 요청했는데 그 언어 번역이 하나도 없으면 '전부 원문' 인 파일이 만들어진다 —
   //   사용자는 일본어판인 줄 알고 받는데 자막·소리가 중국어다(실제 보고). 조용한 폴백을 막는다.
-  if (outLang) {
+  // ★게이트는 '실제 출력 언어(workingLang)' 기준 — 예전엔 명시 lang(outLang)일 때만 검사해서,
+  //   lang 없이 오는 섹션 합성이 targetLanguages[0] 기본값으로 언어판을 만들면서 게이트를
+  //   우회했다. 그 언어 번역이 없으면 대사 줄이 자막도 소리도 없이 통째로 빠진 영상이
+  //   sectionVideos 에 조용히 저장됐다(사전 검출). 언어판이면 경로 불문 검사한다.
+  if (workingLang) {
     const has = (p.scenes ?? []).some((sc) =>
-      (sc.cut?.bubbles ?? []).some((b) => b.speakerId !== "__sfx__" && (b.tracks?.[outLang]?.text || "").trim())
+      (sc.cut?.bubbles ?? []).some((b) => b.speakerId !== "__sfx__" && (b.tracks?.[workingLang]?.text || "").trim())
     );
     if (!has)
       throw new Error(
-        `${outLang} 번역이 아직 없어요 — 4단계에서 '${outLang}로 만들기' 를 누르면 번역·더빙이 한 번에 됩니다`
+        `${workingLang} 번역이 아직 없어요 — '더빙 일괄(${workingLang})' 을 누르면 번역·더빙이 한 번에 됩니다`
       );
     const hasAudio = (p.scenes ?? []).some((sc) =>
-      (sc.cut?.bubbles ?? []).some((b) => (b.tracks?.[outLang]?.audioUrl || "").trim())
+      (sc.cut?.bubbles ?? []).some((b) => (b.tracks?.[workingLang]?.audioUrl || "").trim())
     );
     // ★예전엔 여기서 "소리는 원문으로 나갑니다" 라고 경고만 하고 중국어 음성을 실어 보냈다.
     //   이제 원어 폴백이 없으므로, 그 언어 음성이 하나도 없으면 무음 영상이 나온다 —
     //   그런 걸 납품물로 만들어 주지 않는다. 무엇이 없는지 말하고 멈춘다.
     if (!hasAudio)
       throw new Error(
-        `${outLang} 더빙 음성이 하나도 없습니다 — 지금 합성하면 소리 없는 영상이 됩니다. ` +
-          `4단계 '🎙 전체 더빙 생성' 을 먼저 돌려주세요(원어 음성은 언어판에 넣지 않습니다).`
+        `${workingLang} 더빙 음성이 하나도 없습니다 — 지금 합성하면 소리 없는 영상이 됩니다. ` +
+          `'더빙 일괄' 을 먼저 돌려주세요(원어 음성은 언어판에 넣지 않습니다).`
       );
   }
   // 자막 씬(무성영화 카드, text 컷)은 영상 없이도 합성 대상 — 검은 배경+카드로 직접 렌더.
