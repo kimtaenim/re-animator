@@ -440,6 +440,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 🌳 트리 뷰 상태 — 펼친 섹션(하나만)·펼친 컷(하나만, 아코디언). -1 = 전부 접힘.
   const [openTreeSection, setOpenTreeSection] = useState<number>(0);
   const [openTreeCut, setOpenTreeCut] = useState<string | null>(null);
+  // 트리 자동 더빙은 페이지 로드당 1회만 건다(증분이라 중복 비용은 없지만 잡 스팸 방지).
+  const treeDubAutoRef = useRef(false);
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
   const [scenePreview, setScenePreview] = useState<string | null>(null); // 씬 미리보기(영상+자막+더빙)
   const [bubDropId, setBubDropId] = useState<string | null>(null); // 대사(말풍선) 드래그앤드롭 시 드롭 대상 컷 하이라이트
@@ -4415,6 +4417,25 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         .filter((c) => c.originalImage && c.cut?.type !== "text" && !c.generatedImage && !regenPending.has(c.id))
                         .map((c) => c.id);
                       if (missing.length) void regenBatch(missing);
+                      // ★더빙도 제 때(사용자 지정) — 소리 없는 대사가 있으면 자동으로 건다.
+                      //   번역이 부족하면 makeLanguage 가 채우고 이어서 더빙(버튼과 같은 동작).
+                      //   워커 큐가 이미지 → 더빙 순서로 처리하므로 서로 안 겹친다. 증분이라
+                      //   이미 만든 오디오는 다시 만들지 않는다. 페이지 로드당 1회만.
+                      if (!treeDubAutoRef.current && !dubbing && !translating) {
+                        const needsDub = orderedScenes.some((c) =>
+                          (c.cut?.bubbles ?? []).some(
+                            (b) =>
+                              (b.text || "").trim() &&
+                              b.speakerId !== SFX_SPEAKER &&
+                              !(dubLang ? b.tracks?.[dubLang]?.audioUrl : b.audioUrl)
+                          )
+                        );
+                        if (needsDub) {
+                          treeDubAutoRef.current = true;
+                          if (dubLang) void makeLanguage(dubLang);
+                          else void runDubJob(undefined, "");
+                        }
+                      }
                     }
                   }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold"
