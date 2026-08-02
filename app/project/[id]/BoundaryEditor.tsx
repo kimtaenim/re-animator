@@ -171,10 +171,27 @@ export default function BoundaryEditor({ sourceFiles, canvas, scenes, projectId,
   const [lastScenes, setLastScenes] = useState(scenes);
   const [lastScopeKey, setLastScopeKey] = useState(() => (sectionIds ?? []).join(","));
   const scopeKey = (sectionIds ?? []).join(",");
-  if ((scenes !== lastScenes || scopeKey !== lastScopeKey) && !dirty && !saving) {
-    setLastScenes(scenes);
-    setLastScopeKey(scopeKey);
-    setRegions(scenesToRegions(scopedScenes));
+  // ★세대(씬 id 세트) 추적 — dirty 보호막의 구멍 방지용. 내가 편집하던 씬들과 '다른 id 세트'가
+  //   오면 재분할 등으로 세계가 갈아엎어진 것이다. 그때도 dirty 라고 옛 경계를 움켜쥐고 있으면
+  //   900ms 뒤 자동저장이 방금 만든 새 분할을 옛 경계로 통째로 되돌린다
+  //   (2026-08-02 실제 사고: 재분할 14컷이 옛 15컷으로 부활 + 추출 상태까지 리셋).
+  const idKey = scopedScenes.map((s) => s.id).join(",");
+  const [seedIdKey, setSeedIdKey] = useState(idKey);
+  if (scenes !== lastScenes || scopeKey !== lastScopeKey) {
+    if (!dirty && !saving) {
+      setLastScenes(scenes);
+      setLastScopeKey(scopeKey);
+      setRegions(scenesToRegions(scopedScenes));
+      setSeedIdKey(idKey);
+    } else if (idKey !== seedIdKey) {
+      // 재분할 감지 — 저장 안 된 경계 편집은 죽은 세계의 것이다. 버리고 새 분할로 동기화.
+      console.warn("[G1] 재분할 감지 — 저장 안 된 경계 편집을 버리고 새 분할로 동기화합니다");
+      setLastScenes(scenes);
+      setLastScopeKey(scopeKey);
+      setRegions(scenesToRegions(scopedScenes));
+      setSeedIdKey(idKey);
+      setDirty(false); // 자동저장 예약 해제 — 옛 경계를 다시 쓰지 않는다
+    }
   }
 
   useLayoutEffect(() => {

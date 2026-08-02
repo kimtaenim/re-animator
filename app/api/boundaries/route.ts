@@ -88,6 +88,15 @@ export async function PUT(req: NextRequest) {
   if (!project.virtualCanvas) {
     return NextResponse.json({ ok: false, error: "분할 먼저 실행하세요" }, { status: 409 });
   }
+  // ★분할/추출이 도는 동안 경계 저장 금지 — 낡은 화면의 자동저장 한 방이 진행 중인 잡의
+  //   결과(새 분할·추출 상태)를 통째로 되돌리는 사고 차단(2026-08-02: 재분할 14컷이 옛 15컷으로
+  //   부활 + running 상태가 review 로 리셋돼 '버튼이 돌아오는' 증상). 잡이 끝나면 다시 저장 가능.
+  if (project.steps?.source?.status === "running") {
+    return NextResponse.json(
+      { ok: false, error: "분할/추출 작업이 진행 중이라 경계 저장을 막았어요 — 작업이 끝난 뒤 다시 편집하세요" },
+      { status: 409 }
+    );
+  }
 
   const total = project.virtualCanvas.totalHeight;
   // 정규화·검증: 범위 클램프 + yStart<yEnd 인 것만 + 순서 정렬.
