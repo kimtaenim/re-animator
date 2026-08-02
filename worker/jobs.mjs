@@ -1057,18 +1057,30 @@ export async function runExtract(projectId, payload) {
       await Promise.all(
         chunk.map(async (s) => {
           try {
-            const png = await extractRegion(
-              p.virtualCanvas,
-              buffers,
-              s.sourceRegion.yStart,
-              s.sourceRegion.yEnd,
-              s.sourceRegion.xStart,
-              s.sourceRegion.xEnd
-            );
             if (!s.cut) s.cut = { dialogue: "", sfx: "", type: null };
             // ★이중 OCR 제거: 분할이 이미 풀해상도로 읽어 bubbles 를 채웠으면 다시 안 읽는다(추출 시간
             //   대폭 절약, 검토한 대사=결과 일관성도 ↑). 경계 바뀐 컷은 저장 라우트가 bubbles 를 비워 재OCR.
             const hasSplitText = (s.cut.bubbles ?? []).some((b) => (b.text || "").trim());
+            const needCam = !(s.cut.motion || "").trim();
+            const needDur = s.cut.durationSec == null;
+            const needTrans = s.cut.transition == null;
+            const needAction = s.cut.action == null;
+            const needEmo = (s.cut.bubbles ?? []).some((b) => !b.emotion && b.speakerId !== "__sfx__" && (b.text || "").trim());
+            const needSubY = (s.cut.bubbles ?? []).some((b) => b.subtitleY == null && b.speakerId !== "__sfx__" && (b.text || "").trim());
+            const needsDirect = needCam || needDur || needTrans || needAction || needEmo || needSubY;
+            // ★필요할 때만 픽셀 추출 — 예전엔 OCR·연출을 전부 건너뛸 컷도 무조건 풀해상도 PNG 를
+            //   뽑았다(동시 2개). 재추출처럼 대사·연출이 이미 있는 프로젝트에서 이 루프가
+            //   '글씨 읽기 8/15'에서 메모리로 죽던 원인(2026-08-02 실측 로그). 안 쓸 이미지는 안 만든다.
+            const png = (!hasSplitText || needsDirect)
+              ? await extractRegion(
+                  p.virtualCanvas,
+                  buffers,
+                  s.sourceRegion.yStart,
+                  s.sourceRegion.yEnd,
+                  s.sourceRegion.xStart,
+                  s.sourceRegion.xEnd
+                )
+              : null;
             if (!hasSplitText) {
             const own = await readCutTextTiled(png, key, OCR_MODEL);
             tileOk += own.tiledAdded || 0;
@@ -1112,13 +1124,7 @@ export async function runExtract(projectId, payload) {
             } // end if(!hasSplitText) — 분할 대사 재사용 시 위 OCR 블록 스킵
             // ── AI 연출: 번역을 읽고 풀 연출안(카메라·길이·전환·동작·줄별 감정·자막위치)을
             //   디폴트로 채운다. ★사용자가 이미 지정한 값은 절대 안 덮는다(미지정 필드만).
-            const needCam = !(s.cut.motion || "").trim();
-            const needDur = s.cut.durationSec == null;
-            const needTrans = s.cut.transition == null;
-            const needAction = s.cut.action == null;
-            const needEmo = (s.cut.bubbles ?? []).some((b) => !b.emotion && b.speakerId !== "__sfx__" && (b.text || "").trim());
-            const needSubY = (s.cut.bubbles ?? []).some((b) => b.subtitleY == null && b.speakerId !== "__sfx__" && (b.text || "").trim());
-            if (needCam || needDur || needTrans || needAction || needEmo || needSubY) {
+            if (needsDirect) {
               try {
                 const lines = (s.cut.bubbles ?? [])
                   .map((b, bi) => ({ index: bi, speaker: b.speakerId === "__sfx__" ? null : b.speakerId ? "character" : "narration", text: (b.text || "").trim(), translation: (b.translation || "").trim() }))
@@ -1158,7 +1164,7 @@ export async function runExtract(projectId, payload) {
         })
       );
       done = Math.min(i + C, ocrTodo.length);
-      await log(`글씨 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%)`);
+      await log(`글씨 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%) · ${memLine()}`);
     }
     await log(`[진단] 내레이션 밴드 OCR: ${trHit}/${trTotal} 성공(글자 잡힘) — 0/0이면 밴드가 분할서 안 넘어온 것`);
     if (trlOk > 0) {
@@ -1182,6 +1188,10 @@ export async function runExtract(projectId, payload) {
       await log("AI 연출 건너뜀 — 워커 env 에 ANTHROPIC_API_KEY 를 넣으면 카메라·감정 자동 지정");
     }
   }
+  // ★픽셀 작업 끝 — 이후(교정·번역·저장)는 전부 텍스트다. raw 캐시(파일당 수십 MB)와
+  //   소스 원본 버퍼를 여기서 내려놓아 뒤 단계가 벼랑 끝에서 돌지 않게 한다(분할과 동일 처방).
+  clearRawCache(buffers);
+  buffers.length = 0;
 
   for (const s of scenes) { normalizeNarration(s.cut); normalizeSfx(s.cut); } // 내레이션·효과음 문자열 → 통제 가능한 말풍선으로 통일
   // ★OCR 교정(보수적) — 추출 단계에서도 오독·고유명사 불일치를 전체 문맥으로 잡는다(단계마다 검출).
