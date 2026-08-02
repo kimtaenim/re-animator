@@ -2459,6 +2459,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   //   "일본어 더빙이 안 된다"로 보였다. lang 인자를 주면 그 언어를 강제로 듣는다(언어판 확인용).
   type Bub = NonNullable<NonNullable<Project["scenes"][number]["cut"]>["bubbles"]>[number];
   const bubbleAudio = (b: Bub, lang?: string): string => {
+    // ★★효과음은 언어 무관 — 워커가 b.audioUrl 에 저장한다(tracks[lang] 아님). 아래 언어 규칙에
+    //   태우면 "더빙은 되는데 효과음만 안 들림/🔇"(실사례 2026-08-02) — 만든 쪽(b.audioUrl)과
+    //   읽는 쪽(tracks[lang])이 어긋난 배선이었다. 합성(compose audioUnits)은 원래 이 규칙이 맞다.
+    if (b.speakerId === SFX_SPEAKER) return (b.audioUrl || "").trim();
     const lg = (lang ?? dubLang).trim(); // 기본 = 더빙 언어(원어 더빙을 안 만드므로 여기도 같은 기준)
     // ★더빙 언어가 정해져 있으면 원어(중국어) 음성으로 폴백하지 않는다.
     //   폴백하면 일본어 더빙이 안 된 줄에서 중국어가 들리고, 화면상 🔊(초록)이라 '됐다' 로 보인다
