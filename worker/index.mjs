@@ -3,7 +3,7 @@
 // Render/Railway/Fly 등 상시 서버에서 `node index.mjs`.
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { popJob, updateJob, failStep } from "./store.mjs";
+import { popJob, updateJob, failStep, redis, logProgress } from "./store.mjs";
 
 // ★부모(폴러)는 jobs.mjs·compose.mjs 를 아예 로드하지 않는다 — sharp(libvips)도 안 올라온다.
 //   모든 실제 작업은 runOne.mjs 자식이 하고, 끝나면 프로세스가 죽어 메모리가 OS 로 반환된다.
@@ -118,6 +118,9 @@ async function tick(types) {
 
   console.log(`[worker] ${type} 시작 job=${job.id} project=${job.projectId}`);
   try {
+    // ★지금 도는 잡을 Redis 에 남긴다 — 인스턴스가 통째로 죽어도(메모리 초과 재시작·재배포)
+    //   다음 부팅이 이 기록을 보고 잡을 에러로 확정할 수 있게(영원한 '진행 중' 차단).
+    try { await redis.set("worker:current", { jobId: job.id, projectId: job.projectId, type }); } catch {}
     await updateJob(job.id, { status: "running" });
     const count = await runJobInChild(job);
     await updateJob(job.id, { status: "done" });
@@ -137,6 +140,31 @@ async function tick(types) {
     } catch (e2) {
       console.error("[worker] failStep 실패:", e2?.message ?? e2);
     }
+  } finally {
+    try { await redis.del("worker:current"); } catch {}
+  }
+}
+
+// ★좀비 잡 정리(부팅 시 1회) — 인스턴스가 통째로 죽으면(Render 메모리 초과 재시작·재배포)
+//   돌던 잡이 Redis 에 "running" 으로 영원히 남아 화면이 '진행 중'에서 멈춘다(=먹통).
+//   위에서 남긴 worker:current 를 보고 그 잡을 에러로 확정 + 단계·진행로그에 사유를 남긴다.
+//   조용한 실패 금지: 죽었으면 죽었다고 화면에 말한다.
+async function sweepZombieJob() {
+  try {
+    const cur = await redis.get("worker:current");
+    if (cur?.jobId) {
+      const dead = "워커가 재시작되어 잡이 중단됨(메모리 초과 또는 재배포) — 다시 시작해 주세요";
+      try { await updateJob(cur.jobId, { status: "error", error: dead }); } catch {}
+      try {
+        if (!["dub", "postfx", "camerafx", "sequence", "translate"].includes(cur.type))
+          await failStep(cur.projectId, dead, JOB_STEP[cur.type] ?? "source");
+      } catch {}
+      try { await logProgress(cur.projectId, `[중단] ${cur.type} 잡이 워커 재시작으로 죽었습니다 — ${dead}`); } catch {}
+      console.log(`[worker] 좀비 잡 정리: ${cur.type} job=${cur.jobId} → error 확정`);
+    }
+    await redis.del("worker:current");
+  } catch (e) {
+    console.error("[worker] 좀비 잡 정리 실패(계속 실행):", e?.message ?? e);
   }
 }
 
@@ -144,8 +172,9 @@ async function tick(types) {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log("[worker] BUILD = mem-v36 (분할 OOM 수정 — 원본 raw 캐시를 바이트 예산으로 상한)");
+console.log("[worker] BUILD = mem-v37 (좀비 잡 정리 — 워커 재시작 시 '영원히 진행 중' 차단)");
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
+await sweepZombieJob();
 for (;;) {
   await tick(TYPES);
   await new Promise((r) => setTimeout(r, POLL_MS));
