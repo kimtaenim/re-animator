@@ -3079,6 +3079,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                               <option value="fal">Flux</option>
                               <option value="photoreal">실사화</option>
                             </select>
+                            {/* 🎙 이 컷 더빙 — ④와 같은 함수(runDubJob)라 상태·결과 자동 싱크(사용자 지정). */}
+                            <button
+                              onClick={() => runDubJob([s.id])}
+                              disabled={busy || dubbing}
+                              title={`이 컷 대사·효과음만 ${dubLangLabel}로 다시 더빙 — ④의 '이 컷 더빙'과 동일`}
+                              className="rounded border border-[var(--accent)] px-1.5 py-0.5 text-[var(--accent)] hover:bg-[var(--panel-2)] disabled:opacity-40"
+                            >
+                              🎙 더빙
+                            </button>
                             {modelFor(s.id) === "gpt-image-2" && (
                               <button
                                 type="button"
