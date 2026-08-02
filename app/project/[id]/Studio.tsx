@@ -2583,10 +2583,21 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         )
       );
       if (needDub) {
-        setDubMsg(`🎙 ${LANGUAGES.find((l) => l.id === useLang)?.label ?? useLang} 더빙이 덜 된 줄을 먼저 채웁니다 — 끝나면 자동으로 이어집니다`);
+        // ★이미 더빙 잡이 돌고 있으면 여기서 조용히 실패한다(runDubJob 의 중복 가드) —
+        //   사용자에겐 '버튼을 눌렀는데 아무 일도 안 일어남' 으로 보인다. 이유를 말한다.
+        if (dubbing || translating) {
+          setError("더빙/번역이 이미 돌고 있습니다 — 끝난 뒤 다시 눌러주세요.");
+          return;
+        }
+        const langLabel = LANGUAGES.find((l) => l.id === useLang)?.label ?? useLang;
+        setDubMsg(`🎙 ${langLabel} 더빙이 덜 된 줄을 먼저 채웁니다 — 끝나면 자동으로 이어집니다`);
         const okLang = await makeLanguage(useLang);
         setDubMsg(null);
-        if (!okLang) return; // 번역·더빙이 실패하면 반쪽짜리 결과를 만들지 않는다
+        if (!okLang) {
+          // 번역·더빙이 실패하면 반쪽짜리 결과를 만들지 않는다. 단, 왜 멈췄는지는 반드시 남긴다.
+          setError((e) => e || `${langLabel} 더빙을 채우지 못해 합성을 멈췄습니다 — 위 진행 로그의 실패 사유를 확인하세요.`);
+          return;
+        }
       }
     }
     // ★★'무엇을 굽고 무엇을 안 굽는지' 를 사람이 알 필요가 없어야 한다(사용자 지적).
@@ -2601,7 +2612,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       setDubMsg(`🎥 카메라워크가 반영 안 된 ${stale.length}개 컷을 먼저 굽습니다 — 끝나면 자동으로 합성합니다`);
       const okBake = await bakeAllCamera(stale);
       setDubMsg(null);
-      if (!okBake) return; // 굽기가 실패하면 합성으로 넘어가지 않는다(반쪽 결과 방지)
+      if (!okBake) {
+        // 굽기가 실패하면 합성으로 넘어가지 않는다(반쪽 결과 방지) — 이유를 반드시 남긴다.
+        setError((e) => e || `카메라워크 굽기(${stale.length}개 컷)가 끝나지 않아 합성을 멈췄습니다 — 위 진행 로그를 확인하세요.`);
+        return;
+      }
     }
     try {
       const r = await fetch("/api/compose", {
