@@ -4708,6 +4708,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
             >
               흔들림 모두 끄기
             </button>
+            {/* 배포 확인용 — '내 화면이 새 앱인가'를 여기서 바로 본다(4단계 언어 바와 같은 목적). */}
+            <span className="font-mono text-[9px] text-[var(--muted)] opacity-70">
+              앱 {(process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7)}
+            </span>
             {/* ★체크 → 한 번에 굽기. 컷마다 '적용(굽기)'를 누르면 컷 수만큼 클릭이 든다(사용자 지적). */}
             <button
               type="button"
