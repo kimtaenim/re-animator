@@ -1701,6 +1701,9 @@ export async function runRegen(projectId, payload) {
   // (모델은 라우팅 문자열일 뿐, 피크 메모리는 REGEN_CONCURRENCY 개 이미지 버퍼로 결정).
   const key = process.env.OPENAI_API_KEY;
   const falKey = process.env.FAL_KEY;
+  // ★80c6dc7 이 collectCastRefs(…, VLM_MODEL, …) 를 이 함수에 넣으면서 정의를 빠뜨려
+  //   재생성 첫 컷부터 ReferenceError("VLM_MODEL is not defined")로 전멸했다(2026-08-02 실측).
+  const VLM_MODEL = process.env.OPENAI_VLM_MODEL || "gpt-4o";
   const models = payload?.models && typeof payload.models === "object" ? payload.models : null;
   const defModel = payload?.model || "gpt-image-2";
   const resolveModel = (id) => (models && models[id]) || defModel;

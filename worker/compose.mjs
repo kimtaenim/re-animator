@@ -14,7 +14,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { renderCaptionBox, renderIntertitleFrame } from "./subtitle-render.mjs";
+import { renderCaptionBox, renderIntertitleFrame, ensureSubtitleFontPath } from "./subtitle-render.mjs";
 import { stripMarks } from "./emphasis.mjs";
 
 let FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
