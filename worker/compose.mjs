@@ -1,7 +1,9 @@
 // ============================================================================
-// 합성(5단계) — ★aninews 검증 per-scene 방식 그대로.★ 씬마다: 영상 + 더빙 오디오 + 자막(시간
-// 구간 순차 번인) 을 한 번에 인코딩 → 이어붙이기. 오디오가 영상보다 길면 영상을 슬로모션(setpts)
-// 으로 늘림(루프 X). aninews 와 다른 점은 최소화(pad 레터박스, 씬당 오디오 유닛 여러 개 concat).
+// 합성(6단계) — 영상(컷 길이)이 뼈대, 오디오는 그룹(섹션) 타임라인에 흘려 얹는다(사용자 규칙).
+// ①컷별 재료 수집 → ②그룹 타임라인에 소리 배치(넘치면 다음 컷 위로, 섹션 경계는 안 넘음)
+// → ③세그먼트는 영상 길이대로 인코딩(영상 전용, 자막은 배치만큼 지연) → concat
+// → ④그룹 오디오를 adelay/amix 로 한 번에 얹음(-c:v copy). 그룹 끝에 소리가 남으면
+//    마지막 컷만 홀드(tpad/-t)로 연장. 슬로모션 없음.
 // ============================================================================
 
 import { getProject, saveProject, logProgress, resetProgress, recordCost } from "./store.mjs";
@@ -258,7 +260,15 @@ export async function runCompose(projectId, payload) {
   const [W, H] = targetDims(p);
   const dir = await mkdtemp(join(tmpdir(), "recompose-"));
   try {
+    // ★★사운드 흘려얹기(사용자 지정 규칙) — "같은 섹션(배경 안 바뀌는 범위) 안에서는 소리가
+    //   컷을 자연스럽게 넘나들고, 섹션 경계에서 끊는다. 영상(컷 길이)이 뼈대, 오디오는 위에."
+    //   예전엔 컷마다 소리가 끝날 때까지 영상을 홀드해 컷이 늘어졌다(대사가 컷 길이를 지배).
+    //   이제 2단계: ①컷별 재료 수집 → 그룹 타임라인에 오디오 배치(넘치면 다음 컷 위로,
+    //   앞 소리가 안 끝났으면 그 뒤에 이어서) → ②세그먼트는 영상 길이대로 인코딩(자막은
+    //   배치만큼 지연), 그룹 오디오는 concat 뒤에 한 번에 얹는다(-c:v copy — 재인코딩 없음).
+    //   그룹 = 섹션(sectionStarts). 그룹 끝에서 소리가 남으면 마지막 컷만 홀드로 연장.
     const sceneFiles = [];
+    const parts = []; // 1단계 수집: { s, isCard, vPath, vd, aPath, audioLen, caps, ... }
     for (let i = 0; i < scenes.length; i++) {
       const s = scenes[i];
       const isCard = isCardScene(s); // 무성영화 자막 씬 — 영상 없음, 카드로 렌더
@@ -406,24 +416,54 @@ export async function runCompose(projectId, payload) {
         }
       }
 
+      // ── 1단계 끝: 세그먼트 뼈대 길이 확정 — 카드 씬=분량(소리·자막), 일반 컷=영상 길이.
+      //    ★오디오가 길어도 세그먼트를 늘리지 않는다(흘려얹기) — 그룹 배치(아래 2단계)가 처리.
       const capTotal = caps.length ? caps[caps.length - 1].end : 0;
-      const finalDur = Math.max(audioLen, capTotal) || (isCard ? 2.5 : vd);
-      if (caps.length) caps[caps.length - 1].end = finalDur + 0.5; // 마지막 자막 끝까지
-      // ★★길이 부족 보정(스펙 §5) — 예전엔 오디오가 길면 '전 티어'를 슬로모션했다.
-      //   스펙: "idle/emote 는 0.6-0.8배 슬로우 허용, ★talk 는 슬로우 금지, 루프는 전 티어 금지.
-      //          final > 클립이면 마지막 프레임 홀드 + 카메라워크 지속."
-      //   talk 를 늘리면 입 움직임이 대사와 어긋나 어색해진다 → talk/action 은 슬로우 없이
-      //   '마지막 프레임 홀드'(tpad)로 채운다. idle/emote 만 0.8배까지 슬로우하고 남는 건 홀드.
-      const tier = s.cut?.motionTier;
-      const slowAllowed = tier === "idle" || tier === "emote"; // 스펙 §5
-      const MAX_SLOW = 1 / 0.8; // 0.8배 슬로우 = 1.25배 길이까지만
-      let speed = 1;
-      let holdSec = 0;
-      if (vd > 0 && finalDur > vd) {
-        const need = finalDur / vd;
-        speed = slowAllowed ? Math.min(need, MAX_SLOW) : 1;
-        holdSec = Math.max(0, finalDur - vd * speed); // 슬로우로 못 채운 나머지는 마지막 프레임 홀드
+      const segBase = isCard ? Math.max(audioLen, capTotal) || Number(s.cut?.durationSec) || 2.5 : vd || 3;
+      parts.push({ s, isCard, vPath, vd: segBase, aPath, audioLen, caps, delay: 0, holdSec: 0, start: 0 });
+    }
+
+    // ── 2단계: 그룹(섹션) 타임라인에 오디오 배치 — "같은 섹션 안에서 소리가 컷을 넘나든다".
+    //    각 컷 소리의 시작 = max(그 컷 영상 시작, 앞 소리가 끝난 시각). 그룹(섹션) 경계에서는
+    //    소리를 끊는다 — 남은 소리만큼 그룹 마지막 컷을 홀드로 연장(배경이 바뀌기 전에 마무리).
+    const nAll = (p.scenes ?? []).length;
+    const groupBounds = new Set(sectionKey != null ? [] : (p.sectionStarts ?? []).filter((x) => x > 0 && x < nAll));
+    let cursorVideo = 0; // 전체 타임라인에서 현재 컷 영상 시작
+    let audioCursor = 0; // 다음 소리를 놓을 수 있는 가장 이른 시각
+    for (let k = 0; k < parts.length; k++) {
+      const pt = parts[k];
+      if (k > 0 && groupBounds.has(pt.s.order)) {
+        // 새 그룹(섹션) 시작 — 이전 그룹 소리가 남았으면 직전 컷을 홀드로 늘려 그 안에서 끝낸다.
+        const over = audioCursor - cursorVideo;
+        if (over > 0.05) {
+          parts[k - 1].holdSec += over;
+          cursorVideo += over;
+        }
+        audioCursor = cursorVideo;
       }
+      pt.start = cursorVideo;
+      const aStart = Math.max(cursorVideo, audioCursor);
+      pt.delay = aStart - cursorVideo; // 앞 컷 소리가 길었던 만큼 이 컷 소리·자막이 늦게 시작
+      audioCursor = aStart + (pt.audioLen || 0);
+      cursorVideo += pt.vd;
+    }
+    {
+      // 마지막 그룹 꼬리 — 소리가 영상보다 길면 마지막 컷을 홀드로 연장.
+      const over = audioCursor - cursorVideo;
+      if (over > 0.05 && parts.length) {
+        parts[parts.length - 1].holdSec += over;
+        cursorVideo += over;
+      }
+    }
+    const timelineDur = cursorVideo;
+
+    // ── 3단계: 세그먼트 인코딩(영상 길이대로, 자막은 배치만큼 지연) ──
+    for (let i = 0; i < parts.length; i++) {
+      const pt = parts[i];
+      const { s, isCard, vPath, aPath } = pt;
+      const caps = pt.caps.map((c) => ({ ...c, start: c.start + pt.delay, end: c.end + pt.delay }));
+      const holdSec = pt.holdSec;
+      const finalDur = pt.vd + holdSec;
 
       // 자막 캡션 PNG(캔버스 재사용). 위치는 자막 있을 때만 계산.
       // 위치 해석: 대사(말풍선)별 지정 > 컷 기본 > 디폴트. 카드 씬 기본은 정중앙(무성영화).
@@ -481,7 +521,7 @@ export async function runCompose(projectId, payload) {
       }
 
       const fadeOut = FADES_OUT.has(s.cut?.transition);
-      const fadeIn = FADES_IN.has(scenes[i - 1]?.cut?.transition) || (i === 0 && s.cut?.transition === "fadein");
+      const fadeIn = FADES_IN.has(parts[i - 1]?.s.cut?.transition) || (i === 0 && s.cut?.transition === "fadein");
 
       // ── ffmpeg (aninews 패턴): 입력 0=영상(카드 씬은 검정+테두리 프레임), 1=오디오, 2..=자막 PNG ──
       // -nostats/-loglevel warning: 프레임마다 진행 로그를 stderr 에 쏟지 않게(메모리 폭증 방지).
@@ -505,8 +545,8 @@ export async function runCompose(projectId, payload) {
       } else {
         args.push("-i", vPath);
       }
-      if (aPath) args.push("-i", aPath);
-      else args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100");
+      // ★세그먼트는 '영상 전용' — 소리는 그룹 타임라인(4단계 믹스)에서 한 번에 얹는다(흘려얹기).
+      void aPath;
       for (const c of capPaths) args.push("-loop", "1", "-framerate", String(FPS), "-i", c.path);
       // canvas 폴백일 때만 테두리를 ffmpeg 로 그린다(미리보기와 같은 인셋 4%/5.2%, 아이보리).
       const cardBorders = (() => {
@@ -520,7 +560,7 @@ export async function runCompose(projectId, payload) {
       let filter = isCard
         ? `[0:v]${cardNative ? `${cardBorders.slice(1)},` : ""}setsar=1,fps=${FPS}` // 프레임이 이미 W×H 정확 — 스케일·슬로모션 불필요
         : `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
-          `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,setpts=${speed.toFixed(4)}*PTS,fps=${FPS}`;
+          `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,setpts=PTS,fps=${FPS}`;
       // 마지막 프레임 홀드(스펙 §5) — tpad 로 클립 끝을 늘린다. 루프가 아니라 정지 홀드.
       if (holdSec > 0.05 && !isCard) filter += `,tpad=stop_mode=clone:stop_duration=${holdSec.toFixed(2)}`;
       if (fadeIn) filter += `,fade=t=in:st=0:d=${FADE}`;
@@ -530,7 +570,7 @@ export async function runCompose(projectId, payload) {
       const WHIP = 0.15;
       const whipR = Math.max(4, Math.round(Math.min(W, H) / 12)); // 블러 반경(px)
       const whipOut = s.cut?.transition === "whip";
-      const whipIn = scenes[i - 1]?.cut?.transition === "whip";
+      const whipIn = parts[i - 1]?.s.cut?.transition === "whip";
       if (whipIn) filter += `,boxblur=luma_radius=${whipR}:luma_power=1:enable='lt(t,${WHIP})'`;
       if (whipOut) filter += `,boxblur=luma_radius=${whipR}:luma_power=1:enable='gte(t,${Math.max(0, finalDur - WHIP).toFixed(2)})'`;
       // ★ASS 자막 번인(스펙 §7) — subtitles 필터. 텍스트라 이미지 메모리 0.
@@ -542,32 +582,61 @@ export async function runCompose(projectId, payload) {
       filter += `[bg]`;
       let prev = "bg";
       capPaths.forEach((c, k) => {
-        filter += `;[${prev}][${2 + k}:v]overlay=${c.x}:${c.y}:enable='between(t,${c.span.start.toFixed(3)},${c.span.end.toFixed(3)})'[o${k}]`;
+        filter += `;[${prev}][${1 + k}:v]overlay=${c.x}:${c.y}:enable='between(t,${c.span.start.toFixed(3)},${c.span.end.toFixed(3)})'[o${k}]`;
         prev = `o${k}`;
       });
       const out = join(dir, `scene${i}.mp4`);
       args.push(
         "-filter_complex", filter,
-        "-map", `[${prev}]`, "-map", "1:a",
+        "-map", `[${prev}]`, // ★영상 전용 — 소리는 4단계 그룹 믹스에서 얹는다(흘려얹기)
         "-t", finalDur.toFixed(2), "-r", String(FPS),
-        // -threads 2: x264 가 호스트 코어 수만큼 스레드·프레임버퍼를 잡아 피크가 커짐(실측
-        // 596→404MB). 과거 문제였던 -threads 1+ultrafast 와 달리 2+veryfast 는 로컬 검증 통과.
         // ★메모리 절약(OOM 반복) — 스레드 1 + 룩어헤드/B프레임 제거로 libx264 버퍼를 줄인다.
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23",
         "-threads", "1", "-tune", "zerolatency", "-bf", "0", "-g", "48", "-max_muxing_queue_size", "256",
-        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out
+        "-an", "-movflags", "+faststart", out
       );
-      await log(`씬 ${i + 1}/${scenes.length} 인코딩(자막 ${capPaths.length}·${finalDur.toFixed(1)}s)…`);
+      await log(`씬 ${i + 1}/${parts.length} 인코딩(자막 ${capPaths.length}·${finalDur.toFixed(1)}s${pt.delay > 0.05 ? `·소리 +${pt.delay.toFixed(1)}s 지연` : ""}${holdSec > 0.05 ? `·홀드 ${holdSec.toFixed(1)}s` : ""})…`);
       await run(FFMPEG, args);
       sceneFiles.push(out);
     }
 
-    // 이어붙이기(무손실 copy — 모두 동일 코덱).
+    // 이어붙이기(무손실 copy — 모두 동일 코덱, 영상 전용).
     await log("이어붙이는 중…");
     const listFile = join(dir, "list.txt");
     await writeFile(listFile, sceneFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"));
+    const vOnlyPath = join(dir, "final-v.mp4");
+    await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", "-movflags", "+faststart", vOnlyPath]);
+
+    // ── 4단계: 그룹 오디오 얹기 — 각 컷 소리를 배치 시각(adelay)에 놓고 한 번에 믹스.
+    //    영상은 -c:v copy(재인코딩 없음) — 추가 비용은 오디오 인코딩뿐(수 초).
+    //    배치가 순차(겹침 없음)라 amix 합산은 안전. normalize=0 = 트랙 수로 나눠 줄이지 않음.
     const finalPath = join(dir, "final.mp4");
-    await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", "-movflags", "+faststart", finalPath]);
+    const audioParts = parts.filter((x) => x.aPath);
+    if (audioParts.length) {
+      const args4 = ["-hide_banner", "-nostats", "-loglevel", "warning", "-y", "-i", vOnlyPath];
+      for (const x of audioParts) args4.push("-i", x.aPath);
+      const chains = audioParts.map(
+        (x, j) => `[${j + 1}:a]adelay=${Math.max(0, Math.round((x.start + x.delay) * 1000))}:all=1[d${j}]`
+      );
+      const mixed =
+        audioParts.length === 1
+          ? `[d0]apad[aout]`
+          : `${audioParts.map((_, j) => `[d${j}]`).join("")}amix=inputs=${audioParts.length}:duration=longest:dropout_transition=0:normalize=0,apad[aout]`;
+      await run(FFMPEG, [
+        ...args4,
+        "-filter_complex", [...chains, mixed].join(";"),
+        "-map", "0:v", "-map", "[aout]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
+        "-t", timelineDur.toFixed(2), "-movflags", "+faststart", finalPath,
+      ]);
+    } else {
+      // 소리가 하나도 없어도 무음 트랙은 넣는다 — 최종 join 의 BGM 덕킹이 [0:a] 를 기대한다.
+      await run(FFMPEG, [
+        "-y", "-i", vOnlyPath, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "64k",
+        "-shortest", "-movflags", "+faststart", finalPath,
+      ]);
+    }
 
     await log("업로드 중…");
     // 파일명에 언어 코드 — 스펙 §10(ep01_ja.mp4). 언어 미지정이면 기존 이름 유지.
