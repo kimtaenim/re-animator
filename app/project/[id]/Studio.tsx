@@ -413,7 +413,8 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // ★새로고침해도 보던 단계 그대로 — 예전엔 리로드마다 진행상황으로 다시 계산해서 카메라
   //   미리보기에서 F5 하면 4단계로 튕겼다(사용자 지적). 주소 해시(#camera)에 남겨 복원한다.
   const [activeStep, setActiveStep] = useState<StepKind | "camera" | "tree">(() => {
-    const VALID = new Set(["source", "cast", "tree", "regen", "scene", "camera", "compose"]);
+    // ★3·4·5 는 해시로도 진입 불가(탭 제거와 함께) — 옛 주소(#scene 등)는 기본 화면으로.
+    const VALID = new Set(["source", "cast", "tree", "compose"]);
     if (typeof window !== "undefined") {
       const h = window.location.hash.replace(/^#/, "");
       if (VALID.has(h)) return h as StepKind | "camera" | "tree";
@@ -3891,15 +3892,16 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
 
       {/* 단계 네비 — 클릭하면 그 단계만 보임(한 화면 = 한 단계). 상단 고정이라 스크롤해도 항상 보임(위아래 왕복 X). */}
       <nav className="sticky top-0 z-30 -mx-6 mb-4 flex flex-wrap items-center gap-1 border-b border-[var(--border)] bg-[var(--bg)] px-6 py-2 text-xs">
-        {(["source", "cast", "tree", "regen", "scene", "camera", "compose"] as const).map((k) => {
+        {/* ★3·4·5 단계 탭 제거(사용자 지정) — 컷 작업은 🌳 트리가 유일한 동선.
+            해당 화면 코드는 남겨두되 탭·해시로 진입 불가(되돌리기 쉬움). */}
+        {(["source", "cast", "tree", "compose"] as const).map((k) => {
           const hasImages = project.scenes.some((s) => s.generatedImage);
           const avail =
             k === "source" ||
-            ((k === "cast" || k === "tree" || k === "regen") && approved) ||
-            ((k === "scene" || k === "camera" || k === "compose") && approved && hasImages);
+            ((k === "cast" || k === "tree") && approved) ||
+            (k === "compose" && approved && hasImages);
           const cur = activeStep === k;
-          const label =
-            k === "camera" ? "5. 🎥 카메라 미리보기" : k === "tree" ? "🌳 컷 작업 (3·4·5)" : STEP_LABEL[k];
+          const label = k === "tree" ? "🌳 컷 작업" : STEP_LABEL[k];
           return (
             <button
               key={k}
