@@ -3298,6 +3298,29 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       </div>
                     )}
                     <div className="flex min-w-0 flex-1 flex-col gap-1 text-[11px]">
+                      {/* ★동영상 프롬프트 — 카드 맨 앞(사용자 지정: '제일 앞으로'). 예전엔 ⚙️ 연출·세부
+                          펼침 안에 묻혀 있어 매번 두 번 클릭해야 했다. 비우면 자동 조립. */}
+                      {!isCardScene && (
+                        <div className="flex items-start gap-1">
+                          <textarea
+                            value={s.cut?.videoPrompt ?? ""}
+                            onChange={(e) => updateCut(s.id, { videoPrompt: e.target.value })}
+                            rows={2}
+                            placeholder="동영상 프롬프트(내용·움직임) — 예: 바람에 머리카락 흩날리며 천천히 고개를 든다"
+                            title="이 컷 동영상 생성에 넣을 내용 설명 — 무슨 일이 일어나는지·어떤 움직임인지. 카메라워크는 별도(컷의 카메라 카드)."
+                            className="min-w-0 flex-1 resize-none rounded border border-[var(--accent)]/50 bg-[var(--panel-2)] px-1.5 py-1 text-[10px] leading-tight"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => videoOne(s.id)}
+                            disabled={busy || vidPending.has(s.id)}
+                            title="이 프롬프트로 동영상 생성"
+                            className="shrink-0 rounded border border-[var(--border)] px-1.5 py-1 text-sm text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-40"
+                          >
+                            {vidPending.has(s.id) ? "…" : "🎬"}
+                          </button>
+                        </div>
+                      )}
                       {/* 🕐 생성 시각 — 다시 생성 후 이 시각이 바뀌면 진짜 새 영상, 안 바뀌면 생성/갱신이 안 된 것. */}
                       {!isCardScene && (s.videoUrl || s.videoError) && (
                         <span className="text-[10px] text-[var(--muted)]" title="이 영상이 생성된 시각 — 다시 생성 후 바뀌면 새 영상이 만들어진 것, 안 바뀌면 생성/갱신 안 됨">
@@ -3612,29 +3635,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             placeholder="예: 계속 걷는다 (이어가기)"
                             className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5"
                           />
-                        </div>
-                      )}
-                      {/* 동영상 프롬프트 — 이 컷 영상 생성에 넣을 '내용·움직임' 설명. 카메라워크는 별도(후처리).
-                          비워두면 자동(정지+미세 생동감). 적으면 그 내용대로 움직임 유도 → 🎬 로 생성. */}
-                      {!isCardScene && (
-                        <div className="flex items-start gap-1">
-                          <textarea
-                            value={s.cut?.videoPrompt ?? ""}
-                            onChange={(e) => updateCut(s.id, { videoPrompt: e.target.value })}
-                            rows={2}
-                            placeholder="동영상 프롬프트(내용·움직임) — 예: 바람에 머리카락 흩날리며 천천히 고개를 든다"
-                            title="이 컷 동영상 생성에 넣을 내용 설명 — 무슨 일이 일어나는지·어떤 움직임인지. 카메라워크는 후처리로 별도."
-                            className="min-w-0 flex-1 resize-none rounded border border-[var(--accent)]/50 bg-[var(--panel-2)] px-1.5 py-1 text-[10px] leading-tight"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => videoOne(s.id)}
-                            disabled={busy || vidPending.has(s.id)}
-                            title="이 프롬프트로 동영상 생성"
-                            className="shrink-0 rounded border border-[var(--border)] px-1.5 py-1 text-sm text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-40"
-                          >
-                            {vidPending.has(s.id) ? "…" : "🎬"}
-                          </button>
                         </div>
                       )}
                       {/* 🎬 프롬프트 직접 편집(고급) — 채우면 자동 조립을 무시하고 이걸 그대로 Grok 에 보냄(전체 제어). */}
