@@ -587,7 +587,10 @@ export async function runSplit(projectId) {
 
   const cfg = loadSplitConfig();
   const refWidth = pickRefWidth(files.map((f) => f.width), cfg.refWidthMode);
-  await log(`기준폭 ${refWidth}px, 파일 ${files.length}개 — 행 프로파일 계산…`);
+  // ★런타임 자가 보고 — "코드는 같은데 새 배포부터 다르다"를 조사할 때 실제 Node 버전이
+  //   증거가 된다(render.yaml 이 runtime:node 라 Dockerfile 의 node:20 고정이 안 먹었고,
+  //   버전을 안 박으면 재빌드 때 바뀔 수 있다). 사용자가 Render 로그를 뒤지지 않아도 보이게.
+  await log(`기준폭 ${refWidth}px, 파일 ${files.length}개 — 행 프로파일 계산… (node ${process.version})`);
 
   // 파일을 하나씩 열어 프로파일 계산. 버퍼는 VLM 그룹핑 썸네일용으로 보관.
   const profiles = [];
