@@ -4816,6 +4816,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     cameraWork={s.cut?.cameraWork}
                     motionTier={s.cut?.motionTier}
                     proxyUrl={s.fxProxyUrl}
+                    matteUrl={s.matteUrl}
                     onProxy={() => applyCameraFx(s.id, true)}
                     imageUrl={s.generatedImage ?? s.originalImage}
                     videoUrl={s.videoUrl}

@@ -46,10 +46,11 @@ function Slider({
 }
 
 export default function CameraWorkEditor({
-  cameraWork, motionTier, proxyUrl, onProxy, imageUrl, videoUrl, onChange, onApply, onPreview, applying, busy,
+  cameraWork, motionTier, proxyUrl, onProxy, imageUrl, videoUrl, matteUrl, onChange, onApply, onPreview, applying, busy,
 }: {
   cameraWork?: CameraWork;
   motionTier?: string;
+  matteUrl?: string; // 인물 매트(흰=인물) — 있으면 계층 B 를 '실제 2레이어'로 미리보기
   proxyUrl?: string; // 480p 정확 미리보기 결과(§8②)
   onProxy?: () => void; // "정확 미리보기" 요청 // 티어별 기본 카메라 결정용(§3·§9 — 비어 있으면 자동 적용)
   imageUrl?: string;
@@ -62,6 +63,9 @@ export default function CameraWorkEditor({
 }) {
   const imgRef = useRef<HTMLImageElement>(null);
   const vidRef = useRef<HTMLVideoElement>(null);
+  // 계층 B 2레이어 미리보기용 — 배경/인물 각각의 <img>(인물은 매트로 마스크).
+  const bgRef = useRef<HTMLImageElement>(null);
+  const fgRef = useRef<HTMLImageElement>(null);
   // ★실영상 프리뷰는 hover 시에만 <video> 를 mount(떼면 언마운트) — 컷 많을 때 수십 개 동시 디코딩=크롬 먹통 방지.
   const [hover, setHover] = useState(false);
   // ★★카메라워크가 비어 있으면 '정지'가 아니라 티어에 맞는 기본 카메라를 자동 적용한다.
@@ -96,9 +100,23 @@ export default function CameraWorkEditor({
       const rw = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth || 1280;
       const rh = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight || 720;
       const table = buildKeyframeTable(cw, { fps: 24, refWidth: rw, refHeight: rh });
-      const track = table.tracks.main ?? table.tracks.character; // 계층 B 는 character 트랙으로 근사
+      const dms = Math.max(300, (cw.duration_s || 3) * 1000);
+      const toKfs = (tr: Parameters<typeof toWebKeyframes>[0]) =>
+        toWebKeyframes(tr).map((k) => ({ offset: k.offset, transform: k.transform, transformOrigin: k.transformOrigin }));
+      // ★계층 B(버티고·패럴랙스): 매트가 있으면 '실제 2레이어' 로 미리본다 —
+      //   배경 <img> 는 background 트랙, 인물 <img>(매트로 마스크)는 character 트랙.
+      //   예전엔 character 트랙 하나로 화면 전체를 움직여, 2레이어 효과가 아예 안 보였다.
+      if (layer === "B" && matteUrl && bgRef.current && fgRef.current && !liveVideo) {
+        const bgK = table.tracks.background ? toKfs(table.tracks.background) : null;
+        const fgK = table.tracks.character ? toKfs(table.tracks.character) : null;
+        [bgRef.current, fgRef.current].forEach((n) => n.getAnimations().forEach((a) => a.cancel()));
+        if (bgK && bgK.length > 1) bgRef.current.animate(bgK, { duration: dms, iterations: 1, easing: "linear", fill: "both" });
+        if (fgK && fgK.length > 1) fgRef.current.animate(fgK, { duration: dms, iterations: 1, easing: "linear", fill: "both" });
+        return;
+      }
+      const track = table.tracks.main ?? table.tracks.character; // 매트 없는 계층 B 는 근사(인물 궤적)
       if (!track) return;
-      const kfs = toWebKeyframes(track).map((k) => ({ offset: k.offset, transform: k.transform, transformOrigin: k.transformOrigin }));
+      const kfs = toKfs(track);
       if (kfs.length < 2) return;
       // ★한 번만 재생하고 마지막 프레임에서 멈춘다 — 최종 결과와 같은 동작(사용자 지적:
       //   "왜 줌이 반복 실행되지"). 다시 보려면 마우스를 뗐다 올리거나 값을 바꾸면 된다.
@@ -150,10 +168,14 @@ export default function CameraWorkEditor({
         )}
         {layer === "B" && (
           <span
-            className="text-[var(--muted)]"
-            title="인물과 배경을 따로 움직입니다. 굽기를 누르면 인물 매트를 자동으로 한 번 만들고(그 뒤 재사용) 2레이어로 굽습니다. 여기 프리뷰는 인물 궤적만 보여주는 근사입니다."
+            className={matteUrl ? "text-[var(--ok)]" : "text-[var(--muted)]"}
+            title={
+              matteUrl
+                ? "인물 매트가 있어 미리보기도 실제와 같은 2레이어(배경/인물 따로)로 움직입니다."
+                : "인물과 배경을 따로 움직입니다. 매트는 처음 구울 때(또는 합성할 때) 자동으로 만들어지고, 그 뒤부터는 미리보기도 2레이어로 보입니다."
+            }
           >
-            인물/배경 2레이어 · 매트 자동
+            {matteUrl ? "인물/배경 2레이어 미리보기" : "2레이어 · 매트 생기면 미리보기 정확"}
           </span>
         )}
       </div>
@@ -170,6 +192,28 @@ export default function CameraWorkEditor({
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img ref={imgRef} src={imageUrl} alt="camera preview" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
+          {/* ★계층 B 2레이어 미리보기 — 매트가 있을 때만. 배경 위에 '매트로 오려낸 인물'을 얹어
+              각자 다른 궤적으로 움직인다(= 굽기 결과와 같은 구조). 매트는 첫 굽기 때 생긴다. */}
+          {layer === "B" && matteUrl && !liveVideo && (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img ref={bgRef} src={imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                ref={fgRef}
+                src={imageUrl}
+                alt=""
+                className="absolute inset-0 h-full w-full object-cover"
+                style={{
+                  willChange: "transform",
+                  WebkitMaskImage: `url(${matteUrl})`,
+                  maskImage: `url(${matteUrl})`,
+                  WebkitMaskSize: "100% 100%",
+                  maskSize: "100% 100%",
+                }}
+              />
+            </>
+          )}
           {/* ★loop 제거 — 카메라 애니메이션과 함께 한 번만 재생하고 멈춘다(최종 결과와 동일). */}
           {liveVideo && (
             <video ref={vidRef} key={videoUrl} src={videoUrl} muted playsInline preload="metadata" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
