@@ -226,6 +226,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }, [project.scenes]);
   // ── 섹션(부분 작업) — 한 회분을 몇 개 섹션으로 나눠 부분부분 작업 후 최종 이어붙이기 ──
   const [currentSection, setCurrentSection] = useState<number | null>(null); // null=전체
+  // ★섹션 중심 동선(사용자 지정: "앞으로는 섹션을 권장해야 한다 — 그래야 에러가 없다").
+  //   섹션이 나뉘어 있으면 기본을 '전체' 가 아니라 '첫 섹션' 으로 둔다. 전체를 한 번에 돌리면
+  //   실패 지점이 커지고 되돌리기도 어렵다. '전체' 는 사용자가 직접 고를 때만.
+  const secInitRef = useRef(false);
   const [divN, setDivN] = useState(15); // 분량 기준: 섹션당 컷 수
   const orderedScenes = useMemo(
     () => [...(project.scenes ?? [])].sort((a, b) => a.order - b.order),
@@ -242,6 +246,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       return { i, start: st, end, ids: new Set(orderedScenes.slice(st, end).map((s) => s.id)) };
     });
   }, [project.sectionStarts, orderedScenes]);
+  // ★섹션이 생기면 '첫 섹션'을 자동 선택(한 번만) — 섹션 중심 작업이 기본이어야 한다.
+  //   사용자가 '전체'를 직접 누르면 그 선택을 존중한다(다시 강제하지 않게 ref 로 1회 제한).
+  useEffect(() => {
+    if (secInitRef.current) return;
+    if (sections.length > 0) {
+      secInitRef.current = true;
+      setCurrentSection((cur) => (cur == null ? 0 : cur));
+    }
+  }, [sections.length]);
   // 현재 섹션 필터 — 섹션 없거나 '전체'면 모두 통과.
   const sec = currentSection != null && sections[currentSection] ? sections[currentSection] : null;
   const inSection = (s: Project["scenes"][number]) => !sec || sec.ids.has(s.id);
