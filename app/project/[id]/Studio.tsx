@@ -4034,12 +4034,20 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
           return (
             <div className={REMOTE}>
               <button
-                onClick={() => void regenBatch(imgMissing)}
+                onClick={() => {
+                  void regenBatch(imgMissing);
+                  // ★이미지 일괄 = 더빙도 같이(사용자 지정) — 더빙은 이미지와 무관(대사·목소리만
+                  //   필요)해서 병행 가능. 워커 큐가 순서대로 처리하고, 증분이라 중복 비용 없음.
+                  if (!dubbing && !translating) {
+                    if (dubLang) void makeLanguage(dubLang);
+                    else void runDubJob(undefined, "");
+                  }
+                }}
                 disabled={busy || regenRunning || imgMissing.length === 0}
                 className={P}
-                title="아직 안 그려진 컷 이미지를 전부 생성(워커 6개 병렬). 개별 다시 그리기는 컷 카드에서."
+                title="안 그려진 이미지 전부 생성(6개 병렬) + 소리 없는 대사 더빙까지 같이 겁니다. 개별은 컷 카드에서."
               >
-                {regenRunning ? "이미지 생성 중…" : `🖼 이미지 일괄 (${imgMissing.length})`}
+                {regenRunning ? "이미지 생성 중…" : `🖼+🎙 이미지·더빙 일괄 (${imgMissing.length})`}
               </button>
               <button
                 onClick={() => (dubLang ? void makeLanguage(dubLang) : void runDubJob(undefined, ""))}

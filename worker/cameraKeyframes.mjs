@@ -418,7 +418,10 @@ export const CAMERA_PRESETS = {
   whip: { zoom_rate_pct_per_s: 0, easing: "linear" }, // 전환 속성(§2), 후처리는 전환 경로
   // 계층 B 도 같은 진행값(p)을 쓰므로 가속이 그대로 걸린다 — 달리줌도 '거의 멈췄다 확' 이 된다.
   parallax_push: { zoom_rate_pct_per_s: 6.0, zoom_accel: 3, bg_scale_delta_pct_per_s: 4.0, drift_px_per_s: { x: 10, y: 0 }, easing: "easeInOut" },
-  vertigo: { zoom_rate_pct_per_s: 1.5, zoom_accel: 4, bg_scale_delta_pct_per_s: -14, easing: "easeInOut" }, // 급가속 달리줌
+  // ★start_zoom 없이는 배경 역줌이 구조적으로 0 이었다(bgScale 이 1 밑으로 못 가는데 1 에서
+  //   시작하니 갈 곳이 없음 → 실행 결과 배경 정지 = 버티고가 밋밋). 배경을 1.45 에서 풀어
+  //   1.0 으로 늘어뜨리고, 인물은 급가속(accel)로 밀고 들어온다 — "확 들어가는" 달리줌.
+  vertigo: { zoom_rate_pct_per_s: 2, zoom_accel: 6, start_zoom: 1.45, bg_scale_delta_pct_per_s: -14, easing: "easeInOut" }, // 급가속 달리줌
   orbit: {}, // I2V 위임
 };
 

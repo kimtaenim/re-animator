@@ -22,6 +22,40 @@ import { buildKeyframeTable, sampleTrack, toPixelCrop, presetLayer, needsUpscale
  * @param {number} W @param {number} H
  * @returns {{ script: string, first: {cropW:number,cropH:number,x:number,y:number} }}
  */
+/**
+ * ★트랙 → crop 구간선형 '수식'(w/h/x/y, t 기반) 컴파일러.
+ * 왜 sendcmd 가 아닌가: 이 ffmpeg 빌드에서 sendcmd 로 crop w/h 를 '키우는' 순간 파이프라인이
+ * 교착한다(실측 2026-08-02: pull_out·버티고 배경 등 성장 트랙 전부 4분 행 → SIGKILL.
+ * 축소(push_in)만 통과. 최대창 초기화·sendcmd 병합 모두 무효). crop 의 자체 수식 평가는
+ * 성장 포함 정상(실측 0.5~1.2초 완주). 수식은 테이블 값의 구간선형 보간일 뿐 — 카메라 수식의
+ * 단일 소스는 여전히 lib/cameraKeyframes.mjs 테이블이다(스펙 원칙 유지).
+ * 키가 많으면 균등 샘플로 maxSeg 구간 압축(easing 곡선의 선형 근사 — 프레임당 오차 <1px 수준).
+ */
+export function buildCropExprs(tr, W, H, maxSeg = 24) {
+  if (!tr || !tr.keys?.length) throw new Error("빈 트랙 — crop 수식 불가");
+  const crops = tr.keys.map((k) => ({ t: k.t, ...toPixelCrop({ scale: k.scale, cx: k.cx, cy: k.cy }, W, H, { even: true }) }));
+  const pick =
+    crops.length <= maxSeg + 1
+      ? crops
+      : Array.from({ length: maxSeg + 1 }, (_, i) => crops[Math.round((i * (crops.length - 1)) / maxSeg)]);
+  const mk = (key, even) => {
+    let e = String(pick[pick.length - 1][key]);
+    for (let i = pick.length - 2; i >= 0; i--) {
+      const a = pick[i];
+      const b = pick[i + 1];
+      const dt = Math.max(1e-6, b.t - a.t);
+      let seg = `(${a[key]}+(${b[key]}-${a[key]})*(t-${a.t.toFixed(4)})/${dt.toFixed(4)})`;
+      if (even) seg = `floor(${seg}/2)*2`; // 크롭 크기는 짝수(인코더 요구)
+      e = `if(lt(t,${b.t.toFixed(4)}),${seg},${e})`;
+    }
+    return e;
+  };
+  return { w: mk("cropW", true), h: mk("cropH", true), x: mk("x", false), y: mk("y", false), first: crops[0] };
+}
+export function cropExprFilter(e) {
+  return `crop=w='${e.w}':h='${e.h}':x='${e.x}':y='${e.y}':exact=1`;
+}
+
 export function buildSendcmdScript(table, W, H) {
   const tr = table.tracks.main;
   if (!tr || !tr.keys.length) throw new Error("계층 A main 트랙이 비어있음");
@@ -97,9 +131,8 @@ export async function renderCameraFx(o) {
     return { skipped: true, layer, upscale: false, maxScale: 1 };
   }
 
-  const { script, first } = buildSendcmdScript(table, W, H);
-  const scriptName = "camcmd.txt";
-  await writeFile(join(dir, scriptName), script, "utf8");
+  // ★sendcmd → 수식 crop 전환 — sendcmd 는 크롭 '성장'(pull_out 등 줌아웃 계열)에서 교착(실측).
+  const exprs = buildCropExprs(table.tracks.main, W, H);
 
   const upscale = needsUpscale(table, o.outHeight ?? H);
   // 업스케일 트리거(스펙 §1): 줌>20% 또는 1080p. Real-ESRGAN 실제 패스는 후속 —
@@ -119,11 +152,7 @@ export async function renderCameraFx(o) {
       `업스케일 보정(줌 ${(table.maxScale * 100 - 100).toFixed(0)}%·${o.outHeight ?? H}p) — lanczos + 언샵`
     );
 
-  // crop 초기값 = 프레임0 값(sendcmd 첫 명령 타이밍 어긋나도 첫 프레임 정확).
-  const vf =
-    `sendcmd=f=${scriptName},` +
-    `crop=w=${first.cropW}:h=${first.cropH}:x=${first.x}:y=${first.y}:exact=1,` +
-    `scale=${W}:${H}:flags=${scaleFlags}${sharpen},setsar=1`;
+  const vf = `${cropExprFilter(exprs)},scale=${W}:${H}:flags=${scaleFlags}${sharpen},setsar=1`;
 
   await run(ff, ["-hide_banner", "-nostats", "-loglevel", "warning", "-y", "-i", inPath, "-vf", vf, "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", outPath], dir);
 
@@ -159,37 +188,21 @@ async function renderLayerB(o) {
   const chTr = table.tracks.character;
   if (!bgTr?.keys?.length || !chTr?.keys?.length) throw new Error("계층 B 트랙이 비어있음");
 
-  // 트랙별 sendcmd 스크립트(같은 형식, 대상만 다른 crop 인스턴스).
-  const scriptFor = (tr, name) => {
-    const lines = [];
-    let first = null;
-    for (const k of tr.keys) {
-      const c = toPixelCrop({ scale: k.scale, cx: k.cx, cy: k.cy }, W, H, { even: true });
-      if (!first) first = c;
-      // ★sendcmd 의 target 은 필터 '인스턴스명 전체'(crop@cbg) — 아래 필터 그래프가 crop@cbg 로
-      //   선언하므로 여기도 같아야 한다. 예전엔 cbg 만 써서 모든 명령이 'Function not implemented'
-      //   로 조용히 무시됐고, 버티고·패럴랙스 굽기가 돈·인코딩만 쓰고 정지 클립을 저장했다
-      //   (실측: 타깃 cbg → 첫/끝 프레임 PSNR 49.7dB(정지) / crop@cbg → 10.2dB(정상 무빙)).
-      lines.push(`${k.t.toFixed(3)} crop@${name} w ${c.cropW}, crop@${name} h ${c.cropH}, crop@${name} x ${c.x}, crop@${name} y ${c.y};`);
-    }
-    return { text: lines.join("\n") + "\n", first };
-  };
-  // ★crop 필터 인스턴스를 이름으로 구분(sendcmd 의 target 은 필터 이름) — 안 그러면 두 갈래가
-  //   같은 'crop' 이름을 공유해 서로의 명령을 받아 화면이 뒤섞인다.
-  const bg = scriptFor(bgTr, "cbg");
-  const ch = scriptFor(chTr, "cch");
-  await writeFile(join(dir, "cam_bg.txt"), bg.text, "utf8");
-  await writeFile(join(dir, "cam_ch.txt"), ch.text, "utf8");
+  // ★sendcmd 폐기 → 트랙별 '수식 crop'(buildCropExprs) — sendcmd 는 이 빌드에서
+  //   ①타깃 이름 불일치로 전 명령이 조용히 무시됐고(정지 클립을 fxUrl 로 저장하던 사고)
+  //   ②이름을 고쳐도 crop 성장(버티고 배경 줌아웃)에서 파이프라인이 교착했다(실측 4분 행).
+  //   수식 crop 은 성장 포함 정상(실측: 버티고 원패스 1.2초 완주). 이름 충돌도 없다.
+  const bgE = buildCropExprs(bgTr, W, H);
+  const chE = buildCropExprs(chTr, W, H);
 
   // ★알파를 '먼저' 합쳐 두고 그 RGBA 를 crop 한다 — 매트에 같은 crop 을 따로 거는 것보다
-  //   단순하고(스크립트 2개), 알파가 픽셀과 같이 잘려 어긋날 여지가 없다.
-  const cropOf = (nm, f) => `crop@${nm}=w=${f.cropW}:h=${f.cropH}:x=${f.x}:y=${f.y}:exact=1`;
+  //   단순하고, 알파가 픽셀과 같이 잘려 어긋날 여지가 없다.
   const filter =
     `[0:v]split=2[vb][vc];` +
-    `[vb]sendcmd=f=cam_bg.txt,${cropOf("cbg", bg.first)},scale=${W}:${H}:flags=lanczos,setsar=1[bgv];` +
+    `[vb]${cropExprFilter(bgE)},scale=${W}:${H}:flags=lanczos,setsar=1[bgv];` +
     `[1:v]scale=${W}:${H},format=gray[m];` +
     `[vc][m]alphamerge[rgba];` +
-    `[rgba]sendcmd=f=cam_ch.txt,${cropOf("cch", ch.first)},scale=${W}:${H}:flags=lanczos,setsar=1[fg];` +
+    `[rgba]${cropExprFilter(chE)},scale=${W}:${H}:flags=lanczos,setsar=1[fg];` +
     `[bgv][fg]overlay=0:0:format=auto:shortest=1[out]`;
 
   await run(

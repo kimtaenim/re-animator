@@ -2331,7 +2331,12 @@ export async function runVideo(projectId, payload) {
           //   바꿔도 같으니 그대로 올려보내고(위에서 순화 재시도), 그 외 실패(연결·5xx·타임아웃)는
           //   다른 엔진으로 한 번 더 시도한다. 실제 사고: MiniMax "fetch failed" 로 컷 3개 통째 실패.
           // 이 컷에 '보이는' 캐릭터들(캐스팅 sceneIds 기준) — 화자가 이 중에 없으면 입 다뭄.
-          const shownCast = (p.cast ?? []).filter((c) => (c.sceneIds ?? []).includes(s.id));
+          // ★sceneIds 에는 '목소리만 나오는 컷'(하늘·풍경에 화면 밖 대사)도 들어간다. 그런 컷에
+          //   인물 묘사·발화 지시를 실으면 I2V 가 '입을 움직일 얼굴'을 지어 넣는다(실사례:
+          //   영상 생성에 이상한 얼굴 끼어듦). 그림에서 확인된 인물이 없는 비인물 컷은 빈 목록.
+          const noVisibleChar =
+            (s.cut?.characters?.length ?? 0) === 0 && (s.cut?.type === "object" || s.cut?.type === "text");
+          const shownCast = noVisibleChar ? [] : (p.cast ?? []).filter((c) => (c.sceneIds ?? []).includes(s.id));
           const shownCharIds = shownCast.map((c) => c.id);
           // ★엔진별 프롬프트 예산 — Kling 2500·MiniMax 2000자 상한(초과분은 API 가 뒤를 자른다).
           //   둘 다 1900 으로 깎았더니 Kling 이 쓸 수 있는 여유를 버려 품질이 떨어졌다(사용자 보고).
