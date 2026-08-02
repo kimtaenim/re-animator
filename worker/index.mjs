@@ -177,7 +177,7 @@ process.on("SIGTERM", () => {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log(`[worker] BUILD = mem-v45 (추출 중간 저장 — 막판에 죽어도 OCR·연출·번역 결과 보존, 재실행은 가볍게 완주) node ${process.version}`);
+console.log(`[worker] BUILD = sect-v46 (추출 섹션 이어달리기 — 버튼 하나로 섹션별 경량 잡 연쇄, 한 섹션마다 저장) node ${process.version}`);
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 await markCurrentDead("워커가 재시작되어 잡이 중단됨(메모리 초과 또는 재배포) — 다시 시작해 주세요");
 for (;;) {

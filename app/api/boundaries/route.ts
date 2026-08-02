@@ -217,7 +217,7 @@ export async function PUT(req: NextRequest) {
 
 // POST — G1 확정. 경계로 컷 이미지 추출 잡을 워커에 적재.
 export async function POST(req: NextRequest) {
-  let body: { projectId?: string; sceneIds?: string[] };
+  let body: { projectId?: string; sceneIds?: string[]; nextSections?: string[][] };
   try {
     body = await req.json();
   } catch {
@@ -240,13 +240,24 @@ export async function POST(req: NextRequest) {
   const ids = Array.isArray(body.sceneIds)
     ? body.sceneIds.filter((x): x is string => typeof x === "string" && project.scenes.some((s) => s.id === x))
     : [];
+  // ★섹션 이어달리기 — 남은 섹션들의 컷 id 목록. 워커가 한 섹션을 끝내고 저장한 뒤
+  //   다음 섹션 추출 잡을 스스로 적재한다(회분 전체를 한 잡에 몰지 않는 섹션 중심 설계).
+  const validId = (x: unknown): x is string => typeof x === "string" && project.scenes.some((s) => s.id === x);
+  const nextSections = Array.isArray(body.nextSections)
+    ? body.nextSections
+        .map((arr) => (Array.isArray(arr) ? arr.filter(validId) : []))
+        .filter((arr) => arr.length > 0)
+    : [];
 
   const now = Date.now();
   const job: Job = {
     id: randomUUID(),
     type: "extract",
     projectId,
-    payload: ids.length ? { sceneIds: ids } : {},
+    payload: {
+      ...(ids.length ? { sceneIds: ids } : {}),
+      ...(nextSections.length ? { nextSections } : {}),
+    },
     status: "queued",
     createdAt: now,
     updatedAt: now,

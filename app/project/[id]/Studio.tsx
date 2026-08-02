@@ -2673,13 +2673,26 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setBusy(true);
     setError("");
     try {
-      // ★섹션이 선택돼 있으면 그 섹션만 추출한다 — 회분 전체를 한 번에 돌리면 워커가
-      //   12분 잡 캡을 넘기고 메모리도 겹쳐 터진다(사용자: 시퀀스별로 편집하게 해달라).
+      // ★섹션 중심 설계(사용자 지정: "그래야 에러가 없다") — 회분 전체를 한 잡에 몰면
+      //   12분 캡·메모리 벼랑(실측 501/512MB)에서 통째로 죽고 결과도 통째로 날아간다.
+      //   섹션이 선택돼 있으면 그 섹션만, '전체'면 섹션별 잡을 이어달리기(워커가 한 섹션
+      //   끝날 때마다 저장하고 다음 섹션을 스스로 적재) — 버튼은 지금처럼 하나다.
       const secIds = sec ? orderedScenes.filter((s) => sec.ids.has(s.id)).map((s) => s.id) : null;
+      const chain =
+        !sec && sections.length > 1
+          ? sections.map((x) => orderedScenes.slice(x.start, x.end).map((s) => s.id))
+          : null;
       const r = await fetch("/api/boundaries", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, ...(secIds ? { sceneIds: secIds } : {}) }),
+        body: JSON.stringify({
+          projectId: project.id,
+          ...(secIds
+            ? { sceneIds: secIds }
+            : chain
+              ? { sceneIds: chain[0], nextSections: chain.slice(1) }
+              : {}),
+        }),
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "확정 실패");

@@ -1253,6 +1253,28 @@ export async function runExtract(projectId, payload) {
   //   되돌아갈 수 있다(긴 잡 + 통째 저장 = 과거 사고 패턴).
   const doneById = new Map(work.map((s) => [s.id, s]));
   p2.scenes = (p2.scenes ?? []).map((fresh) => doneById.get(fresh.id) ?? fresh);
+  // ★섹션 이어달리기 — 남은 섹션이 있으면 저장 후 다음 섹션 추출 잡을 스스로 적재하고
+  //   running 을 유지한다(마지막 섹션에서만 approved). 한 잡=한 섹션 → 12분 캡·메모리
+  //   벼랑에서 자유롭고, 죽어도 그 섹션만 잃는다(섹션 중심 설계 — 사용자 지정).
+  const nextSections = Array.isArray(payload?.nextSections)
+    ? payload.nextSections.filter((a) => Array.isArray(a) && a.length > 0)
+    : [];
+  if (nextSections.length > 0) {
+    p2.steps.source = {
+      ...p2.steps.source,
+      kind: "source",
+      status: "running",
+      error: undefined,
+      updatedAt: Date.now(),
+    };
+    await saveProject(p2);
+    await enqueueJob("extract", projectId, {
+      sceneIds: nextSections[0],
+      nextSections: nextSections.slice(1),
+    });
+    await log(`이 섹션 완료·저장 — 다음 섹션 추출을 이어갑니다(남은 ${nextSections.length}구간)`);
+    return work.length;
+  }
   p2.steps.source = {
     ...p2.steps.source,
     kind: "source",
