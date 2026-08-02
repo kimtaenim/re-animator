@@ -3339,8 +3339,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           )}
                         </span>
                       )}
-                      {/* 조작 버튼 줄 — 평소엔 숨고, 카드에 마우스 올리거나 포커스 시에만 뜸(애플식: 콘텐츠 앞, 크롬 뒤). */}
-                      <div className="flex flex-wrap items-center gap-2 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
+                      {/* ★조작 버튼 줄 — 항상 보인다. 예전엔 hover 시에만 떠서 '이 컷 더빙' 등이
+                          없는 기능처럼 보였다(사용자: 컷별 더빙이 돼야 하는데 — 원칙: 숨기지 마라). */}
+                      <div className="flex flex-wrap items-center gap-2">
                         {isCardScene ? (
                           <span className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)]" title="합성 때 검은 화면+테두리 위에 자막·더빙으로 렌더 — 이미지·영상 생성 불필요">
                             🎞 자막 씬(무성영화) — 영상 생성 불필요
