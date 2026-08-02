@@ -418,11 +418,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       const h = window.location.hash.replace(/^#/, "");
       if (VALID.has(h)) return h as StepKind | "camera" | "tree";
     }
-    return project.scenes?.some((s) => s.generatedImage)
-      ? "scene"
-      : project.steps?.source?.status === "approved"
-        ? "cast"
-        : "source";
+    // ★분할이 승인됐으면 기본은 무조건 🌳 컷 작업(3·4·5) — 트리 뷰가 주 동선이다(사용자 지정).
+    //   승인 전엔 1단계. (해시가 있으면 위에서 이미 그 단계로 복원됨.)
+    return project.steps?.source?.status === "approved" ? "tree" : "source";
   });
   // ★단계 전환 시 화면 리셋 방지 — 단계를 조건부 렌더해 언마운트하므로 스크롤이 초기화됐다.
   //   떠나는 단계의 스크롤 위치를 기억했다가, 그 단계로 돌아오면 정확히 그 자리로 복원한다.
