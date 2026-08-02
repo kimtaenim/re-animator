@@ -4408,9 +4408,10 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                   onClick={() => {
                     setOpenTreeSection(secOpen ? -1 : x.i);
                     if (!secOpen && !busy && !regenRunning) {
-                      // ★섹션을 펼치면 미생성 이미지들을 한 잡으로 자동 시작(6개 병렬) —
-                      //   컷마다 열고 기다리는 직렬 대기 제거(사용자: "너무 느리다").
-                      const missing = cuts
+                      // ★섹션을 펼치면 '회분 전체'의 미생성 이미지를 한 잡으로 자동 시작(6개 병렬).
+                      //   섹션(2컷짜리도 있음) 범위로 좁히면 배치 의미가 없다(사용자 지적) —
+                      //   섹션은 펼쳐 보는 단위일 뿐, 굽기는 앞서서 전부 돌아가게 한다.
+                      const missing = orderedScenes
                         .filter((c) => c.originalImage && c.cut?.type !== "text" && !c.generatedImage && !regenPending.has(c.id))
                         .map((c) => c.id);
                       if (missing.length) void regenBatch(missing);
