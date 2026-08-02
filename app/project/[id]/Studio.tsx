@@ -440,8 +440,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // 🌳 트리 뷰 상태 — 펼친 섹션(하나만)·펼친 컷(하나만, 아코디언). -1 = 전부 접힘.
   const [openTreeSection, setOpenTreeSection] = useState<number>(0);
   const [openTreeCut, setOpenTreeCut] = useState<string | null>(null);
-  // 트리 자동 더빙은 페이지 로드당 1회만 건다(증분이라 중복 비용은 없지만 잡 스팸 방지).
-  const treeDubAutoRef = useRef(false);
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
   const [scenePreview, setScenePreview] = useState<string | null>(null); // 씬 미리보기(영상+자막+더빙)
   const [bubDropId, setBubDropId] = useState<string | null>(null); // 대사(말풍선) 드래그앤드롭 시 드롭 대상 컷 하이라이트
@@ -4022,6 +4020,50 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
         const P = "rounded-full bg-[var(--accent)] px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40";
         const G = "rounded-full border border-[var(--border)] bg-[var(--panel-2)] px-3 py-1.5 text-[13px] font-medium disabled:opacity-40";
         const S = "rounded-full border border-[var(--danger)] px-3 py-1.5 text-[13px] font-medium text-[var(--danger)]";
+        // ★🌳 트리 리모컨(사용자 지정 설계) — 일괄은 여기 버튼 3개(이미지·더빙·동영상),
+        //   카메라워크·개별 다시 생성은 각 컷 카드에서. 자동 실행 없음(사람이 명시적으로 누른다).
+        if (activeStep === "tree" && approved) {
+          const imgMissing = orderedScenes
+            .filter((c) => c.originalImage && c.cut?.type !== "text" && !c.generatedImage && !regenPending.has(c.id))
+            .map((c) => c.id);
+          const vidMissing = orderedScenes
+            .filter((c) => c.generatedImage && !c.videoUrl && !vidPending.has(c.id))
+            .map((c) => c.id);
+          return (
+            <div className={REMOTE}>
+              <button
+                onClick={() => void regenBatch(imgMissing)}
+                disabled={busy || regenRunning || imgMissing.length === 0}
+                className={P}
+                title="아직 안 그려진 컷 이미지를 전부 생성(워커 6개 병렬). 개별 다시 그리기는 컷 카드에서."
+              >
+                {regenRunning ? "이미지 생성 중…" : `🖼 이미지 일괄 (${imgMissing.length})`}
+              </button>
+              <button
+                onClick={() => (dubLang ? void makeLanguage(dubLang) : void runDubJob(undefined, ""))}
+                disabled={busy || dubbing || translating}
+                className={P}
+                title={`소리 없는 대사를 전부 ${dubLangLabel}로 더빙 — 번역이 부족하면 알아서 채우고 이어서 더빙(증분: 이미 만든 오디오는 재생성 안 함)`}
+              >
+                {translating ? "번역 중…" : dubbing ? "더빙 중…" : `🎙 더빙 일괄 (${dubLangLabel})`}
+              </button>
+              <button
+                onClick={() => {
+                  if (vidMissing.length) {
+                    markVidPending(vidMissing);
+                    runVideoJob(vidMissing);
+                  }
+                }}
+                disabled={busy || sceneRunning || vidMissing.length === 0}
+                className={P}
+                title="이미지는 있는데 영상이 없는 컷을 전부 생성. 개별 다시 생성은 컷 카드에서."
+              >
+                {sceneRunning ? "영상 생성 중…" : `🎬 동영상 일괄 (${vidMissing.length})`}
+              </button>
+              {(regenRunning || dubbing || sceneRunning) && miniBar()}
+            </div>
+          );
+        }
         if (activeStep === "source" && canvas && hasCuts && (sourceStatus === "review" || running))
           return (
             <div className={REMOTE}>
@@ -4407,37 +4449,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <div key={x.i} className="mb-2 rounded-lg border border-[var(--border)] bg-[var(--panel)]">
                 <button
                   type="button"
-                  onClick={() => {
-                    setOpenTreeSection(secOpen ? -1 : x.i);
-                    if (!secOpen && !busy && !regenRunning) {
-                      // ★섹션을 펼치면 '회분 전체'의 미생성 이미지를 한 잡으로 자동 시작(6개 병렬).
-                      //   섹션(2컷짜리도 있음) 범위로 좁히면 배치 의미가 없다(사용자 지적) —
-                      //   섹션은 펼쳐 보는 단위일 뿐, 굽기는 앞서서 전부 돌아가게 한다.
-                      const missing = orderedScenes
-                        .filter((c) => c.originalImage && c.cut?.type !== "text" && !c.generatedImage && !regenPending.has(c.id))
-                        .map((c) => c.id);
-                      if (missing.length) void regenBatch(missing);
-                      // ★더빙도 제 때(사용자 지정) — 소리 없는 대사가 있으면 자동으로 건다.
-                      //   번역이 부족하면 makeLanguage 가 채우고 이어서 더빙(버튼과 같은 동작).
-                      //   워커 큐가 이미지 → 더빙 순서로 처리하므로 서로 안 겹친다. 증분이라
-                      //   이미 만든 오디오는 다시 만들지 않는다. 페이지 로드당 1회만.
-                      if (!treeDubAutoRef.current && !dubbing && !translating) {
-                        const needsDub = orderedScenes.some((c) =>
-                          (c.cut?.bubbles ?? []).some(
-                            (b) =>
-                              (b.text || "").trim() &&
-                              b.speakerId !== SFX_SPEAKER &&
-                              !(dubLang ? b.tracks?.[dubLang]?.audioUrl : b.audioUrl)
-                          )
-                        );
-                        if (needsDub) {
-                          treeDubAutoRef.current = true;
-                          if (dubLang) void makeLanguage(dubLang);
-                          else void runDubJob(undefined, "");
-                        }
-                      }
-                    }
-                  }}
+                  onClick={() => setOpenTreeSection(secOpen ? -1 : x.i)}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold"
                 >
                   <span>{secOpen ? "▾" : "▸"}</span>
@@ -4472,14 +4484,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             type="button"
                             onClick={() => {
                               setOpenTreeCut(cutOpen ? null : s.id);
-                              if (!cutOpen) {
-                                setOpenScene(s.id); // ④ 카드가 접힌 채로 나오지 않게 같이 펼친다
-                                // ★컷을 열면 이미지가 없을 때 재생성 자동 시작(사용자 지정) —
-                                //   버튼을 또 누르게 하지 않는다. 이미 생성됐거나 진행 중이면 안 건드림.
-                                if (hasRegen && !s.generatedImage && !regenPending.has(s.id) && !busy && !regenRunning) {
-                                  regenOne(s.id);
-                                }
-                              }
+                              if (!cutOpen) setOpenScene(s.id); // ④ 카드가 접힌 채로 나오지 않게 같이 펼친다
                             }}
                             className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px]"
                           >
