@@ -17,6 +17,8 @@ import { splitRuns, wordTokens, toggleWordEmphasis } from "@/lib/emphasis";
 import BoundaryEditor, { type SavedRegion } from "./BoundaryEditor";
 import CastReview from "./CastReview";
 import CameraWorkEditor from "./CameraWorkEditor";
+// 씬 미리보기 모달에서 '안 구운' 카메라워크를 근사로 얹기 위한 수식(편집기 hover 와 동일 원천).
+import { buildKeyframeTable, toWebKeyframes, presetLayer } from "@/lib/cameraKeyframes.mjs";
 
 // ★단계 번호 제거(사용자 지정) — 3·4·5 탭이 사라져 번호가 건너뛰며 오히려 혼란.
 const STEP_LABEL: Record<StepKind, string> = {
@@ -26,6 +28,40 @@ const STEP_LABEL: Record<StepKind, string> = {
   scene: "동영상 생성 및 더빙",
   compose: "합성",
 };
+
+// ★씬 미리보기 모달용 영상 — '안 구운' 카메라워크(계층 A: 크래시줌·푸시인 등)를 편집기
+//   hover 와 같은 WAAPI 근사로 얹는다. 예전엔 모달이 원본만 틀어서 "hover 프리뷰는 되는데
+//   더빙과 같이 보면 카메라가 없다"(사용자 보고). 구운 컷(fxUrl)은 이미 픽셀에 박혀 있으므로
+//   cameraWork 를 넘기지 않아 이중 적용을 막는다.
+function CamPreviewVideo({ src, cameraWork }: { src: string; cameraWork?: CutOntology["cameraWork"] }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !cameraWork || !cameraWork.preset || cameraWork.preset === "static") return;
+    if (presetLayer(cameraWork.preset) !== "A") return; // 계층 B/C 는 굽기·I2V 결과로만 확인
+    try {
+      const table = buildKeyframeTable(cameraWork, { fps: 24 });
+      const tr = table.tracks?.main;
+      if (!tr?.keys?.length) return;
+      const kfs = toWebKeyframes(tr).map((k) => ({ offset: k.offset, transform: k.transform, transformOrigin: k.transformOrigin }));
+      if (kfs.length < 2) return;
+      const anim = el.animate(kfs, {
+        duration: Math.max(300, (Number(cameraWork.duration_s) || 3) * 1000),
+        iterations: 1,
+        easing: "linear",
+        fill: "both",
+      });
+      return () => anim.cancel();
+    } catch {
+      /* 근사 실패 시 원본 그대로 */
+    }
+  }, [src, cameraWork]);
+  return (
+    <div className="overflow-hidden rounded">
+      <video ref={ref} key={src} src={src} autoPlay muted playsInline className="max-h-[70vh] max-w-[86vw]" />
+    </div>
+  );
+}
 
 // 카메라 워크 프리셋 — 고르면 그 컷 모션 프롬프트(영문)를 이 문구로 채운다.
 // ★화려·과장 클리셰만(사용자 지정: 차분한 프리셋 제거). 속도 변화를 명시해야 모델이 따라온다.
@@ -5532,10 +5568,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     // ★key=src — 재생성해 URL 이 바뀌어도 <video> 엘리먼트는 재사용되고 src 프로퍼티만
                     //   갈리는데, 브라우저는 자동재생 중인 <video> 의 src 를 갱신해도 옛 소스를 계속 물고
                     //   있어 새 영상이 안 떴다("계속 발생해온" 증상의 원인). key 로 강제 재마운트.
-                    // ★loop 제거(사용자 지정: 영상이 한 번 더 돌면 안 된다) — 최종 합성은 소리가
-                    //   영상보다 길면 '마지막 프레임 홀드'다. 미리보기도 같은 동작으로: 영상이 끝나면
-                    //   마지막 프레임에 멈춰 더빙이 끝날 때까지 유지(최종과 같은 그림).
-                    <video key={s.fxUrl ?? s.videoUrl} src={s.fxUrl ?? s.videoUrl} autoPlay muted playsInline className="max-h-[70vh] max-w-[86vw] rounded" />
+                    // ★loop 없음(영상 끝=마지막 프레임 홀드, 최종과 동일) + 안 구운 카메라워크는
+                    //   WAAPI 근사로 얹어 hover 프리뷰와 모달이 같은 그림을 보여준다.
+                    <CamPreviewVideo
+                      src={s.fxUrl ?? s.videoUrl!}
+                      cameraWork={s.fxUrl ? undefined : s.cut?.cameraWork}
+                    />
                   ) : s.generatedImage ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={s.generatedImage} alt="" className="max-h-[70vh] max-w-[86vw] rounded" />
