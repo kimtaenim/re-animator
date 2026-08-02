@@ -2919,6 +2919,14 @@ export async function runDub(projectId, payload) {
   if (sugNoVoice > 0)
     await log(`오디오 제안 ${sugNoVoice}개는 목소리가 없어 건너뜀(더빙에는 영향 없음)`);
 
+  // ★효과음 사전 점검 — 효과음만 ElevenLabs 를 쓴다(대사 TTS 와 별개 키). 키가 없으면
+  //   효과음 전 건이 실패하는데, 대사가 성공하면 잡은 '완료'로 끝나 사용자는 이유를 모른다
+  //   (실사례: "효과음이 왜 안 나?"). 시작할 때 화면에 먼저 말한다.
+  {
+    const sfxCount = units.filter((u) => u.kind === "sfx" || u.kind === "sug_sfx").length;
+    if (sfxCount > 0 && !process.env.ELEVENLABS_API_KEY)
+      await log(`★효과음 ${sfxCount}건 생성 불가 — 워커 env 에 ELEVENLABS_API_KEY 가 없습니다(대사 목소리와 별개). Render 대시보드 → 워커 환경변수에 추가하세요`);
+  }
   await log(`더빙 대상 ${units.length}개 — 목소리 생성 시작`);
   const C = Number(process.env.DUB_CONCURRENCY || 2);
   let done = 0;
