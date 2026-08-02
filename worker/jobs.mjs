@@ -24,7 +24,15 @@ import {
   resetDubLog,
 } from "./store.mjs";
 import sharp from "sharp";
-import { computeRowProfile, extractRegion, trimBox } from "./imaging.mjs";
+import { computeRowProfile, extractRegion, trimBox, rawCacheStats } from "./imaging.mjs";
+
+// ★메모리 관측 한 줄 — 진행 로그(사용자가 앱에서 보는 그 로그)에 그대로 찍는다.
+//   OOM 은 재현 순간의 숫자가 없으면 영영 추측이다. 로그를 달라고 하지 말고 스스로 남긴다.
+function memLine() {
+  const rss = Math.round(process.memoryUsage.rss() / 1048576);
+  const rc = rawCacheStats();
+  return `[mem] rss ${rss}MB · 원본raw ${rc.mb}MB(${rc.files}개·디코드${rc.decodes}회)`;
+}
 import { buildCanvas, pickRefWidth } from "./canvas.mjs";
 import { detectRegions } from "./detect.mjs";
 import { splitTallRegions, forceSplit } from "./group.mjs";
@@ -658,7 +666,7 @@ export async function runSplit(projectId) {
   // 가장자리가 그림을 자르고 있으면 내용 끝까지 확장(머리통 절단 방지).
   const grown = extendRegionEdges(regions, global, canvas.totalHeight);
   if (grown) await log(`경계 확장: ${grown}개 컷 가장자리가 그림에 걸려 있어 내용 끝까지 늘림`);
-  await log(`최종 장면 ${regions.length}개`);
+  await log(`최종 장면 ${regions.length}개 · ${memLine()}`);
   mark("여백트림");
 
   // 4) 컷 온톨로지 분류 — 각 컷의 타입(중심)+내용. 사람이 G1 에서 확정.
@@ -791,12 +799,12 @@ export async function runSplit(projectId) {
       inflight.add(p);
       done++;
       if (done % 5 === 0 || done === ocrTodo.length) {
-        await log(`대사 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%)`);
+        await log(`대사 읽기 ${done}/${ocrTodo.length} (${Math.round((done / ocrTodo.length) * 100)}%) · ${memLine()}`);
       }
     }
     await Promise.all([...inflight]); // 남은 호출 마무리
     const withText = scenes.filter((s) => (s.cut?.bubbles ?? []).some((b) => (b.text || "").trim())).length;
-    await log(`대사 읽기 완료 — ${withText}/${scenes.length}컷에서 글자 확보`);
+    await log(`대사 읽기 완료 — ${withText}/${scenes.length}컷에서 글자 확보 · ${memLine()}`);
   }
   mark("대사읽기");
 

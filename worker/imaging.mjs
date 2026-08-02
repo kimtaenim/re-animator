@@ -110,6 +110,17 @@ const _fileRawCache = new WeakMap(); // fileBuffers → Map<idx, {data,width,hei
 //   1 로 내리면 파일 경계를 걸친 컷마다 두 파일을 번갈아 evict/재디코드해 thrash 가 나므로,
 //   '경계를 걸친 컷 하나를 thrash 없이 처리하는 최소값'인 2 가 하한이다.
 const RAW_CACHE_MAX = Number(process.env.RAW_FILE_CACHE || 2);
+// ★★개수 캡만으로는 메모리를 상한하지 못한다(OCR 병렬에서 이미 배운 교훈과 동일) —
+//   파일 높이는 작품마다 10배씩 달라서, '2개'가 작은 파일이면 수십 MB 지만 통짜 원고
+//   (한 회분이 파일 1~2개, 파일당 수만 px)면 파일 하나가 raw 100MB+ 라 2개 = 수백 MB 상주.
+//   → 바이트 예산(RAW_CACHE_MB, 기본 160MB)을 함께 건다. 예산을 넘으면 오래된 것부터
+//   방출하되, 지금 쓰는 1개는 반드시 남긴다(파일 하나가 예산보다 커도 동작은 해야 하므로).
+//   비용: 통짜 원고에서 파일 경계를 걸친 컷(회분에 많아야 파일수-1개)만 재디코드.
+const RAW_CACHE_BYTES = Number(process.env.RAW_CACHE_MB || 160) * 1024 * 1024;
+let _rawStats = { files: 0, bytes: 0, decodes: 0 }; // 관측용(잡 진행 로그에 찍는다)
+export function rawCacheStats() {
+  return { ..._rawStats, mb: Math.round(_rawStats.bytes / 1048576) };
+}
 
 async function fileRawAt(canvas, fileBuffers, idx) {
   let cache = _fileRawCache.get(fileBuffers);
@@ -130,7 +141,13 @@ async function fileRawAt(canvas, fileBuffers, idx) {
     .toBuffer({ resolveWithObject: true });
   const rec = { data, width: info.width, height: info.height };
   cache.set(idx, rec);
-  while (cache.size > RAW_CACHE_MAX) cache.delete(cache.keys().next().value); // 오래된 것 방출
+  _rawStats.decodes++;
+  // 방출 — 개수(기존)와 바이트 예산(신규) 둘 다 지키되, 최소 1개(지금 넣은 것)는 남긴다.
+  const totalBytes = () => [...cache.values()].reduce((n, r) => n + r.data.length, 0);
+  while (cache.size > 1 && (cache.size > RAW_CACHE_MAX || totalBytes() > RAW_CACHE_BYTES)) {
+    cache.delete(cache.keys().next().value); // 오래된 것 방출
+  }
+  _rawStats = { files: cache.size, bytes: totalBytes(), decodes: _rawStats.decodes };
   return rec;
 }
 
