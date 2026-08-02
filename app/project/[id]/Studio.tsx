@@ -2039,6 +2039,33 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   }
 
   // 컷 하나만 생성/다시 생성 — 배치 전에 싸게 충실도 테스트, 마음에 안 드는 컷 재생성.
+  // ★섹션 자동 생성(트리) — 섹션을 펼치면 그 안의 미생성 이미지들을 한 잡(워커 6개 병렬)으로
+  //   바로 시작한다. 컷을 하나씩 열어 하나씩 굽는 직렬 대기("너무 느리다")를 없애는 동선:
+  //   섹션을 펼치는 순간 뒤에서 구워지고, 컷을 열 때쯤엔 이미 있다.
+  async function regenBatch(ids: string[]) {
+    if (!ids.length) return;
+    setError("");
+    const models: Record<string, string> = {};
+    for (const id of ids) models[id] = modelFor(id);
+    markRegenPending(ids);
+    try {
+      const r = await fetch("/api/regen", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, sceneIds: ids, models }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error ?? "생성 실패");
+      setProject((prev) => ({
+        ...prev,
+        steps: { ...prev.steps, regen: { ...prev.steps.regen, status: "running" } },
+      }));
+    } catch (e) {
+      clearRegenPending(ids);
+      setError(e instanceof Error ? e.message : "생성 실패");
+    }
+  }
+
   async function regenOne(sceneId: string) {
     setError("");
     markRegenPending([sceneId]);
@@ -4378,7 +4405,17 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
               <div key={x.i} className="mb-2 rounded-lg border border-[var(--border)] bg-[var(--panel)]">
                 <button
                   type="button"
-                  onClick={() => setOpenTreeSection(secOpen ? -1 : x.i)}
+                  onClick={() => {
+                    setOpenTreeSection(secOpen ? -1 : x.i);
+                    if (!secOpen && !busy && !regenRunning) {
+                      // ★섹션을 펼치면 미생성 이미지들을 한 잡으로 자동 시작(6개 병렬) —
+                      //   컷마다 열고 기다리는 직렬 대기 제거(사용자: "너무 느리다").
+                      const missing = cuts
+                        .filter((c) => c.originalImage && c.cut?.type !== "text" && !c.generatedImage && !regenPending.has(c.id))
+                        .map((c) => c.id);
+                      if (missing.length) void regenBatch(missing);
+                    }
+                  }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold"
                 >
                   <span>{secOpen ? "▾" : "▸"}</span>
