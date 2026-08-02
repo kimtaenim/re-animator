@@ -149,27 +149,40 @@ async function tick(types) {
 //   돌던 잡이 Redis 에 "running" 으로 영원히 남아 화면이 '진행 중'에서 멈춘다(=먹통).
 //   worker:current 를 보고 그 잡을 에러로 확정 + 단계·진행로그에 사유를 남긴다.
 //   조용한 실패 금지: 죽었으면 죽었다고 화면에 말한다.
-async function markCurrentDead(dead) {
+// ★★잡 자동 재개(robust — 사용자 지정) — 워커가 어떤 이유로 죽어도(재배포 SIGTERM·메모리
+//   초과 SIGKILL) 돌던 잡을 '자동으로' 큐 맨 앞에 되돌려 이어서 돌린다. 사용자가 다시 누를
+//   필요가 없다. 같은 잡이 두 번 끊기면 그 잡이 워커를 죽이는 것일 수 있으므로 그때만
+//   에러로 확정하고 이유를 말한다(크래시 루프 방지). 재실행은 증분(된 컷 스킵)이라 손해 최소.
+async function recoverCurrentJob(reason) {
   try {
     const cur = await redis.get("worker:current");
     if (cur?.jobId) {
-      try { await updateJob(cur.jobId, { status: "error", error: dead }); } catch {}
-      try {
-        if (!["dub", "postfx", "camerafx", "sequence", "translate"].includes(cur.type))
-          await failStep(cur.projectId, dead, JOB_STEP[cur.type] ?? "source");
-      } catch {}
-      try { await logProgress(cur.projectId, `[중단] ${cur.type} — ${dead}`); } catch {}
-      console.log(`[worker] 잡 중단 확정: ${cur.type} job=${cur.jobId} — ${dead}`);
+      const job = await redis.get(`job:${cur.jobId}`);
+      const tries = Number(job?.autoRetries || 0);
+      if (job && tries < 1) {
+        await updateJob(cur.jobId, { status: "queued", autoRetries: tries + 1 });
+        await redis.rpush(`jobq:${cur.type}`, cur.jobId); // rpush = 큐 맨 앞(rpop 소비) — 즉시 재개
+        try { await logProgress(cur.projectId, `[자동 재개] ${cur.type} — ${reason}로 끊겨 이어서 다시 돕니다(수동 조작 불필요)`); } catch {}
+        console.log(`[worker] 잡 자동 재개: ${cur.type} job=${cur.jobId}`);
+      } else if (job) {
+        const dead = `${reason}로 같은 잡이 두 번 중단됨 — 이 잡 자체가 원인일 수 있어 자동 재개를 멈춥니다. 다시 시작해 주세요`;
+        try { await updateJob(cur.jobId, { status: "error", error: dead }); } catch {}
+        try {
+          if (!["dub", "postfx", "camerafx", "sequence", "translate"].includes(cur.type))
+            await failStep(cur.projectId, dead, JOB_STEP[cur.type] ?? "source");
+        } catch {}
+        try { await logProgress(cur.projectId, `[중단] ${cur.type} — ${dead}`); } catch {}
+        console.log(`[worker] 잡 중단 확정(2회): ${cur.type} job=${cur.jobId}`);
+      }
     }
     await redis.del("worker:current");
   } catch (e) {
-    console.error("[worker] 잡 중단 확정 실패(계속 실행):", e?.message ?? e);
+    console.error("[worker] 잡 재개/정리 실패(계속 실행):", e?.message ?? e);
   }
 }
-// 재배포/재시작(SIGTERM)이 오면 '그 순간' 바로 중단을 화면에 알린다 — 다음 부팅까지 기다리지 않게.
-// (부팅 시 sweep 은 SIGKILL 등 예고 없는 죽음의 안전망으로 계속 유지.)
+// 재배포/재시작(SIGTERM) — 그 순간 바로 재큐(새 인스턴스가 뜨면 즉시 이어받음).
 process.on("SIGTERM", () => {
-  markCurrentDead("재배포/재시작으로 잡이 중단됨 — 잠시 후 다시 시작해 주세요")
+  recoverCurrentJob("재배포/재시작")
     .finally(() => process.exit(0));
 });
 
@@ -177,9 +190,9 @@ process.on("SIGTERM", () => {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log(`[worker] BUILD = ui-v66 (③ 재생성 카드에도 이 컷 더빙 — ④와 같은 함수로 자동 싱크) node ${process.version}`);
+console.log(`[worker] BUILD = auto-v67 (잡 자동 재개 — 재배포·재시작에 끊긴 잡을 스스로 이어서 돌림, 2회 중단 시에만 정지) node ${process.version}`);
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
-await markCurrentDead("워커가 재시작되어 잡이 중단됨(메모리 초과 또는 재배포) — 다시 시작해 주세요");
+await recoverCurrentJob("워커 재시작(메모리 초과 또는 재배포)");
 for (;;) {
   await tick(TYPES);
   await new Promise((r) => setTimeout(r, POLL_MS));
