@@ -1194,6 +1194,25 @@ export async function runExtract(projectId, payload) {
   buffers.length = 0;
 
   for (const s of scenes) { normalizeNarration(s.cut); normalizeSfx(s.cut); } // 내레이션·효과음 문자열 → 통제 가능한 말풍선으로 통일
+
+  // ★중간 저장 — 추출은 끝에서만 저장해서, 막판(번역·저장 직전)에 죽으면 OCR·연출 결과가
+  //   전부 증발하고 다음 실행이 같은 무게로 처음부터 다시 돌다 같은 곳에서 죽는 루프가 됐다
+  //   (2026-08-02 19:12 실측: 다국어 번역까지 마치고 저장 직전 사망 → 전량 소실).
+  //   무거운 단계가 끝날 때마다 fresh 재읽기+컷 머지로 저장(저장 규약 준수) — 죽어도 전진한다.
+  const midSave = async (label) => {
+    try {
+      const pm = await getProject(projectId);
+      if (!pm) return;
+      const doneById = new Map(work.map((s) => [s.id, s]));
+      pm.scenes = (pm.scenes ?? []).map((fresh) => doneById.get(fresh.id) ?? fresh);
+      await saveProject(pm);
+      await log(`중간 저장(${label}) — 여기까지의 결과는 죽어도 보존됩니다 · ${memLine()}`);
+    } catch (e) {
+      await log(`중간 저장(${label}) 실패(계속): ${String(e?.message ?? e).slice(0, 80)}`);
+    }
+  };
+  await midSave("글씨·연출");
+
   // ★OCR 교정(보수적) — 추출 단계에서도 오독·고유명사 불일치를 전체 문맥으로 잡는다(단계마다 검출).
   //   기존 프로젝트도 추출 재실행 때 교정됨. bubble.text 교정 → cut.dialogue 재구성 후 번역.
   try {
@@ -1215,6 +1234,7 @@ export async function runExtract(projectId, payload) {
   } catch (e) {
     await log(`번역 실패(대사는 그대로): ${String(e?.message ?? e).slice(0, 120)}`);
   }
+  await midSave("교정·번역");
   // ── 다국어 번역(§10) — 프로젝트에 targetLanguages 설정 시 원어→각 언어 tracks 채움. 미설정이면 스킵(기존 무영향). ──
   try {
     const proj = await getProject(projectId);
