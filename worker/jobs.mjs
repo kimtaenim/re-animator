@@ -1662,6 +1662,14 @@ async function collectCastRefs(s, p, key, VLM_MODEL, projectId, log) {
     await log?.(`[진단] 컷 ${s.order + 1}: 그림에 인물 없음(${s.cut?.type}) — 인물 참고이미지 제외`);
     return { bufs, urls };
   }
+  // ★타입이 오분류돼도 걸리게 — '확인된 인물 없음 + 내용 프롬프트 비어 있음' 조합이면 제외.
+  //   내용 앵커가 없는 채로 얼굴 정본이 들어가면 모델이 정본을 내용으로 삼는다(하늘 컷 사고
+  //   의 정확한 조건). 사람이 인물참고 토글을 만질 필요가 없어야 한다(인터페이스 원칙).
+  const hasContent = !!String(s.cut?.description || s.cut?.promptDraft || "").trim();
+  if (visibleChars === 0 && !hasContent) {
+    await log?.(`[진단] 컷 ${s.order + 1}: 확인된 인물·내용 프롬프트 둘 다 없음 — 인물 참고이미지 제외(원본 충실 재생성)`);
+    return { bufs, urls };
+  }
   for (const c of p.cast ?? []) {
     if (bufs.length >= 3) break;
     if (!(c.sceneIds ?? []).includes(s.id)) continue; // 이 컷에 나오는 인물만
