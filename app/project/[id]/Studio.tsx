@@ -412,11 +412,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   //   건드리지 않는다(옛 프로젝트 안전·데이터 무변경). 순수 화면 탭으로만 존재.
   // ★새로고침해도 보던 단계 그대로 — 예전엔 리로드마다 진행상황으로 다시 계산해서 카메라
   //   미리보기에서 F5 하면 4단계로 튕겼다(사용자 지적). 주소 해시(#camera)에 남겨 복원한다.
-  const [activeStep, setActiveStep] = useState<StepKind | "camera">(() => {
-    const VALID = new Set(["source", "cast", "regen", "scene", "camera", "compose"]);
+  const [activeStep, setActiveStep] = useState<StepKind | "camera" | "tree">(() => {
+    const VALID = new Set(["source", "cast", "tree", "regen", "scene", "camera", "compose"]);
     if (typeof window !== "undefined") {
       const h = window.location.hash.replace(/^#/, "");
-      if (VALID.has(h)) return h as StepKind | "camera";
+      if (VALID.has(h)) return h as StepKind | "camera" | "tree";
     }
     return project.scenes?.some((s) => s.generatedImage)
       ? "scene"
@@ -427,7 +427,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
   // ★단계 전환 시 화면 리셋 방지 — 단계를 조건부 렌더해 언마운트하므로 스크롤이 초기화됐다.
   //   떠나는 단계의 스크롤 위치를 기억했다가, 그 단계로 돌아오면 정확히 그 자리로 복원한다.
   const stepScrollY = useRef<Record<string, number>>({});
-  function goToStep(k: StepKind | "camera") {
+  function goToStep(k: StepKind | "camera" | "tree") {
     stepScrollY.current[activeStep] = window.scrollY; // 떠나기 전 현재 위치 저장
     setActiveStep(k);
     // 주소에 남긴다 — 새로고침·뒤로가기에도 같은 단계로 돌아온다(히스토리는 더럽히지 않음).
@@ -439,6 +439,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     const y = stepScrollY.current[activeStep];
     if (y != null) requestAnimationFrame(() => window.scrollTo(0, y)); // 방문했던 단계면 그 자리로
   }, [activeStep]);
+  // 🌳 트리 뷰 상태 — 펼친 섹션(하나만)·펼친 컷(하나만, 아코디언). -1 = 전부 접힘.
+  const [openTreeSection, setOpenTreeSection] = useState<number>(0);
+  const [openTreeCut, setOpenTreeCut] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ type: "image" | "video"; src: string } | null>(null); // 클릭 확대
   const [scenePreview, setScenePreview] = useState<string | null>(null); // 씬 미리보기(영상+자막+더빙)
   const [bubDropId, setBubDropId] = useState<string | null>(null); // 대사(말풍선) 드래그앤드롭 시 드롭 대상 컷 하이라이트
@@ -3850,14 +3853,15 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
 
       {/* 단계 네비 — 클릭하면 그 단계만 보임(한 화면 = 한 단계). 상단 고정이라 스크롤해도 항상 보임(위아래 왕복 X). */}
       <nav className="sticky top-0 z-30 -mx-6 mb-4 flex flex-wrap items-center gap-1 border-b border-[var(--border)] bg-[var(--bg)] px-6 py-2 text-xs">
-        {(["source", "cast", "regen", "scene", "camera", "compose"] as const).map((k) => {
+        {(["source", "cast", "tree", "regen", "scene", "camera", "compose"] as const).map((k) => {
           const hasImages = project.scenes.some((s) => s.generatedImage);
           const avail =
             k === "source" ||
-            ((k === "cast" || k === "regen") && approved) ||
+            ((k === "cast" || k === "tree" || k === "regen") && approved) ||
             ((k === "scene" || k === "camera" || k === "compose") && approved && hasImages);
           const cur = activeStep === k;
-          const label = k === "camera" ? "5. 🎥 카메라 미리보기" : STEP_LABEL[k];
+          const label =
+            k === "camera" ? "5. 🎥 카메라 미리보기" : k === "tree" ? "🌳 컷 작업 (3·4·5)" : STEP_LABEL[k];
           return (
             <button
               key={k}
@@ -4337,6 +4341,179 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
       )}
 
       {/* M3) 재생성 — 좌(원본) / 우(생성) */}
+      {/* ── 🌳 트리 뷰: 섹션 → 컷 → [③재생성 ④영상·더빙 ⑤카메라] — 한 컷을 붙잡고 세 단계를
+          그 자리에서 끝내는 동선(사용자 지정 화면 구조). 카드는 3·4·5단계와 같은 렌더러를
+          공유한다(중복 구현 금지). 섹션 끝에 ⑥ 이 섹션 합성, 전체 레벨에 ⑥ 최종 이어붙이기. ── */}
+      {activeStep === "tree" && approved && (
+        <section className="mb-6">
+          <div className="mb-2 text-xs text-[var(--muted)]">
+            섹션을 펼치고 → 컷을 펼치면 ③ 이미지 재생성 · ④ 영상·더빙 · ⑤ 카메라를 그 자리에서 끝냅니다. 섹션이 끝나면 ⑥ ‘이 섹션 합성’, 전 섹션이 끝나면 맨 아래 ⑥ ‘최종 이어붙이기’.
+          </div>
+          {languageBar()}
+          {(sections.length
+            ? sections
+            : orderedScenes.length
+              ? [{ i: 0, start: 0, end: orderedScenes.length, ids: new Set(orderedScenes.map((s) => s.id)) }]
+              : []
+          ).map((x) => {
+            const cuts = orderedScenes.slice(x.start, x.end);
+            const secOpen = openTreeSection === x.i;
+            const key = String(x.start);
+            const secVidIds = cuts.filter((c) => c.videoUrl).map((c) => c.id);
+            const done = !!project.sectionVideos?.[key];
+            const pending = secComposePending.has(key);
+            const nImg = cuts.filter((c) => c.generatedImage).length;
+            return (
+              <div key={x.i} className="mb-2 rounded-lg border border-[var(--border)] bg-[var(--panel)]">
+                <button
+                  type="button"
+                  onClick={() => setOpenTreeSection(secOpen ? -1 : x.i)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold"
+                >
+                  <span>{secOpen ? "▾" : "▸"}</span>
+                  <span>{sections.length ? `섹션 ${x.i + 1}` : "전체"}</span>
+                  <span className="font-normal text-[var(--muted)]">컷 {x.start + 1}–{x.end}</span>
+                  <span className="ml-auto flex items-center gap-2 text-[11px] font-normal text-[var(--muted)]">
+                    <span>이미지 {nImg}/{cuts.length}</span>
+                    <span>영상 {secVidIds.length}/{cuts.length}</span>
+                    {done && <span className="text-[var(--ok,#3a3)]">✓ 합성됨</span>}
+                  </span>
+                </button>
+                {secOpen && (
+                  <div className="flex flex-col gap-1.5 border-t border-[var(--border)] p-2">
+                    {cuts.map((s) => {
+                      const cutOpen = openTreeCut === s.id;
+                      const isText = s.cut?.type === "text";
+                      const hasRegen = !!s.originalImage && !isText;
+                      const hasScene = !!s.generatedImage || (isText && (s.cut?.bubbles?.length ?? 0) > 0);
+                      const hasCamera = !!s.generatedImage;
+                      const dlg = (
+                        (s.cut?.bubbles ?? []).map((b) => b.translation || b.text).filter(Boolean).join(" ") ||
+                        s.cut?.dialogueTranslation ||
+                        s.cut?.dialogue ||
+                        ""
+                      ).trim();
+                      return (
+                        <div
+                          key={s.id}
+                          className={`rounded border bg-[var(--panel-2)] ${cutOpen ? "border-[var(--accent)]" : "border-[var(--border)]"}`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenTreeCut(cutOpen ? null : s.id);
+                              if (!cutOpen) setOpenScene(s.id); // ④ 카드가 접힌 채로 나오지 않게 같이 펼친다
+                            }}
+                            className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px]"
+                          >
+                            <span className="shrink-0 text-[var(--muted)]">{cutOpen ? "▾" : "▸"} 컷 {s.order + 1}</span>
+                            {(s.generatedImage || s.originalImage) && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={s.generatedImage ?? s.originalImage}
+                                alt=""
+                                className="h-8 w-12 shrink-0 rounded border border-[var(--border)] object-cover"
+                              />
+                            )}
+                            <span className="min-w-0 flex-1 truncate">{dlg || (isText ? "(자막 씬)" : "(무대사)")}</span>
+                            <span className="shrink-0 text-[10px] text-[var(--muted)]">
+                              <span className={s.generatedImage ? "text-[var(--ok,#3a3)]" : ""} title="③ 이미지 재생성 완료 여부">③{s.generatedImage ? "✓" : "·"}</span>{" "}
+                              <span className={s.videoUrl ? "text-[var(--ok,#3a3)]" : ""} title="④ 영상 생성 완료 여부">④{s.videoUrl ? "✓" : "·"}</span>{" "}
+                              <span className={s.fxUrl ? "text-[var(--ok,#3a3)]" : ""} title="⑤ 카메라 구움 여부">⑤{s.fxUrl ? "✓" : "·"}</span>
+                            </span>
+                          </button>
+                          {cutOpen && (
+                            <div className="flex flex-col gap-2 border-t border-[var(--border)] p-2">
+                              {hasRegen && (
+                                <div>
+                                  <div className="mb-1 text-[10px] font-semibold text-[var(--accent)]">③ 이미지 재생성</div>
+                                  {renderRegenCard(s)}
+                                </div>
+                              )}
+                              {hasScene && (
+                                <div>
+                                  <div className="mb-1 text-[10px] font-semibold text-[var(--accent)]">④ 영상 · 더빙</div>
+                                  {renderSceneCard(s)}
+                                </div>
+                              )}
+                              {hasCamera && (
+                                <div>
+                                  <div className="mb-1 text-[10px] font-semibold text-[var(--accent)]">⑤ 카메라</div>
+                                  {renderCameraCard(s)}
+                                </div>
+                              )}
+                              {!hasRegen && !hasScene && !hasCamera && (
+                                <div className="text-[10px] text-[var(--muted)]">이 컷은 여기서 할 작업이 없습니다(원본 이미지·대사 없음).</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {/* ⑥ 이 섹션 합성 — 섹션마다 하나. 6단계와 같은 composeSection/sectionVideos 를 공유. */}
+                    <div className="mt-1 flex flex-wrap items-center gap-2 rounded border border-[var(--accent)] bg-[var(--panel)] px-2 py-1.5 text-[11px]">
+                      <span className="font-semibold text-[var(--accent)]">⑥ 이 섹션 합성</span>
+                      <span className="text-[var(--muted)]">영상 {secVidIds.length}/{cuts.length}컷</span>
+                      <button
+                        type="button"
+                        onClick={() => composeSection(key, secVidIds)}
+                        disabled={busy || pending || secVidIds.length === 0}
+                        title={
+                          secVidIds.length === 0
+                            ? "이 섹션에 생성된 영상이 없습니다 — 먼저 각 컷 ④에서 영상을 만드세요"
+                            : "이 섹션 클립만 합성해 섹션 완성본을 만듭니다(부분 검토·실패 격리)"
+                        }
+                        className="rounded bg-[var(--accent)] px-3 py-1 font-medium text-white disabled:opacity-40"
+                      >
+                        {pending ? "합성 중…" : done ? "다시 합성" : "이 섹션 합성"}
+                      </button>
+                      {done && project.sectionVideos?.[key] && (
+                        <button
+                          type="button"
+                          onClick={() => setLightbox({ type: "video", src: project.sectionVideos![key] })}
+                          className="rounded border border-[var(--accent)] px-2 py-1 text-[var(--accent)] hover:bg-[var(--panel-2)]"
+                        >
+                          ▶ 섹션 완성본 보기
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {/* ⑥ 최종 이어붙이기 — 전체 레벨에 하나. 모든 섹션 합성본이 준비되면 활성. */}
+          {sections.length > 0 && (() => {
+            const doneCnt = sections.filter((s) => project.sectionVideos?.[String(s.start)]).length;
+            const allDone = doneCnt === sections.length;
+            return (
+              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--panel)] px-3 py-2 text-sm">
+                <span className="font-semibold text-[var(--accent)]">⑥ 최종 이어붙이기</span>
+                <span className="text-[11px] text-[var(--muted)]">섹션 합성본 {doneCnt}/{sections.length}</span>
+                <button
+                  type="button"
+                  onClick={joinSections}
+                  disabled={busy || composeRunning || !allDone}
+                  title={allDone ? "섹션 합성본들을 순서대로 이어붙여 최종본을 만듭니다" : "모든 섹션을 먼저 합성하세요"}
+                  className="rounded bg-[var(--accent)] px-3 py-1 font-medium text-white disabled:opacity-40"
+                >
+                  {composeRunning ? "이어붙이는 중…" : "🎬 최종 이어붙이기"}
+                </button>
+                {project.composedUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setLightbox({ type: "video", src: project.composedUrl! })}
+                    className="rounded border border-[var(--accent)] px-2 py-1 text-[11px] text-[var(--accent)] hover:bg-[var(--panel-2)]"
+                  >
+                    ▶ 최종본 보기
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+        </section>
+      )}
+
       {activeStep === "regen" && approved && (
         <section className="mb-6">
           <div className="mb-3 flex items-center justify-between">
