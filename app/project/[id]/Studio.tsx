@@ -18,7 +18,7 @@ import BoundaryEditor, { type SavedRegion } from "./BoundaryEditor";
 import CastReview from "./CastReview";
 import CameraWorkEditor from "./CameraWorkEditor";
 // 씬 미리보기 모달에서 '안 구운' 카메라워크를 근사로 얹기 위한 수식(편집기 hover 와 동일 원천).
-import { buildKeyframeTable, toWebKeyframes, presetLayer } from "@/lib/cameraKeyframes.mjs";
+import { buildKeyframeTable, toWebKeyframes, presetLayer, resolveCameraWork } from "@/lib/cameraKeyframes.mjs";
 
 // ★단계 번호 제거(사용자 지정) — 3·4·5 탭이 사라져 번호가 건너뛰며 오히려 혼란.
 const STEP_LABEL: Record<StepKind, string> = {
@@ -3368,6 +3368,45 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           >
                             {vidPending.has(s.id) ? "…" : "🎬"}
                           </button>
+                        </div>
+                      )}
+                      {/* ★🎥 카메라 프리셋을 ④에서 미리 선택(사용자 제안) — 오빗은 영상 '생성' 때
+                          적용되므로 생성 전에 고르는 게 정석(나중에 고르면 재생성 이중 비용).
+                          버티고·패럴랙스는 골라두면 합성 전 자동 굽기가 처리. 세부 조절은 ⑤ 카드. */}
+                      {!isCardScene && (
+                        <div
+                          className="flex flex-wrap items-center gap-1 text-[10px]"
+                          title="카메라 프리셋 — 오빗은 영상 생성 시 반영(생성 전에 선택). 버티고·패럴랙스는 굽기(합성 전 자동)가 처리. 속도·세부는 ⑤ 카메라 카드에서."
+                        >
+                          <span className="text-[var(--muted)]">🎥 카메라</span>
+                          <select
+                            value={s.cut?.cameraWork?.preset ?? ""}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              updateCut(s.id, {
+                                cameraWork: v
+                                  ? resolveCameraWork(v as NonNullable<CutOntology["cameraWork"]>["preset"], {
+                                      duration_s: Number(s.cut?.durationSec) || 3.5,
+                                    })
+                                  : undefined,
+                              });
+                            }}
+                            className="rounded border border-[var(--border)] bg-[var(--panel-2)] px-1 py-0.5"
+                          >
+                            <option value="">없음(정지)</option>
+                            <option value="push_in">푸시인</option>
+                            <option value="pull_out">풀아웃</option>
+                            <option value="pan">팬</option>
+                            <option value="shake">쉐이크</option>
+                            <option value="crash_zoom">크래시 줌</option>
+                            <option value="whip">휩(전환)</option>
+                            <option value="parallax_push">패럴랙스(2레이어)</option>
+                            <option value="vertigo">버티고 달리줌(2레이어)</option>
+                            <option value="orbit">오빗(생성 시 적용)</option>
+                          </select>
+                          {s.cut?.cameraWork?.preset === "orbit" && (
+                            <span className="text-[var(--accent)]">→ 🎬 생성해야 반영됩니다</span>
+                          )}
                         </div>
                       )}
                       {/* 🕐 생성 시각 — 다시 생성 후 이 시각이 바뀌면 진짜 새 영상, 안 바뀌면 생성/갱신이 안 된 것. */}
