@@ -1,7 +1,7 @@
 // 말풍선(대사) 저장 정리 — /api/cut 저장 시 신뢰 못 할 입력을 화이트리스트로 정리한다.
 // ★한 곳에서만 정의(단일 원천) — 필드 추가 시 여기만 고치면 저장 경로 전체에 반영·테스트 가능.
 //   translation(번역)이 여기서 빠지면 편집 저장 때 번역이 통째로 날아간다(과거 버그).
-import { EMOTIONS, type DialogueBubble, type BubbleTrack, type CameraWork, type CameraPreset, type CameraEasing, type AudioSuggestion } from "./types";
+import { EMOTIONS, type DialogueBubble, type BubbleTrack, type CameraWork, type CameraPreset, type CameraEasing, type AudioSuggestion, type CutOntology } from "./types";
 
 const EMOTION_IDS = new Set(EMOTIONS.map((e) => e.id));
 
@@ -146,4 +146,52 @@ export function cleanAudioSuggestions(raw: unknown): AudioSuggestion[] | undefin
     })
     .slice(0, 8);
   return out;
+}
+
+// ★대사·효과음 '텍스트'를 고치면 그 줄의 기존 소리를 자동 무효화 — 더빙 증분은 '소리 있음'만
+//   보므로(worker/jobs.mjs runDub existing 판정), 안 지우면 텍스트를 고쳐도 옛 텍스트의 소리가
+//   영영 남는다. 목소리 변경 무효화(8e3c671)와 같은 규칙의 텍스트판. 지우면 다음 더빙(일괄·이 컷)이
+//   그 줄만 새로 만든다(안 고친 줄은 그대로 = 비용 최소). /api/cut 저장에서 preserveWorkerAudio
+//   '다음에' 호출한다(복원은 인덱스+텍스트 일치일 때만이라 복원분은 여기서 절대 안 지워짐).
+//   ★줄 이동·삽입으로 인덱스가 밀린 경우: 소리 URL 로 '이 소리가 태어난 줄'을 prev 에서 찾아
+//   그 줄의 텍스트와 비교한다 — 멀쩡한 소리를 인덱스 어긋남으로 오폭하지 않는다.
+export function invalidateEditedAudio(cleaned: CutOntology, prev: CutOntology | undefined): CutOntology {
+  if (!prev) return cleaned;
+  // 내레이션·컷 효과음(레거시 단일 필드): 텍스트가 바뀌면 그 소리는 낡은 것
+  if ((cleaned.narration ?? "") !== (prev.narration ?? "")) cleaned.narrationAudioUrl = undefined;
+  if ((cleaned.sfx ?? "") !== (prev.sfx ?? "")) cleaned.sfxAudioUrl = undefined;
+  const pb = prev.bubbles ?? [];
+  (cleaned.bubbles ?? []).forEach((b, i) => {
+    // 이 줄의 '이전 모습' — 소리 URL 이 prev 어느 줄과 일치하면 그 줄(이동 안전), 아니면 같은 인덱스
+    const origin =
+      pb.find(
+        (p) =>
+          (b.audioUrl != null && p.audioUrl === b.audioUrl) ||
+          Object.entries(b.tracks ?? {}).some(
+            ([l, t]) => t?.audioUrl != null && p.tracks?.[l]?.audioUrl === t.audioUrl
+          )
+      ) ?? pb[i];
+    if (!origin) return; // 새 줄 — 무효화할 옛 소리가 없다
+    const textChanged = (origin.text ?? "") !== (b.text ?? "");
+    if (textChanged && b.audioUrl != null) b.audioUrl = undefined; // 원어 소리(대사·__sfx__ 효과음 줄 공통)
+    for (const [lang, t] of Object.entries(b.tracks ?? {})) {
+      if (!t || t.audioUrl == null) continue;
+      // 언어 소리는 그 언어 번역 텍스트에서 태어난다 — 원문이 바뀌면(번역이 낡음) 또는
+      // 번역 텍스트를 직접 고쳤으면 그 언어 소리를 지운다(번역 텍스트 자체는 보존 — 사람 수정 존중).
+      const ot = origin.tracks?.[lang];
+      const trackTextChanged = ot ? (ot.text ?? "") !== (t.text ?? "") : false;
+      if (textChanged || trackTextChanged) {
+        t.audioUrl = undefined;
+        t.durationFinal = undefined;
+        if (t.status === "tts" || t.status === "done") t.status = t.text ? "translated" : "pending";
+      }
+    }
+  });
+  // 오디오 제안(효과음·삽입 대사): 텍스트를 고치면 생성음 무효화(인덱스 대응 — preserve 와 동일 규칙)
+  const ps = prev.audioSuggestions ?? [];
+  (cleaned.audioSuggestions ?? []).forEach((s, i) => {
+    const o = ps[i];
+    if (o && (o.text ?? "") !== (s.text ?? "") && s.audioUrl != null) s.audioUrl = undefined;
+  });
+  return cleaned;
 }

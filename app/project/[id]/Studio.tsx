@@ -12,7 +12,7 @@ import {
   LANGUAGES,
 } from "@/lib/types";
 import { blankCut } from "@/lib/ontology";
-import { camSig } from "@/lib/cutClean";
+import { camSig, invalidateEditedAudio } from "@/lib/cutClean";
 import { splitRuns, wordTokens, toggleWordEmphasis } from "@/lib/emphasis";
 import BoundaryEditor, { type SavedRegion } from "./BoundaryEditor";
 import CastReview from "./CastReview";
@@ -1003,7 +1003,9 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
     setProject((prev) => ({
       ...prev,
       scenes: prev.scenes.map((s) =>
-        s.id === sceneId ? { ...s, cut: { ...(s.cut ?? blankCut()), ...patch } } : s
+        // ★텍스트를 고친 줄은 소리를 즉시 무효화(서버 /api/cut 도 같은 규칙) — 클라이언트 상태에
+        //   옛 audioUrl 이 남으면 다음 저장(감정·자막 등)에서 텍스트가 이미 일치해 낡은 소리가 부활한다.
+        s.id === sceneId ? { ...s, cut: invalidateEditedAudio({ ...(s.cut ?? blankCut()), ...patch }, s.cut) } : s
       ),
     }));
     clearTimeout(cutSaveTimers.current[sceneId]);

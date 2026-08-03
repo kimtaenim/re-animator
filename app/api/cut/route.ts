@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProject, saveProject } from "@/lib/projectStore";
 import { CUT_TYPES, TEXT_KINDS, blankCut } from "@/lib/ontology";
 import { type CutOntology } from "@/lib/types";
-import { cleanBubbles, cleanCameraWork, cleanAudioSuggestions } from "@/lib/cutClean";
+import { cleanBubbles, cleanCameraWork, cleanAudioSuggestions, invalidateEditedAudio } from "@/lib/cutClean";
 
 export const runtime = "nodejs";
 
@@ -158,7 +158,9 @@ export async function PATCH(req: NextRequest) {
 
   let changed = false;
   if (body.cut !== undefined) {
-    scene.cut = preserveWorkerAudio(cleanCut(body.cut), scene.cut); // 워커가 쓴 오디오 URL 소실 방지
+    // 순서 고정: ①정리 → ②워커 오디오 복원(결여+텍스트 일치만) → ③텍스트 고친 줄 소리 무효화.
+    // ②가 채운 소리는 텍스트가 일치할 때만이라 ③이 지우지 않는다 — 서로 안전.
+    scene.cut = invalidateEditedAudio(preserveWorkerAudio(cleanCut(body.cut), scene.cut), scene.cut);
     changed = true;
   }
   if (body.regenMode === "mask" || body.regenMode === "full") {
