@@ -198,6 +198,56 @@ function subtitleCenterX(cut, W) {
   return Math.round(W * 0.5);
 }
 
+// ── 흘려얹기 배치(순수 수학 — scripts/test-caption-flow.mjs 가 실행 검증) ──
+// "같은 그룹(섹션) 안에서 소리가 컷을 넘나들고, 그룹 경계에서 끊는다. 영상(컷 길이)이 뼈대."
+// parts[k] = { vd(세그 뼈대 길이), audioLen, holdSec(0), s:{order} } 를 받아
+// start(전역 영상 시작)·delay(이 컷 소리·자막 지연)·holdSec(그룹 끝 홀드)를 채우고 전체 길이를 돌려준다.
+// 각 컷 소리의 시작 = max(그 컷 영상 시작, 앞 소리가 끝난 시각). 그룹 경계·마지막 꼬리는
+// 남은 소리만큼 직전 컷을 홀드로 연장해 그 안에서 끝낸다(배경이 바뀌기 전에 마무리).
+export function placeFlowAudio(parts, groupBounds) {
+  let cursorVideo = 0; // 전체 타임라인에서 현재 컷 영상 시작
+  let audioCursor = 0; // 다음 소리를 놓을 수 있는 가장 이른 시각
+  for (let k = 0; k < parts.length; k++) {
+    const pt = parts[k];
+    if (k > 0 && groupBounds.has(pt.s.order)) {
+      // 새 그룹(섹션) 시작 — 이전 그룹 소리가 남았으면 직전 컷을 홀드로 늘려 그 안에서 끝낸다.
+      const over = audioCursor - cursorVideo;
+      if (over > 0.05) {
+        parts[k - 1].holdSec += over;
+        cursorVideo += over;
+      }
+      audioCursor = cursorVideo;
+    }
+    pt.start = cursorVideo;
+    const aStart = Math.max(cursorVideo, audioCursor);
+    pt.delay = aStart - cursorVideo; // 앞 컷 소리가 길었던 만큼 이 컷 소리·자막이 늦게 시작
+    audioCursor = aStart + (pt.audioLen || 0);
+    cursorVideo += pt.vd;
+  }
+  {
+    // 마지막 그룹 꼬리 — 소리가 영상보다 길면 마지막 컷을 홀드로 연장.
+    const over = audioCursor - cursorVideo;
+    if (over > 0.05 && parts.length) {
+      parts[parts.length - 1].holdSec += over;
+      cursorVideo += over;
+    }
+  }
+  return cursorVideo;
+}
+
+// 세그먼트[segStart, segStart+finalDur)와 겹치는 전역 자막({gStart,gEnd,…})을 세그먼트-내
+// 시각으로 잘라 돌려준다 — 컷 경계를 넘는 자막은 다음 세그먼트가 같은 위치에 이어 그린다.
+export function segmentCapWindows(globalCaps, segStart, finalDur) {
+  const out = [];
+  for (const g of globalCaps) {
+    const st = g.gStart - segStart;
+    const en = g.gEnd - segStart;
+    if (en <= 0.05 || st >= finalDur - 0.05) continue;
+    out.push({ g, start: Math.max(0, st), end: Math.min(finalDur, en) });
+  }
+  return out;
+}
+
 export async function runCompose(projectId, payload) {
   await resetProgress(projectId);
   await resolveFf();
@@ -424,81 +474,80 @@ export async function runCompose(projectId, payload) {
     }
 
     // ── 2단계: 그룹(섹션) 타임라인에 오디오 배치 — "같은 섹션 안에서 소리가 컷을 넘나든다".
-    //    각 컷 소리의 시작 = max(그 컷 영상 시작, 앞 소리가 끝난 시각). 그룹(섹션) 경계에서는
-    //    소리를 끊는다 — 남은 소리만큼 그룹 마지막 컷을 홀드로 연장(배경이 바뀌기 전에 마무리).
+    //    (순수 수학은 placeFlowAudio 로 추출 — scripts/test-caption-flow.mjs 가 실행 검증)
     const nAll = (p.scenes ?? []).length;
     const groupBounds = new Set(sectionKey != null ? [] : (p.sectionStarts ?? []).filter((x) => x > 0 && x < nAll));
-    let cursorVideo = 0; // 전체 타임라인에서 현재 컷 영상 시작
-    let audioCursor = 0; // 다음 소리를 놓을 수 있는 가장 이른 시각
-    for (let k = 0; k < parts.length; k++) {
-      const pt = parts[k];
-      if (k > 0 && groupBounds.has(pt.s.order)) {
-        // 새 그룹(섹션) 시작 — 이전 그룹 소리가 남았으면 직전 컷을 홀드로 늘려 그 안에서 끝낸다.
-        const over = audioCursor - cursorVideo;
-        if (over > 0.05) {
-          parts[k - 1].holdSec += over;
-          cursorVideo += over;
-        }
-        audioCursor = cursorVideo;
-      }
-      pt.start = cursorVideo;
-      const aStart = Math.max(cursorVideo, audioCursor);
-      pt.delay = aStart - cursorVideo; // 앞 컷 소리가 길었던 만큼 이 컷 소리·자막이 늦게 시작
-      audioCursor = aStart + (pt.audioLen || 0);
-      cursorVideo += pt.vd;
-    }
-    {
-      // 마지막 그룹 꼬리 — 소리가 영상보다 길면 마지막 컷을 홀드로 연장.
-      const over = audioCursor - cursorVideo;
-      if (over > 0.05 && parts.length) {
-        parts[parts.length - 1].holdSec += over;
-        cursorVideo += over;
-      }
-    }
-    const timelineDur = cursorVideo;
+    const timelineDur = placeFlowAudio(parts, groupBounds);
 
-    // ── 3단계: 세그먼트 인코딩(영상 길이대로, 자막은 배치만큼 지연) ──
+    // ── 자막도 그룹 타임라인의 시민으로(흘려얹기의 자막판) — 소리처럼 컷 경계를 넘어 이어진다.
+    //   ★예전엔 자막을 '자기 세그먼트 안'에만 구웠다(-t finalDur 로 잘림). 긴 대사(짧은 컷)는
+    //   소리가 다음 컷 위로 흘러가는데 자막은 컷 끝에서 사라졌고, 앞 컷 소리에 밀린(delay) 자막은
+    //   자기 컷 길이를 넘는 부분이 아예 안 떴다(사용자: "자막 길이와 영상 길이가 안 맞는다").
+    //   이제 자막 구간을 전역 시각으로 확정하고, 각 세그먼트가 '자기와 겹치는 부분만' 나눠 굽는다
+    //   → 소리와 자막이 같은 시각에 함께 나가고 함께 끝난다(그룹 경계는 홀드가 보장 — 안 넘음).
+    //   위치는 그 자막이 '태어난 컷' 기준으로 여기서 확정한다(다음 컷에 이어 그릴 때도 같은 자리).
+    const fracOf = (v) => (typeof v === "number" && isFinite(v) ? Math.max(0.05, Math.min(0.95, v)) : null);
+    const globalCaps = []; // { text, gStart, gEnd, cx, cy, png? }
+    for (const pt of parts) {
+      // 위치 해석: 대사(말풍선)별 지정 > 컷 기본 > 디폴트. 카드 씬 기본은 정중앙(무성영화).
+      const cyDef =
+        pt.isCard && !pt.s.cut?.subtitlePos && pt.s.cut?.subtitleY == null
+          ? Math.round(H * 0.5)
+          : subtitleCenterY(pt.s.cut, H);
+      const cxDef = subtitleCenterX(pt.s.cut, W);
+      for (const c of pt.caps) {
+        globalCaps.push({
+          text: c.text,
+          gStart: pt.start + pt.delay + c.start,
+          gEnd: pt.start + pt.delay + c.end,
+          cx: fracOf(c.sx) != null ? Math.round(W * fracOf(c.sx)) : cxDef,
+          cy: fracOf(c.sy) != null ? Math.round(H * fracOf(c.sy)) : cyDef,
+        });
+      }
+    }
+    // ★★자막을 ASS 로 굽는다(스펙 §7). PNG 오버레이는 캡션마다 sharp/canvas 로 이미지를
+    //   만들어 compose(OOM 경계 경로)에 네이티브 이미지 메모리를 얹었다 — 반복된 OOM 의 알려진
+    //   원인. ASS 는 텍스트 파일 하나라 이미지 메모리 0, ffmpeg 입력도 늘지 않는다.
+    // ★ASS 는 기본 OFF(opt-in: ASS_ENABLE=1) — libass 가 우리 자막 폰트(Noto Sans KR 가변폰트)를
+    //   패밀리명으로 못 찾아 실측에서 '자막이 아예 안 그려졌다'. 기본은 PNG, ASS 는 env 로 켠다.
+    //   (남은 일: 고정 굵기 TTF 를 번들해 fontsdir 로 물리면 ASS 를 기본으로 승격 가능.)
+    const useAss = (process.env.ASS_ENABLE ?? "0") === "1";
+    // ★한글 폰트 파일을 못 구하면 ASS 는 빈 화면이 된다 → 조용히 PNG 경로로(자막 소실 방지).
+    const assFontPath = useAss && globalCaps.length ? await ensureSubtitleFontPath().catch(() => null) : null;
+    if (!(useAss && assFontPath)) {
+      // PNG 캡션은 '인코딩 루프 밖에서' 한 번만 그린다 — 픽셀 연산(sharp/canvas)과 ffmpeg 인코딩을
+      //   같은 구간에 겹치지 않는 게 이 경로의 OOM 규칙. 경계를 넘는 자막도 파일 하나를 두 세그먼트가 공유.
+      for (let k = 0; k < globalCaps.length; k++) {
+        const g = globalCaps[k];
+        // 박스 크기 PNG + 프레임 내 좌표 — 전체화면 PNG 대비 ffmpeg 피크 실측 ~100MB↓.
+        const box = await renderCaptionBox(g.text, { W, H, cy: g.cy, cx: g.cx });
+        if (box) {
+          const cp = join(dir, `gcap${k}.png`);
+          await writeFile(cp, box.buf);
+          g.png = { path: cp, x: box.x, y: box.y };
+        }
+      }
+    }
+
+    // ── 3단계: 세그먼트 인코딩(영상 길이대로, 자막은 전역 배치에서 겹치는 구간만) ──
     for (let i = 0; i < parts.length; i++) {
       const pt = parts[i];
       const { s, isCard, vPath, aPath } = pt;
-      const caps = pt.caps.map((c) => ({ ...c, start: c.start + pt.delay, end: c.end + pt.delay }));
       const holdSec = pt.holdSec;
       const finalDur = pt.vd + holdSec;
 
-      // 자막 캡션 PNG(캔버스 재사용). 위치는 자막 있을 때만 계산.
-      // 위치 해석: 대사(말풍선)별 지정 > 컷 기본 > 디폴트. 카드 씬 기본은 정중앙(무성영화).
-      const cyDef =
-        isCard && !s.cut?.subtitlePos && s.cut?.subtitleY == null
-          ? Math.round(H * 0.5)
-          : subtitleCenterY(s.cut, H);
-      const cxDef = subtitleCenterX(s.cut, W);
-      const frac = (v) => (typeof v === "number" && isFinite(v) ? Math.max(0.05, Math.min(0.95, v)) : null);
-      // ★★자막을 ASS 로 굽는다(스펙 §7). PNG 오버레이는 캡션마다 sharp/canvas 로 이미지를
-      //   만들어 compose(OOM 경계 경로)에 네이티브 이미지 메모리를 얹었다 — 반복된 OOM 의 알려진
-      //   원인. ASS 는 텍스트 파일 하나라 이미지 메모리 0, ffmpeg 입력도 늘지 않는다.
-      //   AI 가 정한 줄별 자막 위치(bubble.subtitleY — 연출기가 '얼굴·입 안 가리는 위치'로 결정)는
-      //   caps[].sy 로 그대로 전달돼 ASS \pos 로 반영된다. 없으면 스펙 기본(하단 93%).
-      //   ASS_DISABLE=1 이면 옛 PNG 경로로 되돌릴 수 있다(폰트 문제 등 비상용).
-      // ★ASS 는 기본 OFF(opt-in: ASS_ENABLE=1) —
-      //   스펙 §7 이 ASS 를 지정했고 구현·검증했지만, libass 가 우리 자막 폰트(Noto Sans KR
-      //   가변폰트)를 패밀리명으로 못 찾아 실측에서 '자막이 아예 안 그려졌다'(검정 배경 밝은
-      //   픽셀 4개). PNG 경로는 같은 폰트를 직접 등록해 잘 그린다.
-      //   자막이 사라지는 회귀를 만들 수 없으므로 기본은 PNG, ASS 는 env 로 켠다.
-      //   (남은 일: 고정 굵기 TTF 를 번들해 fontsdir 로 물리면 ASS 를 기본으로 승격 가능.)
-      const useAss = (process.env.ASS_ENABLE ?? "0") === "1";
+      // 이 세그먼트[pt.start, pt.start+finalDur)와 겹치는 전역 자막을 세그먼트-내 시각으로 잘라 온다.
+      //   컷 경계를 넘는 자막은 다음 세그먼트가 같은 위치에 이어 그린다(하드컷이라 육안 연속).
+      const segCaps = segmentCapWindows(globalCaps, pt.start, finalDur);
       let assPath = null;
-      // ★한글 폰트 파일을 못 구하면 ASS 는 빈 화면이 된다(libass 가 대체 폰트를 못 찾음).
-      //   그 경우 조용히 PNG 경로로 되돌린다 — 자막이 사라지는 것보다 낫다.
-      const assFontPath = useAss && caps.length ? await ensureSubtitleFontPath().catch(() => null) : null;
       const capPaths = [];
-      if (useAss && caps.length && assFontPath) {
+      if (useAss && segCaps.length && assFontPath) {
         try {
-          const ass = buildAss(caps, {
-            W,
-            H,
-            defaultYFrac: cyDef / H, // 컷 기본 자막 높이(수동 지정·카드 씬 중앙 반영)
-            defaultXFrac: cxDef / W,
-          });
+          // AI 가 정한 줄별 자막 위치는 전역 확정값(cx·cy)을 \pos 로 그대로 전달.
+          const ass = buildAss(
+            segCaps.map((c) => ({ text: c.g.text, start: c.start, end: c.end, sx: c.g.cx / W, sy: c.g.cy / H })),
+            { W, H }
+          );
           assPath = join(dir, `sub${i}.ass`);
           await writeFile(assPath, ass, "utf8");
         } catch (e) {
@@ -507,16 +556,8 @@ export async function runCompose(projectId, payload) {
         }
       }
       if (!assPath) {
-        for (const c of caps) {
-          const ccy = frac(c.sy) != null ? Math.round(H * frac(c.sy)) : cyDef;
-          const ccx = frac(c.sx) != null ? Math.round(W * frac(c.sx)) : cxDef;
-          // 박스 크기 PNG + 프레임 내 좌표 — 전체화면 PNG 대비 ffmpeg 피크 실측 ~100MB↓.
-          const box = await renderCaptionBox(c.text, { W, H, cy: ccy, cx: ccx });
-          if (box) {
-            const cp = join(dir, `cap${i}_${capPaths.length}.png`);
-            await writeFile(cp, box.buf);
-            capPaths.push({ path: cp, span: c, x: box.x, y: box.y });
-          }
+        for (const c of segCaps) {
+          if (c.g.png) capPaths.push({ path: c.g.png.path, span: c, x: c.g.png.x, y: c.g.png.y });
         }
       }
 
@@ -595,7 +636,7 @@ export async function runCompose(projectId, payload) {
         "-threads", "1", "-tune", "zerolatency", "-bf", "0", "-g", "48", "-max_muxing_queue_size", "256",
         "-an", "-movflags", "+faststart", out
       );
-      await log(`씬 ${i + 1}/${parts.length} 인코딩(자막 ${capPaths.length}·${finalDur.toFixed(1)}s${pt.delay > 0.05 ? `·소리 +${pt.delay.toFixed(1)}s 지연` : ""}${holdSec > 0.05 ? `·홀드 ${holdSec.toFixed(1)}s` : ""})…`);
+      await log(`씬 ${i + 1}/${parts.length} 인코딩(자막 ${segCaps.length}·${finalDur.toFixed(1)}s${pt.delay > 0.05 ? `·소리 +${pt.delay.toFixed(1)}s 지연` : ""}${holdSec > 0.05 ? `·홀드 ${holdSec.toFixed(1)}s` : ""})…`);
       await run(FFMPEG, args);
       sceneFiles.push(out);
     }
