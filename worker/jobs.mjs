@@ -2665,11 +2665,14 @@ export async function runCameraFx(projectId, payload) {
           //   원본 프레임을 배경으로 쓰면 인물 복사본이 겹쳐 보이므로(사용자: "배경이 겹쳐 나온다")
           //   인물 자리를 인페인팅으로 지운 판을 컷당 1회 만들어 재사용한다(scene.cleanPlateUrl).
           let plUrl = s.cleanPlateUrl;
+          // ★생성 방식이 바뀌면 옛 판은 폐기 — 실루엣 마스크 시절 판(plate/)은 잔상이 남아
+          //   있어(사용자 보고) 재사용하면 안 된다. 경로의 버전(plate-v2/)으로 구분해 다시 만든다.
+          if (plUrl && !plUrl.includes("/plate-v2/")) plUrl = null;
           if (!plUrl) {
             const src = s.generatedImage || s.originalImage;
             await log(`컷 ${s.order + 1} 배경판(클린 플레이트) 생성 중…`);
             const { buf: pbuf, cost } = await generateCleanPlate(src, matteBuf, process.env.FAL_KEY, (m) => console.error("[plate]", m));
-            const pup = await put(`project/${projectId}/plate/${s.id}-${Date.now()}.png`, pbuf, {
+            const pup = await put(`project/${projectId}/plate-v2/${s.id}-${Date.now()}.png`, pbuf, {
               access: "public",
               contentType: "image/png",
               addRandomSuffix: false,
