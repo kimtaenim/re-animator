@@ -71,6 +71,51 @@ export const PLATE_COST = Number(process.env.FAL_IMAGE_COST || 0.05);
 import { falFillRaw } from "./fal.mjs";
 
 /**
+ * 인물 매트 → 인페인팅용 '사각 박스' 마스크(흰=지울 영역).
+ * ★실루엣 모양 마스크를 쓰면 인페인팅 모델이 마스크 윤곽에서 사람 형태를 읽어 실루엣을
+ *   다시 그린다(사용자 실측: "인물 분리했는데 실루엣이 그대로 남아 있다"). 인물의 바운딩
+ *   박스를 여유 있게 잡은 '사각형' 마스크는 모양 힌트가 없어 배경 재구성이 깨끗하다.
+ * @param {Buffer} matteBuf 인물 매트(흰=인물) PNG
+ * @returns {Promise<{ maskBuf: Buffer, box: {left:number,top:number,width:number,height:number} }>}
+ */
+export async function matteToBoxMask(matteBuf) {
+  const meta = await sharp(matteBuf).metadata();
+  const W = meta.width, H = meta.height;
+  if (!W || !H) throw new Error("매트 크기를 읽지 못했습니다");
+  // 저해상 스캔(가로 200px)으로 흰 픽셀 바운딩 박스를 찾는다 — 픽셀 연산 비용 고정(OOM 무관).
+  const SCAN_W = 200;
+  const scanH = Math.max(1, Math.round((H / W) * SCAN_W));
+  const { data, info } = await sharp(matteBuf).toColourspace("b-w").resize(SCAN_W, scanH, { fit: "fill" }).raw().toBuffer({ resolveWithObject: true });
+  let minX = info.width, minY = info.height, maxX = -1, maxY = -1;
+  for (let y = 0; y < info.height; y++) {
+    for (let x = 0; x < info.width; x++) {
+      if (data[(y * info.width + x) * info.channels] > 127) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) throw new Error("매트에 인물 영역이 없습니다(빈 매트)");
+  const sx = W / info.width, sy = H / info.height;
+  // 원본 좌표 + 여유(각 변 10%, 최소 16px) — 머리카락·그림자 잔상까지 확실히 포함.
+  const mw = Math.max(16, Math.round((maxX - minX + 1) * sx * 0.1));
+  const mh = Math.max(16, Math.round((maxY - minY + 1) * sy * 0.1));
+  const left = Math.max(0, Math.round(minX * sx) - mw);
+  const top = Math.max(0, Math.round(minY * sy) - mh);
+  const right = Math.min(W, Math.round((maxX + 1) * sx) + mw);
+  const bottom = Math.min(H, Math.round((maxY + 1) * sy) + mh);
+  const bw = Math.max(1, right - left), bh = Math.max(1, bottom - top);
+  const rect = await sharp({ create: { width: bw, height: bh, channels: 3, background: { r: 255, g: 255, b: 255 } } }).png().toBuffer();
+  const maskBuf = await sharp({ create: { width: W, height: H, channels: 3, background: { r: 0, g: 0, b: 0 } } })
+    .composite([{ input: rect, left, top }])
+    .png()
+    .toBuffer();
+  return { maskBuf, box: { left, top, width: bw, height: bh } };
+}
+
+/**
  * 컷 이미지 + 인물 매트 → 인물을 지운 배경판(PNG).
  * @param {string} imageUrl 공개 URL(컷 이미지 — 매트를 만든 그 이미지여야 좌표가 맞는다)
  * @param {Buffer} matteBuf 인물 매트(흰=인물) PNG
@@ -85,12 +130,9 @@ export async function generateCleanPlate(imageUrl, matteBuf, key, onLog) {
   if (!ir.ok) throw new Error(`컷 이미지 다운로드 실패 ${ir.status}`);
   const imageBuf = Buffer.from(await ir.arrayBuffer());
 
-  // 매트 팽창(dilate) — 블러로 흰 영역을 번지게 한 뒤 낮은 문턱으로 이진화하면 팽창과 같다.
-  // 시그마는 env PLATE_DILATE_SIGMA(기본 10px) — 좁으면 인물 테두리 잔상이 배경판에 남는다.
-  const sigma = Math.max(1, Number(process.env.PLATE_DILATE_SIGMA || 10));
-  const mask = await sharp(matteBuf).toColourspace("b-w").blur(sigma).threshold(8).png().toBuffer();
-
-  const { buf, cost } = await falFillRaw(imageBuf, mask, PLATE_PROMPT, key);
-  onLog?.("클린 플레이트 생성(인물 영역 인페인팅)");
+  // ★실루엣 모양 마스크 금지 — 바운딩 박스 마스크로(위 matteToBoxMask 주석 참조).
+  const { maskBuf, box } = await matteToBoxMask(matteBuf);
+  const { buf, cost } = await falFillRaw(imageBuf, maskBuf, PLATE_PROMPT, key);
+  onLog?.(`클린 플레이트 생성(박스 ${box.width}x${box.height} 인페인팅)`);
   return { buf, cost };
 }

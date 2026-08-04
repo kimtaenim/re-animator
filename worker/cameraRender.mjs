@@ -186,8 +186,12 @@ async function renderLayerB(o) {
   // ★매트·배경판(정지 이미지 루프)은 '클립 실제 길이'만큼 늘려야 한다 — duration_s+2 로만 자르면
   //   그보다 긴 클립(예: Kling 10초)이 shortest 에 의해 6초로 잘린 채 저장돼 뒷부분이 소실됐다.
   const [clipDurRaw] = await probeRaw(o.fp, inPath, "format=duration");
-  const matteDur = Math.max(Number(clipDurRaw) || 0, dur0(cameraWork)) + 0.5;
-  const table = buildKeyframeTable(cameraWork, { fps, refWidth: W, refHeight: H });
+  // ★카메라 길이 = 클립 전체 — 기본 duration_s(3.5s)로 두면 6~10초 클립(MiniMax·Kling)에서
+  //   앞 3.5초만 움직이고 나머지가 통째로 정지했다(사용자: "배경이 제대로 움직이지 않는다").
+  //   사람이 더 길게 지정한 경우만 그 값을 존중, 클립 길이가 하한(정지 꼬리 금지).
+  const cwEff = { ...cameraWork, duration_s: Math.max(Number(cameraWork?.duration_s) || 0, Number(clipDurRaw) || 0) || 3.5 };
+  const matteDur = Math.max(Number(clipDurRaw) || 0, dur0(cwEff)) + 0.5;
+  const table = buildKeyframeTable(cwEff, { fps, refWidth: W, refHeight: H });
   const bgTr = table.tracks.background;
   const chTr = table.tracks.character;
   if (!bgTr?.keys?.length || !chTr?.keys?.length) throw new Error("계층 B 트랙이 비어있음");
