@@ -49,5 +49,14 @@ try { await matteToBoxMask(await sharp({ create: { width: 64, height: 64, channe
 catch { threw = true; }
 ok("빈 매트는 명시적 에러", threw);
 
+// ── 팽창 실루엣(제거 전용 Erase 모델의 1차 마스크) — 실루엣보다 넓고, 배경 대부분은 보존 ──
+const { dilateMatte } = await import("../worker/matte.mjs");
+const dil = await dilateMatte(matte, 12);
+const dRaw = await sharp(dil).toColourspace("b-w").raw().toBuffer({ resolveWithObject: true });
+const dAt = (x, y) => dRaw.data[(y * dRaw.info.width + x) * dRaw.info.channels];
+ok("팽창: 인물 안은 흰", dAt(person.left + 80, person.top + 120) > 200);
+ok("팽창: 실루엣 밖 가장자리(+8px)도 흰(머리카락 여유)", dAt(person.left - 8, person.top + 120) > 200);
+ok("팽창: 먼 배경은 검정(보존)", dAt(4, 4) < 50 && dAt(W - 5, H - 5) < 50);
+
 console.log(`\n결과: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

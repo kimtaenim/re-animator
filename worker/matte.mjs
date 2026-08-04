@@ -68,7 +68,20 @@ const PLATE_PROMPT =
   "No people, no characters, no figures, no text.";
 export const PLATE_COST = Number(process.env.FAL_IMAGE_COST || 0.05);
 
-import { falFillRaw } from "./fal.mjs";
+import { falFillRaw, falEraseRaw } from "./fal.mjs";
+
+/**
+ * 매트 팽창(dilate) — 블러로 흰 영역을 번지게 한 뒤 낮은 문턱으로 이진화하면 팽창과 같다.
+ * 제거(Erase) 모델용 마스크: 실루엣+여유 — 머리카락·그림자 잔상까지 지우되 배경은 최대 보존.
+ * @param {Buffer} matteBuf 인물 매트(흰=인물) PNG
+ * @param {number} [sigma] 팽창 반경(px 근사, 기본 env PLATE_DILATE_SIGMA=12)
+ */
+export async function dilateMatte(matteBuf, sigma = Math.max(1, Number(process.env.PLATE_DILATE_SIGMA || 12))) {
+  // ★2패스 필수 — sharp 는 호출 순서와 무관하게 threshold 를 blur '앞'에 적용한다(파이프라인
+  //   고정, 실측). 한 체인에 걸면 팽창이 전혀 안 되고 경계만 흐려진다.
+  const blurred = await sharp(matteBuf).toColourspace("b-w").blur(sigma).toBuffer();
+  return sharp(blurred).threshold(8).png().toBuffer();
+}
 
 /**
  * 인물 매트 → 인페인팅용 '사각 박스' 마스크(흰=지울 영역).
@@ -130,9 +143,19 @@ export async function generateCleanPlate(imageUrl, matteBuf, key, onLog) {
   if (!ir.ok) throw new Error(`컷 이미지 다운로드 실패 ${ir.status}`);
   const imageBuf = Buffer.from(await ir.arrayBuffer());
 
-  // ★실루엣 모양 마스크 금지 — 바운딩 박스 마스크로(위 matteToBoxMask 주석 참조).
+  // ★1차 = 제거 전용(Erase) + 팽창 실루엣 마스크 — 마스크 밖 배경은 픽셀 그대로 보존된다.
+  //   (생성형 Fill 은 큰 영역을 통째로 새로 그려 배경이 원본과 달라졌다 — 사용자 실측 기각.)
+  try {
+    const mask = await dilateMatte(matteBuf);
+    const { buf, cost } = await falEraseRaw(imageBuf, mask, key);
+    onLog?.("클린 플레이트 생성(제거 전용 Erase — 배경 보존)");
+    return { buf, cost };
+  } catch (e) {
+    onLog?.(`Erase 실패(${String(e?.message ?? e).slice(0, 80)}) — Fill+박스로 폴백`);
+  }
+  // 폴백 = 생성형 Fill + 박스 마스크(실루엣 힌트 방지) — Erase 모델을 못 쓸 때의 차선.
   const { maskBuf, box } = await matteToBoxMask(matteBuf);
   const { buf, cost } = await falFillRaw(imageBuf, maskBuf, PLATE_PROMPT, key);
-  onLog?.(`클린 플레이트 생성(박스 ${box.width}x${box.height} 인페인팅)`);
+  onLog?.(`클린 플레이트 생성(폴백: 박스 ${box.width}x${box.height} Fill)`);
   return { buf, cost };
 }
