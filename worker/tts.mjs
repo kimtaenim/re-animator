@@ -22,6 +22,27 @@ const EMOTION_TAGS = {
   sigh: "sighs",
 };
 
+// ★줄 단위 실제 언어 감지 — 일본어판 안에 '영어로 말하는 줄'(원작이 영어 대사·번역이 영어 유지)이
+//   있으면 그 줄만 영어로 읽어야 한다. 예전엔 작업 언어를 전 줄에 강제해(Typecast language=jpn)
+//   영어 텍스트 줄이 실패하거나 발음이 뭉개졌고, 실패한 줄은 소리 없이 남았다
+//   (사용자 보고: "일본어 하다가 중간에 영어 하는 부분이 소리가 아예 안 들어가 있다").
+//   확실한 문자 근거가 있을 때만 바꾼다: 가나→ja, 한글 우세→ko, CJK·한글이 전혀 없고 라틴 우세→en.
+//   한자만 있는 줄(ja 한자 표기/zh 모호)·기호뿐인 줄은 주어진 언어 유지.
+//   ★원어판(lang="")은 손대지 않는다 — 기존 동작 유지(회귀 금지).
+export function effectiveTtsLang(text, lang = "") {
+  if (!lang) return lang; // 원어판: 기존 동작 그대로
+  const t = String(text || "");
+  const kana = (t.match(/[぀-ヿ]/g) || []).length; // 히라가나·가타카나
+  const hangul = (t.match(/\p{Script=Hangul}/gu) || []).length;
+  const han = (t.match(/\p{Script=Han}/gu) || []).length;
+  const latin = (t.match(/[A-Za-z]/g) || []).length;
+  if (kana > 0) return "ja"; // 가나가 하나라도 있으면 일본어 문장(영단어 섞여도 ja 로 읽음)
+  if (hangul > 0 && hangul >= latin) return "ko";
+  if (han > 0) return lang; // 한자만: ja(한자 표기)/zh 모호 — 주어진 언어 유지
+  if (latin > 0) return "en"; // CJK·한글 없이 라틴 문자뿐 = 영어 대사 줄
+  return lang; // 기호·숫자뿐 — 주어진 언어 유지
+}
+
 // { buf, ext, contentType } 반환. text 는 1~2000자.
 // 스마트(둥근) 따옴표를 straight 로 정규화 — 일부 TTS 가 특수 문자에서 실패하는 걸 방어.
 // speed = 말 속도 배수(1=기본, 1.2=조금 빠르게). Typecast=audio_tempo, ElevenLabs=voice_settings.speed.
@@ -38,8 +59,9 @@ export async function synthesize(provider, voiceId, text, speed = 1, emotion = "
   if (!t) throw new Error("빈 텍스트");
   if (!voiceId) throw new Error("voice_id 없음");
   const sp = Math.max(0.5, Math.min(2, Number(speed) || 1));
-  if (provider === "typecast") return synthTypecast(voiceId, t, sp, lang);
-  return synthEleven(voiceId, t, sp, EMOTION_TAGS[emotion], lang);
+  const el = effectiveTtsLang(t, lang); // ★줄의 실제 문자로 언어 보정(영어 대사 줄 무음 방지)
+  if (provider === "typecast") return synthTypecast(voiceId, t, sp, el);
+  return synthEleven(voiceId, t, sp, EMOTION_TAGS[emotion], el);
 }
 
 // 작업 언어(§10) → Typecast language 코드. 미지정·미지원이면 kor(기존 동작).

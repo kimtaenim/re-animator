@@ -190,7 +190,7 @@ process.on("SIGTERM", () => {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log(`[worker] BUILD = flow-v72 (자막도 흘려얹기 — 긴 대사 자막이 소리 따라 컷을 넘어 이어짐, 컷 끝 잘림·미표시 수정) node ${process.version}`);
+console.log(`[worker] BUILD = dub-v73 (대화 컷 상한 4→8초 + 언어판 줄별 언어 보정 — 일본어판 영어 대사 무음 수정) node ${process.version}`);
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 await recoverCurrentJob("워커 재시작(메모리 초과 또는 재배포)");
 for (;;) {

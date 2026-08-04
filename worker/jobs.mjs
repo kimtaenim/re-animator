@@ -1911,7 +1911,10 @@ export async function runPortrait(projectId, payload) {
 // → ③무대사 장면전환(transition)은 길게 → ④그 외 최소 비트. 나중에 TTS 오디오 길이가 마스터.
 const half = (x) => Math.max(0.5, Math.min(15, Math.round(x * 2) / 2)); // 0.5초 단위로 스냅
 // 모션 티어별 길이 범위(초, 스펙 §3): talk 3-4·idle 2-3·emote 2·action 1-2 강제.
-const TIER_SEC = { talk: [2.5, 4], idle: [2, 3], emote: [1.5, 2.5], action: [1, 2] };
+// ★talk 상한 8초(사용자 2026-08-03: "대화 컷이 너무 짧다") — 대사 길이(글자수/5cps)가 티어
+//   범위로 클램프되므로, 상한 4초는 긴 대사에서 소리·자막이 다음 컷 위로 크게 흘러넘쳤다.
+//   엔진은 전부 수용(Kling 3~15·MiniMax 6/10 반올림·Grok ≤10, 짧은 쪽은 트림). env 로 조정 가능.
+const TIER_SEC = { talk: [2.5, Number(process.env.TIER_TALK_MAX_SEC || 8)], idle: [2, 3], emote: [1.5, 2.5], action: [1, 2] };
 function estimateVideoSeconds(cut) {
   const MIN = Number(process.env.VIDEO_MIN_SEC || 2);
   const MAX = Number(process.env.VIDEO_MAX_SEC || 8);
