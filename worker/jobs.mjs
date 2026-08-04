@@ -51,7 +51,7 @@ import { klingVideoFromImage, KLING_VIDEO_COST } from "./kling.mjs";
 import { minimaxVideoFromImage, MINIMAX_VIDEO_COST, hasMinimax } from "./minimax.mjs";
 import { renderCameraFx } from "./cameraRender.mjs";
 import { presetLayer } from "./cameraKeyframes.mjs";
-import { generateMatte } from "./matte.mjs";
+import { generateMatte, generateCleanPlate } from "./matte.mjs";
 import { readCutText, readCutTextTiled, prepareOcrImage, readCutTextPrepared } from "./ocr.mjs";
 import { detectRefBox, cropToBox } from "./refbox.mjs";
 import { translateScenes, proofreadScenes, translateScenesMultilang } from "./translate.mjs";
@@ -1760,6 +1760,10 @@ export async function runRegen(projectId, payload) {
       if (g.url) {
         s.generatedImage = g.url;
         s.regenError = undefined;
+        // ★이미지가 바뀌면 그 이미지에서 만든 매트·배경판은 낡은 것 — 지워서 다음 계층 B 굽기가
+        //   새 이미지 기준으로 다시 만들게 한다(옛 이미지 매트로 합성하면 인물이 어긋난다).
+        s.matteUrl = undefined;
+        s.cleanPlateUrl = undefined;
       } else {
         s.regenError = g.error || "생성 실패";
       }
@@ -2633,6 +2637,7 @@ export async function runCameraFx(projectId, payload) {
       //   매트는 컷 이미지에서 한 번만 만들면 되므로 scene.matteUrl 에 저장해 재사용한다
       //   (다시 구울 때마다 돈을 쓰지 않는다). 실패하면 그 컷만 스킵되고 잡은 계속된다.
       let mattePath;
+      let platePath;
       if (cw && presetLayer(cw.preset) === "B") {
         try {
           let mUrl = s.matteUrl;
@@ -2652,17 +2657,41 @@ export async function runCameraFx(projectId, payload) {
             } catch {}
           }
           const mp = join(dir, "matte.png");
-          await writeFile(mp, await download(mUrl));
+          const matteBuf = await download(mUrl);
+          await writeFile(mp, matteBuf);
           mattePath = mp;
+
+          // ★클린 플레이트(인물을 지운 배경판) — 계층 B 배경 레이어(사용자 결정 2026-08-03).
+          //   원본 프레임을 배경으로 쓰면 인물 복사본이 겹쳐 보이므로(사용자: "배경이 겹쳐 나온다")
+          //   인물 자리를 인페인팅으로 지운 판을 컷당 1회 만들어 재사용한다(scene.cleanPlateUrl).
+          let plUrl = s.cleanPlateUrl;
+          if (!plUrl) {
+            const src = s.generatedImage || s.originalImage;
+            await log(`컷 ${s.order + 1} 배경판(클린 플레이트) 생성 중…`);
+            const { buf: pbuf, cost } = await generateCleanPlate(src, matteBuf, process.env.FAL_KEY, (m) => console.error("[plate]", m));
+            const pup = await put(`project/${projectId}/plate/${s.id}-${Date.now()}.png`, pbuf, {
+              access: "public",
+              contentType: "image/png",
+              addRandomSuffix: false,
+            });
+            plUrl = pup.url;
+            s.cleanPlateUrl = plUrl; // 아래 저장 루프가 씬 필드를 그대로 기록한다
+            try {
+              await recordCost({ projectId, vendor: "fal", model: "clean-plate", costUsd: cost, meta: { kind: "plate", sceneId: s.id } });
+            } catch {}
+          }
+          const pp2 = join(dir, "plate.png");
+          await writeFile(pp2, await download(plUrl));
+          platePath = pp2;
         } catch (e) {
-          await log(`컷 ${s.order + 1} 매트 실패(이 컷만 건너뜀): ${String(e?.message ?? e).slice(0, 140)}`);
+          await log(`컷 ${s.order + 1} 매트·배경판 실패(이 컷만 건너뜀): ${String(e?.message ?? e).slice(0, 140)}`);
         }
       }
 
       let result = { skipped: true, layer: "-" };
       if (cw && cw.preset) {
         result = await renderCameraFx({
-          ff, fp, dir, inPath: inp, outPath: outp, cameraWork: cw, mattePath,
+          ff, fp, dir, inPath: inp, outPath: outp, cameraWork: cw, mattePath, platePath,
           onLog: (m) => console.error("[camerafx]", m),
         });
       }
@@ -2701,9 +2730,11 @@ export async function runCameraFx(projectId, payload) {
           delete t2.fxProxyUrl; // 카메라워크 없음 = 프록시도 없음
         }
         if (s.matteUrl) t2.matteUrl = s.matteUrl; // 이번에 만든 매트 보존(다시 만들지 않게)
+        if (s.cleanPlateUrl) t2.cleanPlateUrl = s.cleanPlateUrl; // 배경판도 보존(재과금 방지)
         await saveProject(p2);
       } else if (p2 && t2) {
         if (s.matteUrl) t2.matteUrl = s.matteUrl;
+        if (s.cleanPlateUrl) t2.cleanPlateUrl = s.cleanPlateUrl;
         // ★어떤 설정으로 구웠는지 지문을 남긴다 — 앱이 '이 컷은 지금 설정대로 구워져 있나'를
         //   판단해 자동으로 다시 굽는다(사용자가 '뭘 굽고 뭘 안 굽는지' 외우지 않게).
         const sig = camSig(cw);

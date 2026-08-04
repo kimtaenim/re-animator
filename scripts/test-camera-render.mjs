@@ -114,9 +114,18 @@ try {
   await run(ff, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=black:s=${W}x${H}`,
     "-vf", `drawbox=x=${Math.round(W * 0.35)}:y=${Math.round(H * 0.2)}:w=${Math.round(W * 0.3)}:h=${Math.round(H * 0.7)}:color=white:t=fill`,
     "-frames:v", "1", matte]);
+
+  // ★매트만 있고 클린 플레이트(배경판)가 없으면 스킵 — 원본 프레임을 배경으로 쓰면
+  //   인물 복사본이 겹쳐 보이는 구조 결함(사용자 보고)이라, 겹친 결과물을 만들지 않는다.
+  const rbMatteOnly = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: join(dir, "bm.mp4"), mattePath: matte, cameraWork: resolveCameraWork("vertigo", { duration_s: 3 }) });
+  ok(rbMatteOnly.skipped && rbMatteOnly.needsMatte, "계층 B: 배경판 없으면 스킵(겹침 방지 — 원본 프레임을 배경으로 안 씀)");
+
+  // 클린 플레이트 = 초록 단색(식별용) — 출력 배경이 '판'에서 왔는지 픽셀로 검증할 수 있다.
+  const plate = join(dir, "plate.png");
+  await run(ff, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=green:s=${W}x${H}`, "-frames:v", "1", plate]);
   const bOut = join(dir, "b2.mp4");
-  const rbYes = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: bOut, mattePath: matte, cameraWork: resolveCameraWork("vertigo", { duration_s: 3 }) });
-  ok(!rbYes.skipped && rbYes.layer === "B", "계층 B: 매트가 있으면 2레이어로 굽는다");
+  const rbYes = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: bOut, mattePath: matte, platePath: plate, cameraWork: resolveCameraWork("vertigo", { duration_s: 3 }) });
+  ok(!rbYes.skipped && rbYes.layer === "B", "계층 B: 매트+배경판이 있으면 2레이어로 굽는다");
   await stat(bOut);
   const [bdur] = await probe(bOut, "format=duration");
   ok(Math.abs(Number(bdur) - 3) < 0.5, `계층 B 출력 길이 ~3s (실제 ${Number(bdur).toFixed(2)})`);
@@ -125,6 +134,15 @@ try {
   const psb = await capture(ff, ["-hide_banner", "-i", bOut, "-i", clip, "-lavfi", "psnr", "-f", "null", "-"]);
   const avgb = psb.match(/average:([0-9.]+|inf)/);
   ok(avgb && avgb[1] !== "inf", `계층 B 가 화면을 실제로 변경(psnr average=${avgb?.[1]})`);
+  // ★겹침 원천 차단 검증 — 화면 구석(인물 밖)은 '초록 배경판'이어야 한다.
+  //   예전 구조(배경=원본 프레임)라면 여기 testsrc 색 막대가 보인다(= 인물·배경 이중 겹침의 근원).
+  const cs = await capture(ff, ["-hide_banner", "-ss", "1", "-i", bOut, "-frames:v", "1",
+    "-vf", "crop=32:32:4:4,signalstats,metadata=print", "-f", "null", "-"]);
+  const uavg = Number((cs.match(/signalstats\.UAVG=([0-9.]+)/) || [])[1]);
+  const vavg = Number((cs.match(/signalstats\.VAVG=([0-9.]+)/) || [])[1]);
+  // green(#008000) 의 YUV ≈ U86·V74 (원본 testsrc 구석은 백색 계열 ≈ U128·V128) — 105 를 경계로 판별.
+  ok(isFinite(uavg) && isFinite(vavg) && uavg < 105 && vavg < 105,
+    `계층 B 배경이 클린 플레이트에서 옴(구석 UAVG=${uavg}·VAVG=${vavg} — 초록, 원본 프레임 아님)`);
 } finally {
   await rm(dir, { recursive: true, force: true }).catch(() => {});
 }

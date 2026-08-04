@@ -54,3 +54,43 @@ export async function generateMatte(imageUrl, key, onLog) {
   onLog?.(`인물 매트 생성(${meta.width}x${meta.height}, ${meta.hasAlpha ? "알파" : "회색조"} 기준)`);
   return { buf, cost: MATTE_COST };
 }
+
+// ── 클린 플레이트(인물을 지운 배경판) — 계층 B 의 배경 레이어용(사용자 결정 2026-08-03) ──
+// 예전 계층 B 는 배경 레이어로 '인물이 든 원본 프레임'을 그대로 써서, 배경이 움직이면
+// 그 안의 인물 복사본이 같이 움직여 화면이 이중으로 겹쳐 보였다(사용자: "배경이 겹쳐 나온다").
+// 인물 자리를 인페인팅으로 지운 배경판을 컷당 1회 만들어 배경 레이어로 쓰면 겹침이 원천 차단된다.
+//
+// 마스크 = 인물 매트를 '넓힌' 것(blur→threshold ≒ 팽창) — 머리카락·외곽 잔상까지 확실히 지운다.
+// 프롬프트는 배경 재구성만 지시(동작·사물 예시를 넣지 않는다 — 모델이 그대로 그리는 사고 방지).
+const PLATE_PROMPT =
+  "Remove every person and character completely. Reconstruct only the background scenery behind them, " +
+  "seamlessly continuing the surrounding artwork in the exact same style, colors and lighting. " +
+  "No people, no characters, no figures, no text.";
+export const PLATE_COST = Number(process.env.FAL_IMAGE_COST || 0.05);
+
+import { falFillRaw } from "./fal.mjs";
+
+/**
+ * 컷 이미지 + 인물 매트 → 인물을 지운 배경판(PNG).
+ * @param {string} imageUrl 공개 URL(컷 이미지 — 매트를 만든 그 이미지여야 좌표가 맞는다)
+ * @param {Buffer} matteBuf 인물 매트(흰=인물) PNG
+ * @param {string} key FAL_KEY
+ * @param {(m:string)=>void} [onLog]
+ * @returns {Promise<{ buf: Buffer, cost: number }>}
+ */
+export async function generateCleanPlate(imageUrl, matteBuf, key, onLog) {
+  if (!key) throw new Error("FAL_KEY 없음 — 클린 플레이트(배경판)를 만들 수 없습니다");
+  if (!imageUrl) throw new Error("배경판을 만들 이미지가 없습니다");
+  const ir = await fetch(imageUrl, { signal: AbortSignal.timeout(60_000) });
+  if (!ir.ok) throw new Error(`컷 이미지 다운로드 실패 ${ir.status}`);
+  const imageBuf = Buffer.from(await ir.arrayBuffer());
+
+  // 매트 팽창(dilate) — 블러로 흰 영역을 번지게 한 뒤 낮은 문턱으로 이진화하면 팽창과 같다.
+  // 시그마는 env PLATE_DILATE_SIGMA(기본 10px) — 좁으면 인물 테두리 잔상이 배경판에 남는다.
+  const sigma = Math.max(1, Number(process.env.PLATE_DILATE_SIGMA || 10));
+  const mask = await sharp(matteBuf).toColourspace("b-w").blur(sigma).threshold(8).png().toBuffer();
+
+  const { buf, cost } = await falFillRaw(imageBuf, mask, PLATE_PROMPT, key);
+  onLog?.("클린 플레이트 생성(인물 영역 인페인팅)");
+  return { buf, cost };
+}

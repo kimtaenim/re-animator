@@ -98,11 +98,15 @@ export async function renderCameraFx(o) {
     }
     log?.(`orbit + 후처리 줌 — 궤도는 I2V, 줌·드리프트는 여기서 굽는다`);
   }
-  // 계층 B(버티고·패럴랙스): 인물/배경을 따로 움직인다 — 인물 매트(알파)가 있어야 한다.
-  //   매트가 없으면 예전처럼 스킵(무엇이 없어서 안 되는지 로그로 남긴다).
+  // 계층 B(버티고·패럴랙스): 인물/배경을 따로 움직인다 — 인물 매트 + ★클린 플레이트(인물을
+  //   지운 배경판)가 있어야 한다. 예전엔 배경 레이어로 '인물이 든 원본 프레임'을 그대로 써서
+  //   배경이 움직일 때 그 안의 인물 복사본이 같이 움직여 화면이 이중으로 겹쳐 보였다
+  //   (사용자: "배경이 겹쳐서 나온다. 성공한 일이 없다"). 겹침은 그 구조로는 해결 불가 —
+  //   클린 플레이트 없이는 굽지 않는다(겹친 결과물을 만드느니 스킵이 낫다).
   if (layer === "B") {
-    if (!o.mattePath) {
-      log?.(`${cameraWork.preset}(계층 B) — 인물 매트가 없어 스킵(매트를 먼저 만들어야 합니다)`);
+    if (!o.mattePath || !o.platePath) {
+      const need = !o.mattePath ? "인물 매트" : "클린 플레이트(인물 지운 배경판)";
+      log?.(`${cameraWork.preset}(계층 B) — ${need}가 없어 스킵(겹침 방지: 재료 없이는 굽지 않습니다)`);
       return { skipped: true, layer, upscale: false, maxScale: 1, needsMatte: true };
     }
     const r = await renderLayerB({ ...o, log });
@@ -175,11 +179,11 @@ function dur0(cameraWork) {
 }
 
 async function renderLayerB(o) {
-  const { ff, dir, inPath, outPath, cameraWork, mattePath, log } = o;
+  const { ff, dir, inPath, outPath, cameraWork, mattePath, platePath, log } = o;
   const [W, H] = await probe(o.fp, inPath, "stream=width,height");
   const [fpsRaw] = await probeRaw(o.fp, inPath, "stream=r_frame_rate");
   const fps = parseFps(fpsRaw) || 24;
-  // ★매트(정지 이미지 루프)는 '클립 실제 길이'만큼 늘려야 한다 — duration_s+2 로만 자르면
+  // ★매트·배경판(정지 이미지 루프)은 '클립 실제 길이'만큼 늘려야 한다 — duration_s+2 로만 자르면
   //   그보다 긴 클립(예: Kling 10초)이 shortest 에 의해 6초로 잘린 채 저장돼 뒷부분이 소실됐다.
   const [clipDurRaw] = await probeRaw(o.fp, inPath, "format=duration");
   const matteDur = Math.max(Number(clipDurRaw) || 0, dur0(cameraWork)) + 0.5;
@@ -195,26 +199,32 @@ async function renderLayerB(o) {
   const bgE = buildCropExprs(bgTr, W, H);
   const chE = buildCropExprs(chTr, W, H);
 
-  // ★알파를 '먼저' 합쳐 두고 그 RGBA 를 crop 한다 — 매트에 같은 crop 을 따로 거는 것보다
-  //   단순하고, 알파가 픽셀과 같이 잘려 어긋날 여지가 없다.
+  // ★배경 = 클린 플레이트(입력 2 — 인물을 지운 배경판, 정지 이미지 루프).
+  //   예전엔 배경도 원본 클립([0:v] split)이라 인물 복사본이 배경과 같이 움직여 겹쳐 보였다.
+  //   배경판은 정지지만 배경의 '움직임'은 어차피 이 crop 궤적이 만든다(2.5D 방식) — 겹침 0.
+  // ★인물 = 원본 클립 + 매트 알파. 알파를 '먼저' 합쳐 두고 그 RGBA 를 crop 한다 —
+  //   매트에 같은 crop 을 따로 거는 것보다 단순하고, 알파가 픽셀과 같이 잘려 어긋날 여지가 없다.
   const filter =
-    `[0:v]split=2[vb][vc];` +
-    `[vb]${cropExprFilter(bgE)},scale=${W}:${H}:flags=lanczos,setsar=1[bgv];` +
+    `[2:v]scale=${W}:${H},setsar=1,${cropExprFilter(bgE)},scale=${W}:${H}:flags=lanczos,setsar=1[bgv];` +
     `[1:v]scale=${W}:${H},format=gray[m];` +
-    `[vc][m]alphamerge[rgba];` +
+    `[0:v][m]alphamerge[rgba];` +
     `[rgba]${cropExprFilter(chE)},scale=${W}:${H}:flags=lanczos,setsar=1[fg];` +
     `[bgv][fg]overlay=0:0:format=auto:shortest=1[out]`;
 
+  // ★출력 길이 = 클립 길이(-t) — alphamerge/overlay 는 정지 이미지 루프(매트·배경판)가 남아
+  //   있으면 영상 마지막 프레임을 반복하며 루프 길이(클립+2.5s)까지 늘어난다(실측 5.5s).
+  const outDur = Number(clipDurRaw) || Number(cameraWork?.duration_s) || 3;
   await run(
     ff,
     ["-hide_banner", "-nostats", "-loglevel", "warning", "-y",
      "-i", inPath, "-loop", "1", "-framerate", String(fps), "-t", String(matteDur), "-i", mattePath,
-     "-filter_complex", filter, "-map", "[out]", "-shortest", "-an",
+     "-loop", "1", "-framerate", String(fps), "-t", String(matteDur), "-i", platePath,
+     "-filter_complex", filter, "-map", "[out]", "-t", outDur.toFixed(3), "-an",
      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
      "-threads", "2", "-movflags", "+faststart", outPath],
     dir
   );
-  log?.(`${cameraWork.preset}(계층 B) — 인물/배경 2레이어로 구움(매트 사용)`);
+  log?.(`${cameraWork.preset}(계층 B) — 클린 플레이트 배경 + 매트 인물 2레이어로 구움(겹침 0)`);
   return { skipped: false, layer: "B", upscale: false, maxScale: table.maxScale };
 }
 

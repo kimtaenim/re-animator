@@ -44,6 +44,25 @@ async function callFal(model, input, key) {
   return url;
 }
 
+// 범용 마스크 인페인팅(Fill) — 이미지의 마스크(흰) 영역을 프롬프트대로 다시 그린 PNG 버퍼.
+// ★프로젝트 크기 맞춤(fitBuffer) 없이 원본 크기 그대로 돌려준다 — 클린 플레이트(계층 B 배경판)
+//   등 '이미지와 같은 좌표계'가 필요한 용도. 비용은 FAL_COST 1회.
+export async function falFillRaw(imageBuf, maskBuf, prompt, key) {
+  if (!key) throw new Error("FAL_KEY 없음");
+  const url = await callFal(
+    FAL_FILL,
+    {
+      prompt,
+      image_url: `data:image/png;base64,${imageBuf.toString("base64")}`,
+      mask_url: `data:image/png;base64,${maskBuf.toString("base64")}`,
+    },
+    key
+  );
+  const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!r.ok) throw new Error(`fal 결과 다운로드 실패 ${r.status}`);
+  return { buf: Buffer.from(await r.arrayBuffer()), cost: FAL_COST };
+}
+
 async function downloadFit(url, project) {
   const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
   if (!r.ok) throw new Error(`fal 결과 다운로드 실패 ${r.status}`);
