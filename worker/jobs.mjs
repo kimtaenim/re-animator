@@ -51,7 +51,7 @@ import { klingVideoFromImage, KLING_VIDEO_COST } from "./kling.mjs";
 import { minimaxVideoFromImage, MINIMAX_VIDEO_COST, hasMinimax } from "./minimax.mjs";
 import { renderCameraFx } from "./cameraRender.mjs";
 import { presetLayer } from "./cameraKeyframes.mjs";
-import { generateMatte, generateCleanPlate } from "./matte.mjs";
+import { generateMatte, generateCleanPlate, matteWhiteRatio } from "./matte.mjs";
 import { readCutText, readCutTextTiled, prepareOcrImage, readCutTextPrepared } from "./ocr.mjs";
 import { detectRefBox, cropToBox } from "./refbox.mjs";
 import { translateScenes, proofreadScenes, translateScenesMultilang } from "./translate.mjs";
@@ -2638,7 +2638,13 @@ export async function runCameraFx(projectId, payload) {
       //   (다시 구울 때마다 돈을 쓰지 않는다). 실패하면 그 컷만 스킵되고 잡은 계속된다.
       let mattePath;
       let platePath;
-      if (cw && presetLayer(cw.preset) === "B") {
+      let layerBSingle = false; // 인물 없는 컷·매트 불량 → 배경 트랙 단일 레이어(겹침 위험 0)
+      if (cw && presetLayer(cw.preset) === "B" && !(s.cut?.characters ?? []).length) {
+        // ★인물 없는 컷(풍경·사물·텍스트) — 분리할 인물이 없다. 매트·배경판을 만들지 않고(비용 0)
+        //   배경 궤적을 프레임 전체에 적용한다. 예전엔 이런 컷이 통째로 스킵돼 "패럴랙스가 안 된다"였다.
+        layerBSingle = true;
+        await log(`컷 ${s.order + 1} 인물 없는 컷 — ${cw.preset} 를 단일 레이어(배경 궤적)로 굽습니다`);
+      } else if (cw && presetLayer(cw.preset) === "B") {
         try {
           let mUrl = s.matteUrl;
           if (!mUrl) {
@@ -2658,6 +2664,15 @@ export async function runCameraFx(projectId, payload) {
           }
           const mp = join(dir, "matte.png");
           const matteBuf = await download(mUrl);
+          // ★매트 sanity — 흰(인물) 비율이 0 에 가까우면 인물 없음, 0.75 초과면 배경 제거 모델이
+          //   화면 대부분을 전경으로 오판한 것. 그대로 2레이어를 만들면 배경판·합성이 다 망가진다
+          //   → 단일 레이어로 굽는다(비용 추가 0).
+          const whiteRatio = await matteWhiteRatio(matteBuf);
+          if (whiteRatio < 0.005 || whiteRatio > 0.75) {
+            layerBSingle = true;
+            await log(`컷 ${s.order + 1} 매트 부적합(인물 비율 ${(whiteRatio * 100).toFixed(0)}%) — 단일 레이어(배경 궤적)로 굽습니다`);
+            throw { __single: true }; // 아래 plate 생성 건너뜀(catch 에서 무시)
+          }
           await writeFile(mp, matteBuf);
           mattePath = mp;
 
@@ -2687,14 +2702,19 @@ export async function runCameraFx(projectId, payload) {
           await writeFile(pp2, await download(plUrl));
           platePath = pp2;
         } catch (e) {
-          await log(`컷 ${s.order + 1} 매트·배경판 실패(이 컷만 건너뜀): ${String(e?.message ?? e).slice(0, 140)}`);
+          // ★재료(매트·배경판) 실패 = 스킵이 아니라 '단일 레이어로 대체' — 스킵하면 그 컷은
+          //   아무 움직임도 없는 원본이 된다(사용자: "심지어 줌도 안 된다"). 시차는 없어도
+          //   카메라 무브 자체는 보장하고, 사유를 로그로 남긴다(몰래 낮추지 않는다).
+          layerBSingle = true;
+          if (!e?.__single) // __single = 매트 부적합 → 단일 레이어 전환(실패 아님, 위에서 로그함)
+            await log(`컷 ${s.order + 1} 매트·배경판 실패 → 단일 레이어(시차 없음)로 대체: ${String(e?.message ?? e).slice(0, 140)}`);
         }
       }
 
       let result = { skipped: true, layer: "-" };
       if (cw && cw.preset) {
         result = await renderCameraFx({
-          ff, fp, dir, inPath: inp, outPath: outp, cameraWork: cw, mattePath, platePath,
+          ff, fp, dir, inPath: inp, outPath: outp, cameraWork: cw, mattePath, platePath, layerBSingle,
           onLog: (m) => console.error("[camerafx]", m),
         });
       }

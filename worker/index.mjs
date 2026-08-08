@@ -190,7 +190,7 @@ process.on("SIGTERM", () => {
 //   동영상 중에도 걸 수 있지만(잡 큐에 적재), 워커는 순서대로 처리한다.
 // ★배포 지문 — 커밋마다 갱신한다. 이 태그로 '내 코드가 실제로 배포됐는지'를 로그에서 확인한다.
 //   (예전엔 고정 문자열이라 버전 확인이 불가능했다.)
-console.log(`[worker] BUILD = plate-v77 (배경판 = 제거 전용 Erase 모델 — 배경 보존, Fill 은 폴백만; 옛 판 캐시 자동 폐기) node ${process.version}`);
+console.log(`[worker] BUILD = plate-v78 (패럴랙스 깊이 방향 반전·측면 시차 + 인물 없는 컷·재료 실패는 단일 레이어 — 스킵으로 무동작 되던 것 제거) node ${process.version}`);
 console.log("[worker] 시작 — 단일 루프(한 번에 한 잡) 폴링 중…");
 await recoverCurrentJob("워커 재시작(메모리 초과 또는 재배포)");
 for (;;) {

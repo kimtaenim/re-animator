@@ -105,6 +105,15 @@ export async function renderCameraFx(o) {
   //   클린 플레이트 없이는 굽지 않는다(겹친 결과물을 만드느니 스킵이 낫다).
   if (layer === "B") {
     if (!o.mattePath || !o.platePath) {
+      // ★인물 없는 컷(풍경·사물·군중 원경) — 분리할 인물이 없으므로 '배경 트랙 단일 레이어'로
+      //   굽는다(jobs 가 cut.characters 0 또는 매트 불량을 보고 지정). 예전엔 이런 컷이 통째로
+      //   스킵돼 "패럴랙스가 안 된다"가 됐다. 겹칠 인물이 없으니 단일 레이어가 정답이다.
+      //   ★인물 컷의 재료 실패는 여전히 스킵 — 몰래 단순 줌으로 낮추면 '그냥 줌이 된다'는
+      //   그 문제를 다시 만든다(정직하게 스킵 사유를 남긴다).
+      if (o.layerBSingle) {
+        const r = await renderLayerBSingle({ ...o, log });
+        return r;
+      }
       const need = !o.mattePath ? "인물 매트" : "클린 플레이트(인물 지운 배경판)";
       log?.(`${cameraWork.preset}(계층 B) — ${need}가 없어 스킵(겹침 방지: 재료 없이는 굽지 않습니다)`);
       return { skipped: true, layer, upscale: false, maxScale: 1, needsMatte: true };
@@ -176,6 +185,26 @@ export async function renderCameraFx(o) {
 // 매트 입력에 걸 길이(초) — 루프 입력이 무한이면 파이프라인이 안 끝나는 경우가 있어 명시한다.
 function dur0(cameraWork) {
   return Math.max(1, Math.ceil(Number(cameraWork?.duration_s) || 4) + 2);
+}
+
+// 계층 B '단일 레이어' — 인물 없는 컷(풍경·사물)용. 분리할 인물이 없으므로 배경 트랙의
+// 궤적(시차의 배경 몫)을 프레임 전체에 적용한다. 매트·배경판 불필요(비용 0)·겹침 위험 0.
+async function renderLayerBSingle(o) {
+  const { ff, dir, inPath, outPath, cameraWork, log } = o;
+  const [W, H] = await probe(o.fp, inPath, "stream=width,height");
+  const [fpsRaw] = await probeRaw(o.fp, inPath, "stream=r_frame_rate");
+  const fps = parseFps(fpsRaw) || 24;
+  const [clipDurRaw] = await probeRaw(o.fp, inPath, "format=duration");
+  // 카메라 길이 = 클립 전체(2레이어와 동일 규칙 — 정지 꼬리 금지).
+  const cwEff = { ...cameraWork, duration_s: Math.max(Number(cameraWork?.duration_s) || 0, Number(clipDurRaw) || 0) || 3.5 };
+  const table = buildKeyframeTable(cwEff, { fps, refWidth: W, refHeight: H });
+  const tr = table.tracks.background ?? table.tracks.main;
+  if (!tr?.keys?.length) throw new Error("계층 B 단일 트랙이 비어있음");
+  const exprs = buildCropExprs(tr, W, H);
+  const vf = `${cropExprFilter(exprs)},scale=${W}:${H}:flags=lanczos,setsar=1`;
+  await run(ff, ["-hide_banner", "-nostats", "-loglevel", "warning", "-y", "-i", inPath, "-vf", vf, "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", outPath], dir);
+  log?.(`${cameraWork.preset}(계층 B·인물 없는 컷) — 배경 트랙 단일 레이어로 구움`);
+  return { skipped: false, layer: "B", upscale: false, maxScale: table.maxScale };
 }
 
 async function renderLayerB(o) {

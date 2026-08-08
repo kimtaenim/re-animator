@@ -100,6 +100,12 @@ console.log("== camera keyframe golden test ==");
   const v = buildKeyframeTable(resolveCameraWork("vertigo", { duration_s: 4 }));
   const vc = v.tracks.character.keys, vb = v.tracks.background.keys;
   ok(vc[vc.length - 1].scale >= vb[vb.length - 1].scale, "vertigo: 배경이 인물 대비 역방향(작아짐)");
+  // ★parallax 깊이 방향(사용자: "단순 줌으로 전락") — 가까운 인물이 배경보다 '빨리' 커져야
+  //   깊이가 생긴다. 예전엔 bg_delta 가 +4 라 배경이 더 빨랐다(물리적으로 거꾸로 = 그냥 줌).
+  const px = buildKeyframeTable(resolveCameraWork("parallax_push", { duration_s: 4 }));
+  const pc = px.tracks.character.keys.at(-1), pb = px.tracks.background.keys.at(-1);
+  ok(pc.scale > pb.scale, `parallax: 인물(${pc.scale})이 배경(${pb.scale})보다 빨리 커짐(깊이)`);
+  ok(Math.abs(pb.cx - 0.5) < Math.abs(pc.cx - 0.5) + 1e-9, "parallax: 배경 횡이동 < 인물(측면 시차 40% 감쇠)");
 }
 
 // ── 5) 워커(toPixelCrop) ↔ 웹앱(toWebTransform) 좌표 2px 이내 일치 ─────────────

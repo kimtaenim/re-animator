@@ -159,3 +159,13 @@ export async function generateCleanPlate(imageUrl, matteBuf, key, onLog) {
   onLog?.(`클린 플레이트 생성(폴백: 박스 ${box.width}x${box.height} Fill)`);
   return { buf, cost };
 }
+
+/**
+ * 매트의 흰(인물) 비율(0~1) — 매트 불량 판정용. 0 에 가까우면 인물 없음, 1 에 가까우면
+ * 배경 제거 모델이 화면 전체를 전경으로 오판한 것(그대로 쓰면 배경판·합성이 다 망가진다).
+ */
+export async function matteWhiteRatio(matteBuf) {
+  const st = await sharp(matteBuf).toColourspace("b-w").stats();
+  const mean = st.channels?.[0]?.mean ?? 0;
+  return Math.max(0, Math.min(1, mean / 255));
+}

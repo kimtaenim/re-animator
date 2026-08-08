@@ -143,6 +143,18 @@ try {
   // green(#008000) 의 YUV ≈ U86·V74 (원본 testsrc 구석은 백색 계열 ≈ U128·V128) — 105 를 경계로 판별.
   ok(isFinite(uavg) && isFinite(vavg) && uavg < 105 && vavg < 105,
     `계층 B 배경이 클린 플레이트에서 옴(구석 UAVG=${uavg}·VAVG=${vavg} — 초록, 원본 프레임 아님)`);
+
+  // ── 6) ★계층 B 단일 레이어(인물 없는 컷) — 매트·배경판 없이 배경 궤적으로 굽는다 ──
+  //   예전엔 인물 없는 풍경 컷의 패럴랙스가 통째로 스킵돼 "안 된다"가 됐다.
+  const bsOut = join(dir, "bs.mp4");
+  const rbs = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: bsOut, layerBSingle: true, cameraWork: resolveCameraWork("parallax_push", { duration_s: 3 }) });
+  ok(!rbs.skipped && rbs.layer === "B", "계층 B 단일 레이어: 인물 없는 컷도 굽는다(스킵 아님)");
+  await stat(bsOut);
+  const [bsd] = await probe(bsOut, "format=duration");
+  ok(Math.abs(Number(bsd) - 3) < 0.5, `단일 레이어 출력 길이 ~3s (실제 ${Number(bsd).toFixed(2)})`);
+  const psbs = await capture(ff, ["-hide_banner", "-i", bsOut, "-i", clip, "-lavfi", "psnr", "-f", "null", "-"]);
+  const avgbs = psbs.match(/average:([0-9.]+|inf)/);
+  ok(avgbs && avgbs[1] !== "inf", `단일 레이어가 화면을 실제로 변경(psnr average=${avgbs?.[1]})`);
 } finally {
   await rm(dir, { recursive: true, force: true }).catch(() => {});
 }
