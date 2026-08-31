@@ -72,7 +72,8 @@ const CAMERA_MOVES: [string, string, string][] = [
   ["crash-in", "⚡ 크래시 줌인", "Camera direction — CRASH ZOOM IN, two speeds only: for most of the clip the camera pushes in almost imperceptibly slowly; then at the very end it SNAPS forward in one instant burst to a tight dramatic close-up. The acceleration is sudden, not gradual."],
   ["crash-out", "💥 크래시 줌아웃", "Camera direction — CRASH ZOOM OUT: hold a tight close-up almost still for a beat; then in one instant burst the camera snaps far back, revealing the whole scene. A single sudden burst, not a gradual pull."],
   ["speed-ramp", "🚀 스피드 램프", "Camera direction — SPEED RAMP IN: the camera starts gliding forward very slowly, then smoothly but rapidly accelerates, arriving fast and close to the subject right at the end. One continuous accelerating move."],
-  ["vertigo", "🌀 현기증", "Camera direction — DOLLY ZOOM (vertigo): the camera slowly pushes in while the lens zooms out, so the subject stays the same size while the background stretches and warps. Slow, continuous, unsettling."],
+  // (폐기) 🌀 현기증(달리줌) — I2V 도 제대로 못 만든다(사용자: "잘 안 되던데", 2026-08-03).
+  //   후처리 버티고와 함께 완전 폐기. 문구는 LEGACY_MOVE_PHRASES 로 이동(저장분 자동 정리).
   ["whip-pan", "💨 휩 팬", "Camera direction — WHIP PAN: the camera holds still for a beat, then whips sideways extremely fast with motion blur and snaps to a stop. One single whip."],
   ["orbit-180", "⟲ 오비트180(빠름)", "Camera direction — FAST ORBIT: the camera sweeps one fast 180-degree arc around the subject in a single smooth motion with slight motion blur."],
   ["orbit-120", "⟳ 오비트120(느림)", "Camera direction — ELEGANT ORBIT: the camera glides in a slow, smooth 120-degree arc around the subject, luxurious and steady like a high-end commercial."],
@@ -84,6 +85,8 @@ const CAMERA_MOVES: [string, string, string][] = [
 
 // (레거시) 예전 프리셋 문구 — 이미 저장된 컷의 motion 에서 지울 때만 사용(프리셋 교체 시 잔류 방지).
 const LEGACY_MOVE_PHRASES: string[] = [
+  // 🌀 현기증(달리줌) 폐기분 — 프리셋 교체 시 저장된 motion 에서 지워지게.
+  "Camera direction — DOLLY ZOOM (vertigo): the camera slowly pushes in while the lens zooms out, so the subject stays the same size while the background stretches and warps. Slow, continuous, unsettling.",
   // v37~v46 세대(피사체 동작 폭주 세대)
   "CRASH ZOOM IN: the camera creeps forward very slowly, then suddenly ACCELERATES and slams toward the subject at high speed — an explosive speed ramp ending in a tight dramatic close-up. Large, fast frame movement is intended.",
   "CRASH ZOOM OUT: the camera explosively pulls far away from the subject in one fast continuous motion, revealing the whole scene — the frame changes dramatically from close-up to wide.",
