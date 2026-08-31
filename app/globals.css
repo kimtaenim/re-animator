@@ -1,38 +1,41 @@
 @import "tailwindcss";
 
 @theme {
-  /* === 액센트 한 곳에서 조정 — 웨지우드 블루(차분한 더스티 블루) =========== */
-  /*   더 옅게 → #7AA3C4 / 더 진하게 → #3C6288                               */
-  --color-accent: #1e90ff; /* 일렉트릭 블루(밝게) */
-  --color-accent-strong: #0f77e0; /* hover/active */
+  /* === 액센트 한 곳에서 조정 — 델프트 블루(코발트) ======================== */
+  /*   더 옅게 → #4a6ed6 / 더 진하게 → #16339e                               */
+  --color-accent: #2a4bc4; /* 델프트 코발트 */
+  --color-accent-strong: #1d3aa3; /* hover/active */
   /* ===================================================================== */
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-/* 밝은 테마 기본(aninews 와 동일 zinc 팔레트), 다크는 시스템 설정 따름. */
+/* ★델프트 블루 테마(사용자 지정 2026-08-03) — 도자기 백자 바탕 + 코발트 셰이드 + 투명한
+   글레이즈(패널 반투명 → 바탕 그라데이션이 은은히 비침). 다크는 '델프트 야경'(짙은 남색). */
 :root {
-  --bg: #fafafa; /* zinc-50 */
-  --panel: #ffffff; /* white */
-  --panel-2: #f4f4f5; /* zinc-100 */
-  --border: #e4e4e7; /* zinc-200 */
-  --text: #18181b; /* zinc-900 */
-  --muted: #71717a; /* zinc-500 */
-  --accent: #1e90ff; /* 일렉트릭 블루(밝게) */
-  --accent-strong: #0f77e0; /* hover/active */
+  --bg: #edf2fb; /* 백자 — 아주 옅은 청백 */
+  --panel: rgba(255, 255, 255, 0.82); /* 글레이즈 — 반투명 백자(밑색이 비침) */
+  --panel-2: rgba(224, 234, 250, 0.75); /* 옅은 청유(靑釉) */
+  --border: #b9cbec; /* 옅은 코발트 선 */
+  --text: #172a5c; /* 코발트 잉크(짙은 남청) */
+  --muted: #5b70a3; /* 흐린 청회 */
+  --accent: #2a4bc4; /* 델프트 코발트 */
+  --accent-strong: #1d3aa3; /* hover/active */
   --danger: #ef4444; /* red-500 */
-  --ok: #1e90ff; /* 확정 액션(일렉트릭 블루로 통일) */
+  --ok: #2a4bc4; /* 확정 액션(코발트로 통일) */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #000000;
-    --panel: #18181b; /* zinc-900 */
-    --panel-2: #27272a; /* zinc-800 */
-    --border: #27272a; /* zinc-800 */
-    --text: #f4f4f5; /* zinc-100 */
-    --muted: #a1a1aa; /* zinc-400 */
+    --bg: #0a1226; /* 델프트 야경 — 짙은 남색 */
+    --panel: rgba(20, 33, 66, 0.82);
+    --panel-2: rgba(31, 48, 92, 0.72);
+    --border: #2c4478;
+    --text: #e7eeff;
+    --muted: #93a8d8;
+    --accent: #6f95f2; /* 야경에선 코발트를 한 단계 밝게 */
+    --accent-strong: #4f7ae8;
   }
   html {
     color-scheme: dark;
@@ -53,6 +56,25 @@ body {
     system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
+/* 백자 위 은은한 청색 워시 — 반투명 패널(글레이즈)이 이 그라데이션을 비춰 유약 느낌이 난다.
+   ★background-attachment: fixed 금지 — 크로미엄에서 고정 배경+합성 레이어가 아래쪽을
+   검게 남기는 렌더링 버그(실측 스크린샷). 스크롤 따라가는 기본으로 충분하다. */
+body {
+  background-image:
+    radial-gradient(1200px 600px at 15% -5%, rgba(42, 75, 196, 0.10), transparent 60%),
+    radial-gradient(900px 500px at 95% 8%, rgba(111, 149, 242, 0.10), transparent 55%),
+    linear-gradient(170deg, rgba(255, 255, 255, 0.6), transparent 40%);
+  min-height: 100vh;
+}
+@media (prefers-color-scheme: dark) {
+  /* 야경에선 흰 워시를 빼고 코발트 광만 — 흰 겹은 남색을 뿌옇게 만든다(실측). */
+  body {
+    background-image:
+      radial-gradient(1200px 600px at 15% -5%, rgba(80, 120, 235, 0.14), transparent 60%),
+      radial-gradient(900px 500px at 95% 8%, rgba(42, 75, 196, 0.12), transparent 55%);
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -62,16 +84,62 @@ a {
   text-decoration: none;
 }
 
-/* 일렉트릭 블루 네온 글로우 — 그림 위 보조선·박스가 확 뜨게. */
+/* 코발트 글로우 — 그림 위 보조선·박스가 확 뜨게(네온보다 차분한 유약광). */
 .glow-accent {
   box-shadow:
-    0 0 8px var(--accent),
+    0 0 8px color-mix(in oklab, var(--accent), transparent 30%),
     0 0 3px var(--accent);
+}
+
+/* ★버튼 전면 규칙(사용자 지정: "크게·둥글게") — 마크업 550여 곳의 유틸리티(rounded·px-2·
+   text-xs …)를 안 고치고 요소 규칙 + !important 로 전면 적용한다. 크기·모양만 바꾸고
+   색·배경 유틸리티(bg-*, text-*)는 그대로 존중되므로 기능·상태 표현은 무변경.
+   글레이즈: 위쪽 하이라이트 그라데이션 + 안쪽 흰 림 — 유약 바른 도자 단추 느낌. */
+button {
+  border-radius: 999px !important;
+  padding: 0.5em 1.05em !important;
+  font-size: 14.5px !important;
+  line-height: 1.35 !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.04) 55%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 1px 2px rgba(23, 42, 92, 0.12);
+  transition: box-shadow 120ms ease, transform 80ms ease, background-color 120ms ease;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 2px 6px rgba(23, 42, 92, 0.18);
+}
+button:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 3px rgba(23, 42, 92, 0.18);
+}
+button:disabled {
+  cursor: default;
+}
+/* 예외: 이미지·썸네일·캔버스를 감싼 버튼(컷 썸네일 클릭 등) — 알약 패딩·완전 원형을 걸면
+   그림이 잘리거나 틀어진다. 모양만 살짝 둥글게, 글레이즈 광택은 제거. */
+button:has(img),
+button:has(canvas),
+button:has(video) {
+  padding: 0 !important;
+  border-radius: 10px !important;
+  background-image: none;
+  box-shadow: none;
+}
+
+/* 입력류도 유약 톤(모양은 유틸리티 존중 — 강제 없음). */
+input,
+select,
+textarea {
+  accent-color: var(--accent);
 }
 
 button:focus-visible,
 a:focus-visible {
   outline: 2px solid color-mix(in oklab, var(--color-accent), transparent 50%);
   outline-offset: 2px;
-  border-radius: 12px;
+  border-radius: 999px;
 }
