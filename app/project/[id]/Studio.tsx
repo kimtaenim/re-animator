@@ -3534,6 +3534,29 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                         </summary>
                         <div className="px-2 pb-2">{directionPanel(s)}</div>
                       </details>
+                      {/* ★🎞 전환 — 항상 보이게(사용자 지시 2026-08-03: "페이드인·아웃·오버랩·암전이 왜 안 보이지").
+                          접힌 ⚙️ 연출·세부 안에 있어 못 찾던 것을 꺼냈다. 이 컷 → 다음 컷 사이(합성에서 적용). */}
+                      <div
+                        className="flex flex-wrap items-center gap-1 text-[10px]"
+                        title="이 컷 → 다음 컷 사이 전환. 6단계 '영상 묶기' 결과에 적용됩니다."
+                      >
+                        <span className="text-[var(--muted)]">🎞 전환</span>
+                        {TRANSITIONS.map(([v, t]) => (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => updateCut(s.id, { transition: v })}
+                            disabled={busy}
+                            className={`rounded border px-1.5 py-0.5 text-[10px] disabled:opacity-40 ${
+                              (s.cut?.transition ?? "none") === v
+                                ? "border-[var(--accent)] font-medium text-[var(--accent)]"
+                                : "border-[var(--border)] hover:bg-[var(--panel-2)]"
+                            }`}
+                          >
+                            {t}
+                          </button>
+                        ))}
+                      </div>
                       {advCut.has(s.id) && (<>
                       {/* ★연기(감정) — '이 컷 더빙' 전에 말풍선별 감정 지정. 예전엔 여기 없어서 컷에서
                           연기 지정을 못 했음(감정 픽커가 연출 보고서 테이블에만 있었음). 더빙에 반영됨. */}
@@ -3565,28 +3588,7 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                           )}
                         </div>
                       )}
-                      {/* 전환 — 카메라워크처럼 칩으로. 이 컷 → 다음 컷 사이(5단계 합성에서 적용). */}
-                      <div
-                        className="flex flex-wrap items-center gap-1"
-                        title="이 컷 → 다음 컷 사이 전환. 6단계 '영상 묶기' 결과에 적용됩니다."
-                      >
-                        <span className="text-[var(--muted)]">🎞</span>
-                        {TRANSITIONS.map(([v, t]) => (
-                          <button
-                            key={v}
-                            type="button"
-                            onClick={() => updateCut(s.id, { transition: v })}
-                            disabled={busy}
-                            className={`rounded border px-1.5 py-0.5 text-[10px] disabled:opacity-40 ${
-                              (s.cut?.transition ?? "none") === v
-                                ? "border-[var(--accent)] font-medium text-[var(--accent)]"
-                                : "border-[var(--border)] hover:bg-[var(--panel-2)]"
-                            }`}
-                          >
-                            {t}
-                          </button>
-                        ))}
-                      </div>
+                      {/* (이동) 🎞 전환 칩은 항상 보이는 영역으로 — "왜 안 보이지"(사용자, 2026-08-03). */}
                       {/* 🎥 카메라워크는 별도 '카메라 미리보기' 탭으로 분리(A안) — 4단계는 영상 생성·더빙에 집중.
                           편집기·프리뷰·적용(굽기)은 그 탭에서. (여기 있던 CameraWorkEditor 제거) */}
                       {/* 🎞 동작 보간은 접힌 줄(모션티어 옆 🎞)로 옮김 — 항상 보이게. 여기선 중복 제거. */}
