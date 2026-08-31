@@ -87,8 +87,9 @@ try {
   // ── 3) 스킵 로직 ────────────────────────────────────────────────────────────
   const rs = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: join(dir, "s.mp4"), cameraWork: resolveCameraWork("static", { duration_s: 3 }) });
   ok(rs.skipped, "static: 렌더 스킵");
+  // ★버티고·패럴랙스 2레이어는 폐기(2026-08-03) — 저장돼 있던 컷은 단순 무브로 항상 구워진다.
   const rb = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: join(dir, "b.mp4"), cameraWork: resolveCameraWork("parallax_push", { duration_s: 3 }) });
-  ok(rb.skipped && rb.layer === "B", "parallax_push(계층 B): 매트 미구현 스킵");
+  ok(!rb.skipped && rb.layer === "B", "parallax_push(폐기 프리셋): 스킵 아님 — 단순 무브로 굽는다");
   const rc = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: join(dir, "c.mp4"), cameraWork: resolveCameraWork("orbit", { duration_s: 3 }) });
   ok(rc.skipped && rc.layer === "C", "orbit(계층 C): 후처리 성분 없으면 스킵(궤도는 I2V)");
 
@@ -104,57 +105,20 @@ try {
   const avgz = psz.match(/average:([0-9.]+|inf)/);
   ok(avgz && avgz[1] !== "inf", `orbit+줌이 화면을 실제로 변경(psnr average=${avgz?.[1]})`);
 
-  // ── 5) ★계층 B(버티고·패럴랙스) 2레이어 — 인물 매트로 인물/배경을 따로 움직인다 ──
-  //   매트가 없으면 스킵(무엇이 없는지 알려줘야 함), 있으면 실제로 구워져야 한다.
-  const rbNo = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: join(dir, "bn.mp4"), cameraWork: resolveCameraWork("vertigo", { duration_s: 3 }) });
-  ok(rbNo.skipped && rbNo.needsMatte, "계층 B: 매트 없으면 스킵 + '매트 필요' 표시");
-
-  // 합성 매트(가운데 흰 사각형 = 인물, 나머지 검정 = 배경).
-  const matte = join(dir, "matte.png");
-  await run(ff, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=black:s=${W}x${H}`,
-    "-vf", `drawbox=x=${Math.round(W * 0.35)}:y=${Math.round(H * 0.2)}:w=${Math.round(W * 0.3)}:h=${Math.round(H * 0.7)}:color=white:t=fill`,
-    "-frames:v", "1", matte]);
-
-  // ★매트만 있고 클린 플레이트(배경판)가 없으면 스킵 — 원본 프레임을 배경으로 쓰면
-  //   인물 복사본이 겹쳐 보이는 구조 결함(사용자 보고)이라, 겹친 결과물을 만들지 않는다.
-  const rbMatteOnly = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: join(dir, "bm.mp4"), mattePath: matte, cameraWork: resolveCameraWork("vertigo", { duration_s: 3 }) });
-  ok(rbMatteOnly.skipped && rbMatteOnly.needsMatte, "계층 B: 배경판 없으면 스킵(겹침 방지 — 원본 프레임을 배경으로 안 씀)");
-
-  // 클린 플레이트 = 초록 단색(식별용) — 출력 배경이 '판'에서 왔는지 픽셀로 검증할 수 있다.
-  const plate = join(dir, "plate.png");
-  await run(ff, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=green:s=${W}x${H}`, "-frames:v", "1", plate]);
+  // ── 5) ★(폐기) 계층 B — 버티고·패럴랙스는 지원 종료(2026-08-03 사용자 결정).
+  //   저장돼 있던 컷은 재료(매트·배경판) 없이 '항상' 단순 무브(배경 궤적)로 구워져야 한다
+  //   (예전엔 재료 없으면 스킵 = 아무 움직임도 없는 원본 — "심지어 줌도 안 된다" 사고).
   const bOut = join(dir, "b2.mp4");
-  const rbYes = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: bOut, mattePath: matte, platePath: plate, cameraWork: resolveCameraWork("vertigo", { duration_s: 3 }) });
-  ok(!rbYes.skipped && rbYes.layer === "B", "계층 B: 매트+배경판이 있으면 2레이어로 굽는다");
+  const rbYes = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: bOut, cameraWork: resolveCameraWork("vertigo", { duration_s: 3 }) });
+  ok(!rbYes.skipped && rbYes.layer === "B", "vertigo(폐기 프리셋): 재료 없이도 단순 무브로 굽는다(스킵 금지)");
   await stat(bOut);
   const [bdur] = await probe(bOut, "format=duration");
-  ok(Math.abs(Number(bdur) - 3) < 0.5, `계층 B 출력 길이 ~3s (실제 ${Number(bdur).toFixed(2)})`);
+  ok(Math.abs(Number(bdur) - 3) < 0.5, `폐기 프리셋 출력 길이 ~3s (실제 ${Number(bdur).toFixed(2)})`);
   const [bw, bh] = await probe(bOut, "stream=width,height");
-  ok(Number(bw) === W && Number(bh) === H, `계층 B 출력 해상도 ${bw}x${bh}`);
+  ok(Number(bw) === W && Number(bh) === H, `폐기 프리셋 출력 해상도 ${bw}x${bh}`);
   const psb = await capture(ff, ["-hide_banner", "-i", bOut, "-i", clip, "-lavfi", "psnr", "-f", "null", "-"]);
   const avgb = psb.match(/average:([0-9.]+|inf)/);
-  ok(avgb && avgb[1] !== "inf", `계층 B 가 화면을 실제로 변경(psnr average=${avgb?.[1]})`);
-  // ★겹침 원천 차단 검증 — 화면 구석(인물 밖)은 '초록 배경판'이어야 한다.
-  //   예전 구조(배경=원본 프레임)라면 여기 testsrc 색 막대가 보인다(= 인물·배경 이중 겹침의 근원).
-  const cs = await capture(ff, ["-hide_banner", "-ss", "1", "-i", bOut, "-frames:v", "1",
-    "-vf", "crop=32:32:4:4,signalstats,metadata=print", "-f", "null", "-"]);
-  const uavg = Number((cs.match(/signalstats\.UAVG=([0-9.]+)/) || [])[1]);
-  const vavg = Number((cs.match(/signalstats\.VAVG=([0-9.]+)/) || [])[1]);
-  // green(#008000) 의 YUV ≈ U86·V74 (원본 testsrc 구석은 백색 계열 ≈ U128·V128) — 105 를 경계로 판별.
-  ok(isFinite(uavg) && isFinite(vavg) && uavg < 105 && vavg < 105,
-    `계층 B 배경이 클린 플레이트에서 옴(구석 UAVG=${uavg}·VAVG=${vavg} — 초록, 원본 프레임 아님)`);
-
-  // ── 6) ★계층 B 단일 레이어(인물 없는 컷) — 매트·배경판 없이 배경 궤적으로 굽는다 ──
-  //   예전엔 인물 없는 풍경 컷의 패럴랙스가 통째로 스킵돼 "안 된다"가 됐다.
-  const bsOut = join(dir, "bs.mp4");
-  const rbs = await renderCameraFx({ ff, fp, dir, inPath: clip, outPath: bsOut, layerBSingle: true, cameraWork: resolveCameraWork("parallax_push", { duration_s: 3 }) });
-  ok(!rbs.skipped && rbs.layer === "B", "계층 B 단일 레이어: 인물 없는 컷도 굽는다(스킵 아님)");
-  await stat(bsOut);
-  const [bsd] = await probe(bsOut, "format=duration");
-  ok(Math.abs(Number(bsd) - 3) < 0.5, `단일 레이어 출력 길이 ~3s (실제 ${Number(bsd).toFixed(2)})`);
-  const psbs = await capture(ff, ["-hide_banner", "-i", bsOut, "-i", clip, "-lavfi", "psnr", "-f", "null", "-"]);
-  const avgbs = psbs.match(/average:([0-9.]+|inf)/);
-  ok(avgbs && avgbs[1] !== "inf", `단일 레이어가 화면을 실제로 변경(psnr average=${avgbs?.[1]})`);
+  ok(avgb && avgb[1] !== "inf", `폐기 프리셋이 화면을 실제로 변경(psnr average=${avgb?.[1]})`);
 } finally {
   await rm(dir, { recursive: true, force: true }).catch(() => {});
 }

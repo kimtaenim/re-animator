@@ -5,8 +5,8 @@
 // 씬 정지 이미지 위에 키프레임 테이블을 Web Animations API 로 재생(무비용 근사).
 // 파라미터 슬라이더 즉시 반영, 저장은 camera_work JSON 만(onChange→updateCut). "적용"은
 // 워커 camerafx 잡(정확 렌더). 수식은 lib/cameraKeyframes.mjs 단일 소스.
-//   계층 B(parallax/vertigo)는 인물/배경 매트 미구현 → 프리뷰는 근사(단일 레이어),
-//   굽기는 매트 준비 후. orbit(계층 C)은 클라이언트 프리뷰 불가 → "프록시 렌더 필수".
+//   ★버티고·패럴랙스(계층 B 후처리)는 지원 종료(2026-08-03 사용자 결정) — 선택지 제거,
+//   저장돼 있던 컷은 단순 무브로만. orbit(계층 C)은 클라이언트 프리뷰 불가 → "프록시 렌더 필수".
 // ============================================================================
 import { useEffect, useRef, useState } from "react";
 import type { CameraWork, CameraPreset } from "@/lib/types";
@@ -21,9 +21,9 @@ const PRESETS: { id: CameraPreset; label: string; layer: "A" | "B" | "C" }[] = [
   { id: "shake", label: "흔들기 shake", layer: "A" },
   { id: "crash_zoom", label: "크래시 줌", layer: "A" },
   { id: "whip", label: "휩 whip(전환)", layer: "A" },
-  // ★매트(인물 분리)는 굽기 때 자동 생성된다 — 예전 라벨('매트 후')은 이제 틀렸다.
-  { id: "parallax_push", label: "패럴랙스(인물/배경 분리)", layer: "B" },
-  { id: "vertigo", label: "버티고 달리줌(인물/배경 분리)", layer: "B" },
+  // ★버티고·패럴랙스(계층 B 후처리)는 폐기(사용자 결정 2026-08-03) — 2주간 실패, 선택지에서 제거.
+  //   이미 저장된 컷은 단순 무브(배경 궤적)로만 구워진다. 달리줌 느낌은 ④ 모션 프리셋의
+  //   🌀 현기증(영상 생성 시 엔진이 만듦)으로 대신한다.
   { id: "orbit", label: "오빗 orbit(I2V·프록시 필수)", layer: "C" },
 ];
 
@@ -46,11 +46,11 @@ function Slider({
 }
 
 export default function CameraWorkEditor({
-  cameraWork, motionTier, proxyUrl, onProxy, imageUrl, videoUrl, matteUrl, onChange, onApply, onPreview, applying, busy,
+  cameraWork, motionTier, proxyUrl, onProxy, imageUrl, videoUrl, onChange, onApply, onPreview, applying, busy,
 }: {
   cameraWork?: CameraWork;
   motionTier?: string;
-  matteUrl?: string; // 인물 매트(흰=인물) — 있으면 계층 B 를 '실제 2레이어'로 미리보기
+  matteUrl?: string; // (폐기) 계층 B 2레이어 미리보기용이었음 — 호출부 호환을 위해 타입만 유지
   proxyUrl?: string; // 480p 정확 미리보기 결과(§8②)
   onProxy?: () => void; // "정확 미리보기" 요청 // 티어별 기본 카메라 결정용(§3·§9 — 비어 있으면 자동 적용)
   imageUrl?: string;
@@ -63,9 +63,6 @@ export default function CameraWorkEditor({
 }) {
   const imgRef = useRef<HTMLImageElement>(null);
   const vidRef = useRef<HTMLVideoElement>(null);
-  // 계층 B 2레이어 미리보기용 — 배경/인물 각각의 <img>(인물은 매트로 마스크).
-  const bgRef = useRef<HTMLImageElement>(null);
-  const fgRef = useRef<HTMLImageElement>(null);
   // ★실영상 프리뷰는 hover 시에만 <video> 를 mount(떼면 언마운트) — 컷 많을 때 수십 개 동시 디코딩=크롬 먹통 방지.
   const [hover, setHover] = useState(false);
   // ★★카메라워크가 비어 있으면 '정지'가 아니라 티어에 맞는 기본 카메라를 자동 적용한다.
@@ -100,22 +97,9 @@ export default function CameraWorkEditor({
       const rw = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth || 1280;
       const rh = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight || 720;
       const table = buildKeyframeTable(cw, { fps: 24, refWidth: rw, refHeight: rh });
-      const dms = Math.max(300, (cw.duration_s || 3) * 1000);
       const toKfs = (tr: Parameters<typeof toWebKeyframes>[0]) =>
         toWebKeyframes(tr).map((k) => ({ offset: k.offset, transform: k.transform, transformOrigin: k.transformOrigin }));
-      // ★계층 B(버티고·패럴랙스): 매트가 있으면 '실제 2레이어' 로 미리본다 —
-      //   배경 <img> 는 background 트랙, 인물 <img>(매트로 마스크)는 character 트랙.
-      //   예전엔 character 트랙 하나로 화면 전체를 움직여, 2레이어 효과가 아예 안 보였다.
-      if (layer === "B" && matteUrl && bgRef.current && fgRef.current && !liveVideo) {
-        const bgK = table.tracks.background ? toKfs(table.tracks.background) : null;
-        const fgK = table.tracks.character ? toKfs(table.tracks.character) : null;
-        [bgRef.current, fgRef.current].forEach((n) => n.getAnimations().forEach((a) => a.cancel()));
-        if (bgK && bgK.length > 1) bgRef.current.animate(bgK, { duration: dms, iterations: 1, easing: "linear", fill: "both" });
-        if (fgK && fgK.length > 1) fgRef.current.animate(fgK, { duration: dms, iterations: 1, easing: "linear", fill: "both" });
-        return;
-      }
-      // 매트가 아직 없는 계층 B: 인물 트랙은 거의 정지라(버티고는 인물 1.5%/s) 그걸 보여주면
-      // "아무 일도 안 일어난다"로 보인다 — 실제로 크게 움직이는 배경 트랙으로 근사한다.
+      // (폐기) 계층 B 2레이어 미리보기 제거 — 남은 B 프리셋 컷은 굽기와 같은 배경 궤적 근사만.
       const track = table.tracks.main ?? (layer === "B" ? table.tracks.background : null) ?? table.tracks.character;
       if (!track) return;
       const kfs = toKfs(track);
@@ -169,15 +153,8 @@ export default function CameraWorkEditor({
           </span>
         )}
         {layer === "B" && (
-          <span
-            className={matteUrl ? "text-[var(--ok)]" : "text-[var(--muted)]"}
-            title={
-              matteUrl
-                ? "인물 매트가 있어 미리보기도 실제와 같은 2레이어(배경/인물 따로)로 움직입니다."
-                : "인물과 배경을 따로 움직입니다. 매트는 처음 구울 때(또는 합성할 때) 자동으로 만들어지고, 그 뒤부터는 미리보기도 2레이어로 보입니다."
-            }
-          >
-            {matteUrl ? "인물/배경 2레이어 미리보기" : "지금은 배경 궤적만 근사 · 한 번 구우면 2레이어로 보입니다"}
+          <span className="text-[var(--muted)]" title="버티고·패럴랙스(2레이어)는 지원 종료됐습니다. 이 컷은 단순 무브로만 구워집니다 — 다른 프리셋으로 바꾸는 걸 권합니다.">
+            지원 종료 프리셋
           </span>
         )}
       </div>
@@ -194,28 +171,7 @@ export default function CameraWorkEditor({
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img ref={imgRef} src={imageUrl} alt="camera preview" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
-          {/* ★계층 B 2레이어 미리보기 — 매트가 있을 때만. 배경 위에 '매트로 오려낸 인물'을 얹어
-              각자 다른 궤적으로 움직인다(= 굽기 결과와 같은 구조). 매트는 첫 굽기 때 생긴다. */}
-          {layer === "B" && matteUrl && !liveVideo && (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img ref={bgRef} src={imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                ref={fgRef}
-                src={imageUrl}
-                alt=""
-                className="absolute inset-0 h-full w-full object-cover"
-                style={{
-                  willChange: "transform",
-                  WebkitMaskImage: `url(${matteUrl})`,
-                  maskImage: `url(${matteUrl})`,
-                  WebkitMaskSize: "100% 100%",
-                  maskSize: "100% 100%",
-                }}
-              />
-            </>
-          )}
+          {/* (폐기) 계층 B 2레이어 미리보기 제거 — 버티고·패럴랙스 지원 종료(2026-08-03). */}
           {/* ★loop 제거 — 카메라 애니메이션과 함께 한 번만 재생하고 멈춘다(최종 결과와 동일). */}
           {liveVideo && (
             <video ref={vidRef} key={videoUrl} src={videoUrl} muted playsInline preload="metadata" className="absolute inset-0 h-full w-full object-cover" style={{ willChange: "transform" }} />
@@ -242,6 +198,10 @@ export default function CameraWorkEditor({
         {PRESETS.map((p) => (
           <option key={p.id} value={p.id}>{p.label}</option>
         ))}
+        {/* 폐기된 프리셋이 저장돼 있던 컷 — 값이 사라져 셀렉트가 비지 않게 지원 종료로 표시(바꾸면 사라짐) */}
+        {(preset === "parallax_push" || preset === "vertigo") && (
+          <option value={preset}>(지원 종료) {preset === "vertigo" ? "버티고" : "패럴랙스"} — 다른 프리셋을 고르세요</option>
+        )}
       </select>
 
       {/* ★오빗(layer C)도 슬라이더를 연다 — '오빗 + 줌' 동시 지정(사용자 지정).
@@ -339,7 +299,7 @@ export default function CameraWorkEditor({
           disabled={busy || applying || preset === "static"}
           title={
             layer === "C" ? "오빗의 줌·드리프트·흔들림을 실제 픽셀에 굽습니다(궤도는 생성된 영상에 이미 있습니다). 줌을 0 으로 두면 구울 게 없어 그대로 둡니다."
-            : layer === "B" ? "인물/배경을 따로 움직여 굽습니다. 인물 매트가 없으면 이 컷 이미지에서 자동으로 한 번 만들고(그 뒤 재사용) 굽습니다."
+            : layer === "B" ? "지원 종료 프리셋 — 단순 무브(배경 궤적)로만 구워집니다. 다른 프리셋으로 바꾸는 걸 권합니다."
             : preset === "static" ? "정지는 굽지 않습니다(원본 사용)"
             : "이 카메라워크를 실제 픽셀에 굽습니다(컷당 ~20-40초). 굽고 나면 미리보기가 최종 픽셀입니다."
           }

@@ -98,27 +98,11 @@ export async function renderCameraFx(o) {
     }
     log?.(`orbit + 후처리 줌 — 궤도는 I2V, 줌·드리프트는 여기서 굽는다`);
   }
-  // 계층 B(버티고·패럴랙스): 인물/배경을 따로 움직인다 — 인물 매트 + ★클린 플레이트(인물을
-  //   지운 배경판)가 있어야 한다. 예전엔 배경 레이어로 '인물이 든 원본 프레임'을 그대로 써서
-  //   배경이 움직일 때 그 안의 인물 복사본이 같이 움직여 화면이 이중으로 겹쳐 보였다
-  //   (사용자: "배경이 겹쳐서 나온다. 성공한 일이 없다"). 겹침은 그 구조로는 해결 불가 —
-  //   클린 플레이트 없이는 굽지 않는다(겹친 결과물을 만드느니 스킵이 낫다).
+  // ★버티고·패럴랙스(계층 B 후처리 2레이어)는 폐기(사용자 결정 2026-08-03) — 2주간 겹침·
+  //   실루엣·배경 훼손·무동작이 반복돼 접었다. 저장돼 있던 컷은 '배경 궤적 단일 레이어'로만
+  //   굽는다(매트·배경판·fal 비용 0, 겹침 위험 0). UI 에서도 선택지 제거됨.
   if (layer === "B") {
-    if (!o.mattePath || !o.platePath) {
-      // ★인물 없는 컷(풍경·사물·군중 원경) — 분리할 인물이 없으므로 '배경 트랙 단일 레이어'로
-      //   굽는다(jobs 가 cut.characters 0 또는 매트 불량을 보고 지정). 예전엔 이런 컷이 통째로
-      //   스킵돼 "패럴랙스가 안 된다"가 됐다. 겹칠 인물이 없으니 단일 레이어가 정답이다.
-      //   ★인물 컷의 재료 실패는 여전히 스킵 — 몰래 단순 줌으로 낮추면 '그냥 줌이 된다'는
-      //   그 문제를 다시 만든다(정직하게 스킵 사유를 남긴다).
-      if (o.layerBSingle) {
-        const r = await renderLayerBSingle({ ...o, log });
-        return r;
-      }
-      const need = !o.mattePath ? "인물 매트" : "클린 플레이트(인물 지운 배경판)";
-      log?.(`${cameraWork.preset}(계층 B) — ${need}가 없어 스킵(겹침 방지: 재료 없이는 굽지 않습니다)`);
-      return { skipped: true, layer, upscale: false, maxScale: 1, needsMatte: true };
-    }
-    const r = await renderLayerB({ ...o, log });
+    const r = await renderLayerBSingle({ ...o, log });
     return r;
   }
 
@@ -172,23 +156,10 @@ export async function renderCameraFx(o) {
   return { skipped: false, layer, upscale, maxScale: table.maxScale };
 }
 
-// ── 계층 B(2레이어) — 인물과 배경이 서로 다른 궤적으로 움직인다 ──────────────────
-// 버티고(달리줌): 인물은 크기를 유지하고 배경만 반대로 스케일 → 공간이 늘어나는 그 느낌.
-// 패럴랙스: 인물과 배경의 스케일 속도 차.
-//
-// ★구현: 같은 클립을 두 갈래로 crop 한다(각자 sendcmd 스크립트).
-//   배경 = background 트랙 crop → 화면 채움
-//   인물 = character 트랙 crop + '같은 crop 을 적용한 매트'로 알파를 만들어 배경 위에 올림
-//   매트에 인물 crop 을 똑같이 걸기 때문에 알파가 인물과 정확히 붙어 다닌다.
-// ★단일 ffmpeg 패스 — 프레임별 sharp 디코딩 없음(합성 OOM 회피 원칙 유지).
-//   추가 비용은 매트 PNG 입력 1개(루프)뿐이다.
-// 매트 입력에 걸 길이(초) — 루프 입력이 무한이면 파이프라인이 안 끝나는 경우가 있어 명시한다.
-function dur0(cameraWork) {
-  return Math.max(1, Math.ceil(Number(cameraWork?.duration_s) || 4) + 2);
-}
-
-// 계층 B '단일 레이어' — 인물 없는 컷(풍경·사물)용. 분리할 인물이 없으므로 배경 트랙의
-// 궤적(시차의 배경 몫)을 프레임 전체에 적용한다. 매트·배경판 불필요(비용 0)·겹침 위험 0.
+// ── (폐기) 계층 B 2레이어(renderLayerB)는 삭제됨 — 사용자 결정 2026-08-03.
+//    2주간 겹침·실루엣·배경 훼손·무동작 반복(정지 매트로 움직이는 영상을 분리하는 구조 한계).
+//    저장돼 있던 버티고·패럴랙스 컷은 아래 단일 레이어로만 굽는다. 다시 만들지 말 것.
+// 계층 B '단일 레이어' — 배경 트랙의 궤적을 프레임 전체에 적용(매트·배경판·fal 비용 0).
 async function renderLayerBSingle(o) {
   const { ff, dir, inPath, outPath, cameraWork, log } = o;
   const [W, H] = await probe(o.fp, inPath, "stream=width,height");
@@ -203,61 +174,7 @@ async function renderLayerBSingle(o) {
   const exprs = buildCropExprs(tr, W, H);
   const vf = `${cropExprFilter(exprs)},scale=${W}:${H}:flags=lanczos,setsar=1`;
   await run(ff, ["-hide_banner", "-nostats", "-loglevel", "warning", "-y", "-i", inPath, "-vf", vf, "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", "-threads", "2", "-movflags", "+faststart", outPath], dir);
-  log?.(`${cameraWork.preset}(계층 B·인물 없는 컷) — 배경 트랙 단일 레이어로 구움`);
-  return { skipped: false, layer: "B", upscale: false, maxScale: table.maxScale };
-}
-
-async function renderLayerB(o) {
-  const { ff, dir, inPath, outPath, cameraWork, mattePath, platePath, log } = o;
-  const [W, H] = await probe(o.fp, inPath, "stream=width,height");
-  const [fpsRaw] = await probeRaw(o.fp, inPath, "stream=r_frame_rate");
-  const fps = parseFps(fpsRaw) || 24;
-  // ★매트·배경판(정지 이미지 루프)은 '클립 실제 길이'만큼 늘려야 한다 — duration_s+2 로만 자르면
-  //   그보다 긴 클립(예: Kling 10초)이 shortest 에 의해 6초로 잘린 채 저장돼 뒷부분이 소실됐다.
-  const [clipDurRaw] = await probeRaw(o.fp, inPath, "format=duration");
-  // ★카메라 길이 = 클립 전체 — 기본 duration_s(3.5s)로 두면 6~10초 클립(MiniMax·Kling)에서
-  //   앞 3.5초만 움직이고 나머지가 통째로 정지했다(사용자: "배경이 제대로 움직이지 않는다").
-  //   사람이 더 길게 지정한 경우만 그 값을 존중, 클립 길이가 하한(정지 꼬리 금지).
-  const cwEff = { ...cameraWork, duration_s: Math.max(Number(cameraWork?.duration_s) || 0, Number(clipDurRaw) || 0) || 3.5 };
-  const matteDur = Math.max(Number(clipDurRaw) || 0, dur0(cwEff)) + 0.5;
-  const table = buildKeyframeTable(cwEff, { fps, refWidth: W, refHeight: H });
-  const bgTr = table.tracks.background;
-  const chTr = table.tracks.character;
-  if (!bgTr?.keys?.length || !chTr?.keys?.length) throw new Error("계층 B 트랙이 비어있음");
-
-  // ★sendcmd 폐기 → 트랙별 '수식 crop'(buildCropExprs) — sendcmd 는 이 빌드에서
-  //   ①타깃 이름 불일치로 전 명령이 조용히 무시됐고(정지 클립을 fxUrl 로 저장하던 사고)
-  //   ②이름을 고쳐도 crop 성장(버티고 배경 줌아웃)에서 파이프라인이 교착했다(실측 4분 행).
-  //   수식 crop 은 성장 포함 정상(실측: 버티고 원패스 1.2초 완주). 이름 충돌도 없다.
-  const bgE = buildCropExprs(bgTr, W, H);
-  const chE = buildCropExprs(chTr, W, H);
-
-  // ★배경 = 클린 플레이트(입력 2 — 인물을 지운 배경판, 정지 이미지 루프).
-  //   예전엔 배경도 원본 클립([0:v] split)이라 인물 복사본이 배경과 같이 움직여 겹쳐 보였다.
-  //   배경판은 정지지만 배경의 '움직임'은 어차피 이 crop 궤적이 만든다(2.5D 방식) — 겹침 0.
-  // ★인물 = 원본 클립 + 매트 알파. 알파를 '먼저' 합쳐 두고 그 RGBA 를 crop 한다 —
-  //   매트에 같은 crop 을 따로 거는 것보다 단순하고, 알파가 픽셀과 같이 잘려 어긋날 여지가 없다.
-  const filter =
-    `[2:v]scale=${W}:${H},setsar=1,${cropExprFilter(bgE)},scale=${W}:${H}:flags=lanczos,setsar=1[bgv];` +
-    `[1:v]scale=${W}:${H},format=gray[m];` +
-    `[0:v][m]alphamerge[rgba];` +
-    `[rgba]${cropExprFilter(chE)},scale=${W}:${H}:flags=lanczos,setsar=1[fg];` +
-    `[bgv][fg]overlay=0:0:format=auto:shortest=1[out]`;
-
-  // ★출력 길이 = 클립 길이(-t) — alphamerge/overlay 는 정지 이미지 루프(매트·배경판)가 남아
-  //   있으면 영상 마지막 프레임을 반복하며 루프 길이(클립+2.5s)까지 늘어난다(실측 5.5s).
-  const outDur = Number(clipDurRaw) || Number(cameraWork?.duration_s) || 3;
-  await run(
-    ff,
-    ["-hide_banner", "-nostats", "-loglevel", "warning", "-y",
-     "-i", inPath, "-loop", "1", "-framerate", String(fps), "-t", String(matteDur), "-i", mattePath,
-     "-loop", "1", "-framerate", String(fps), "-t", String(matteDur), "-i", platePath,
-     "-filter_complex", filter, "-map", "[out]", "-t", outDur.toFixed(3), "-an",
-     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
-     "-threads", "2", "-movflags", "+faststart", outPath],
-    dir
-  );
-  log?.(`${cameraWork.preset}(계층 B) — 클린 플레이트 배경 + 매트 인물 2레이어로 구움(겹침 0)`);
+  log?.(`${cameraWork.preset}(지원 종료 프리셋) — 단순 무브(배경 궤적)로 구움`);
   return { skipped: false, layer: "B", upscale: false, maxScale: table.maxScale };
 }
 

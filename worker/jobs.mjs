@@ -51,7 +51,6 @@ import { klingVideoFromImage, KLING_VIDEO_COST } from "./kling.mjs";
 import { minimaxVideoFromImage, MINIMAX_VIDEO_COST, hasMinimax } from "./minimax.mjs";
 import { renderCameraFx } from "./cameraRender.mjs";
 import { presetLayer } from "./cameraKeyframes.mjs";
-import { generateMatte, generateCleanPlate, matteWhiteRatio } from "./matte.mjs";
 import { readCutText, readCutTextTiled, prepareOcrImage, readCutTextPrepared } from "./ocr.mjs";
 import { detectRefBox, cropToBox } from "./refbox.mjs";
 import { translateScenes, proofreadScenes, translateScenesMultilang } from "./translate.mjs";
@@ -2633,88 +2632,14 @@ export async function runCameraFx(projectId, payload) {
       const buf = await download(s.videoUrl);
       await writeFile(inp, buf);
 
-      // ★계층 B(버티고·패럴랙스)는 인물 매트가 있어야 굽는다 — 없으면 여기서 만든다.
-      //   매트는 컷 이미지에서 한 번만 만들면 되므로 scene.matteUrl 에 저장해 재사용한다
-      //   (다시 구울 때마다 돈을 쓰지 않는다). 실패하면 그 컷만 스킵되고 잡은 계속된다.
-      let mattePath;
-      let platePath;
-      let layerBSingle = false; // 인물 없는 컷·매트 불량 → 배경 트랙 단일 레이어(겹침 위험 0)
-      if (cw && presetLayer(cw.preset) === "B" && !(s.cut?.characters ?? []).length) {
-        // ★인물 없는 컷(풍경·사물·텍스트) — 분리할 인물이 없다. 매트·배경판을 만들지 않고(비용 0)
-        //   배경 궤적을 프레임 전체에 적용한다. 예전엔 이런 컷이 통째로 스킵돼 "패럴랙스가 안 된다"였다.
-        layerBSingle = true;
-        await log(`컷 ${s.order + 1} 인물 없는 컷 — ${cw.preset} 를 단일 레이어(배경 궤적)로 굽습니다`);
-      } else if (cw && presetLayer(cw.preset) === "B") {
-        try {
-          let mUrl = s.matteUrl;
-          if (!mUrl) {
-            const src = s.generatedImage || s.originalImage;
-            await log(`컷 ${s.order + 1} 인물 매트 생성 중…`);
-            const { buf: mbuf, cost } = await generateMatte(src, process.env.FAL_KEY, (m) => console.error("[matte]", m));
-            const up = await put(`project/${projectId}/matte/${s.id}-${Date.now()}.png`, mbuf, {
-              access: "public",
-              contentType: "image/png",
-              addRandomSuffix: false,
-            });
-            mUrl = up.url;
-            s.matteUrl = mUrl; // 아래 저장 루프가 씬 필드를 그대로 기록한다
-            try {
-              await recordCost({ projectId, vendor: "fal", model: "matte", costUsd: cost, meta: { kind: "matte", sceneId: s.id } });
-            } catch {}
-          }
-          const mp = join(dir, "matte.png");
-          const matteBuf = await download(mUrl);
-          // ★매트 sanity — 흰(인물) 비율이 0 에 가까우면 인물 없음, 0.75 초과면 배경 제거 모델이
-          //   화면 대부분을 전경으로 오판한 것. 그대로 2레이어를 만들면 배경판·합성이 다 망가진다
-          //   → 단일 레이어로 굽는다(비용 추가 0).
-          const whiteRatio = await matteWhiteRatio(matteBuf);
-          if (whiteRatio < 0.005 || whiteRatio > 0.75) {
-            layerBSingle = true;
-            await log(`컷 ${s.order + 1} 매트 부적합(인물 비율 ${(whiteRatio * 100).toFixed(0)}%) — 단일 레이어(배경 궤적)로 굽습니다`);
-            throw { __single: true }; // 아래 plate 생성 건너뜀(catch 에서 무시)
-          }
-          await writeFile(mp, matteBuf);
-          mattePath = mp;
-
-          // ★클린 플레이트(인물을 지운 배경판) — 계층 B 배경 레이어(사용자 결정 2026-08-03).
-          //   원본 프레임을 배경으로 쓰면 인물 복사본이 겹쳐 보이므로(사용자: "배경이 겹쳐 나온다")
-          //   인물 자리를 인페인팅으로 지운 판을 컷당 1회 만들어 재사용한다(scene.cleanPlateUrl).
-          let plUrl = s.cleanPlateUrl;
-          // ★생성 방식이 바뀌면 옛 판은 폐기 — v1(실루엣 Fill)=잔상, v2(박스 Fill)=배경 훼손
-          //   (모두 사용자 실측 기각). 경로의 버전(plate-v3/=제거 전용 Erase)으로 구분해 다시 만든다.
-          if (plUrl && !plUrl.includes("/plate-v3/")) plUrl = null;
-          if (!plUrl) {
-            const src = s.generatedImage || s.originalImage;
-            await log(`컷 ${s.order + 1} 배경판(클린 플레이트) 생성 중…`);
-            const { buf: pbuf, cost } = await generateCleanPlate(src, matteBuf, process.env.FAL_KEY, (m) => console.error("[plate]", m));
-            const pup = await put(`project/${projectId}/plate-v3/${s.id}-${Date.now()}.png`, pbuf, {
-              access: "public",
-              contentType: "image/png",
-              addRandomSuffix: false,
-            });
-            plUrl = pup.url;
-            s.cleanPlateUrl = plUrl; // 아래 저장 루프가 씬 필드를 그대로 기록한다
-            try {
-              await recordCost({ projectId, vendor: "fal", model: "clean-plate", costUsd: cost, meta: { kind: "plate", sceneId: s.id } });
-            } catch {}
-          }
-          const pp2 = join(dir, "plate.png");
-          await writeFile(pp2, await download(plUrl));
-          platePath = pp2;
-        } catch (e) {
-          // ★재료(매트·배경판) 실패 = 스킵이 아니라 '단일 레이어로 대체' — 스킵하면 그 컷은
-          //   아무 움직임도 없는 원본이 된다(사용자: "심지어 줌도 안 된다"). 시차는 없어도
-          //   카메라 무브 자체는 보장하고, 사유를 로그로 남긴다(몰래 낮추지 않는다).
-          layerBSingle = true;
-          if (!e?.__single) // __single = 매트 부적합 → 단일 레이어 전환(실패 아님, 위에서 로그함)
-            await log(`컷 ${s.order + 1} 매트·배경판 실패 → 단일 레이어(시차 없음)로 대체: ${String(e?.message ?? e).slice(0, 140)}`);
-        }
-      }
+      // (폐기) 계층 B 매트·배경판 생성 블록 삭제 — 버티고·패럴랙스 지원 종료(사용자 결정
+      //   2026-08-03). 저장돼 있던 컷은 cameraRender 가 단순 무브(배경 궤적)로만 굽는다.
+      //   fal(매트·인페인팅) 호출 0 — 다시 만들지 말 것.
 
       let result = { skipped: true, layer: "-" };
       if (cw && cw.preset) {
         result = await renderCameraFx({
-          ff, fp, dir, inPath: inp, outPath: outp, cameraWork: cw, mattePath, platePath, layerBSingle,
+          ff, fp, dir, inPath: inp, outPath: outp, cameraWork: cw,
           onLog: (m) => console.error("[camerafx]", m),
         });
       }
@@ -2752,12 +2677,8 @@ export async function runCameraFx(projectId, payload) {
         } else {
           delete t2.fxProxyUrl; // 카메라워크 없음 = 프록시도 없음
         }
-        if (s.matteUrl) t2.matteUrl = s.matteUrl; // 이번에 만든 매트 보존(다시 만들지 않게)
-        if (s.cleanPlateUrl) t2.cleanPlateUrl = s.cleanPlateUrl; // 배경판도 보존(재과금 방지)
         await saveProject(p2);
       } else if (p2 && t2) {
-        if (s.matteUrl) t2.matteUrl = s.matteUrl;
-        if (s.cleanPlateUrl) t2.cleanPlateUrl = s.cleanPlateUrl;
         // ★어떤 설정으로 구웠는지 지문을 남긴다 — 앱이 '이 컷은 지금 설정대로 구워져 있나'를
         //   판단해 자동으로 다시 굽는다(사용자가 '뭘 굽고 뭘 안 굽는지' 외우지 않게).
         const sig = camSig(cw);

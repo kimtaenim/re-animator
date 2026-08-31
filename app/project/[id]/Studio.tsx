@@ -3374,11 +3374,12 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                       )}
                       {/* ★🎥 카메라 프리셋을 ④에서 미리 선택(사용자 제안) — 오빗은 영상 '생성' 때
                           적용되므로 생성 전에 고르는 게 정석(나중에 고르면 재생성 이중 비용).
-                          버티고·패럴랙스는 골라두면 합성 전 자동 굽기가 처리. 세부 조절은 ⑤ 카드. */}
+                          나머지는 합성 전 자동 굽기가 처리. 세부 조절은 ⑤ 카드.
+                          (버티고·패럴랙스 2레이어는 지원 종료 — 2026-08-03 사용자 결정) */}
                       {!isCardScene && (
                         <div
                           className="flex flex-wrap items-center gap-1 text-[10px]"
-                          title="카메라 프리셋 — 오빗은 영상 생성 시 반영(생성 전에 선택). 버티고·패럴랙스는 굽기(합성 전 자동)가 처리. 속도·세부는 ⑤ 카메라 카드에서."
+                          title="카메라 프리셋 — 오빗은 영상 생성 시 반영(생성 전에 선택). 나머지는 굽기(합성 전 자동)가 처리. 속도·세부는 ⑤ 카메라 카드에서."
                         >
                           <span className="text-[var(--muted)]">🎥 카메라</span>
                           <select
@@ -3402,9 +3403,11 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                             <option value="shake">쉐이크</option>
                             <option value="crash_zoom">크래시 줌</option>
                             <option value="whip">휩(전환)</option>
-                            <option value="parallax_push">패럴랙스(2레이어)</option>
-                            <option value="vertigo">버티고 달리줌(2레이어)</option>
                             <option value="orbit">오빗(생성 시 적용)</option>
+                            {/* 폐기(버티고·패럴랙스)가 저장돼 있던 컷 — 셀렉트가 비지 않게 표시만 */}
+                            {(s.cut?.cameraWork?.preset === "parallax_push" || s.cut?.cameraWork?.preset === "vertigo") && (
+                              <option value={s.cut.cameraWork.preset}>(지원 종료) {s.cut.cameraWork.preset === "vertigo" ? "버티고" : "패럴랙스"}</option>
+                            )}
                           </select>
                           {s.cut?.cameraWork?.preset === "orbit" && (
                             <span className="text-[var(--accent)]">→ 🎬 생성해야 반영됩니다</span>
@@ -3937,7 +3940,6 @@ export default function Studio({ initialProject }: { initialProject: Project }) 
                     cameraWork={s.cut?.cameraWork}
                     motionTier={s.cut?.motionTier}
                     proxyUrl={s.fxProxyUrl}
-                    matteUrl={s.matteUrl}
                     onProxy={() => applyCameraFx(s.id, true)}
                     imageUrl={s.generatedImage ?? s.originalImage}
                     videoUrl={s.videoUrl}
