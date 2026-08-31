@@ -1144,9 +1144,13 @@ export async function runExtract(projectId, payload) {
                   .filter((l) => l.speaker && l.text);
                 const d = await directCut(png, s.cut, lines);
                 if (d) {
-                  if (needCam && d.camera !== "none" && CAMERA_PROMPTS[d.camera]) {
-                    s.cut.motion = CAMERA_PROMPTS[d.camera]; // I2V 프롬프트용(기존)
-                    // ★★그리고 '카메라 미리보기·굽기가 실제로 읽는' 구조체에도 넣는다.
+                  if (needCam && d.camera !== "none") {
+                    // ★I2V 프롬프트(cut.motion)는 '엔진만 할 수 있는 무브'(휩 팬·오빗·정지 앰비언트)에만.
+                    //   줌·셰이크 계열은 굽기(cameraWork)가 확정적으로 처리 — 생성·굽기에 같은 무브를
+                    //   겹쳐 넣지 않는다(중복 제거, 사용자 지시 2026-08-03). CAMERA_PROMPTS 에 없는
+                    //   id(crash-in 등)는 아래 매핑으로 굽기 프리셋만 배정된다.
+                    if (CAMERA_PROMPTS[d.camera]) s.cut.motion = CAMERA_PROMPTS[d.camera];
+                    // ★★'카메라 미리보기·굽기가 실제로 읽는' 구조체에도 넣는다.
                     //   이게 없어서 AI 연출이 카메라를 정해도 카메라 탭은 늘 '정지'였다(열흘 버그).
                     //   사람이 이미 직접 지정한 컷은 덮지 않는다(수동 우선).
                     const pre = DIRECTOR_CAMERA_TO_PRESET[d.camera];

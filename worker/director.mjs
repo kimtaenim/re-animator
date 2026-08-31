@@ -11,15 +11,11 @@ import sharp from "sharp";
 // 카메라 프리셋 — Studio CAMERA_MOVES 와 동기(id·영문 프롬프트 동일해야 함).
 // ★"subject barely moves"류 정지 앵커 금지 — 과장 지시와 충돌해 밋밋하게 타협됨.
 // ★시간 구조(느림/빠름 구간) 명시형 — Studio CAMERA_MOVES 와 문구 동일해야 함.
+// ★I2V 프롬프트는 '엔진만 할 수 있는 무브'만 — 줌·셰이크 계열은 굽기(cameraWork)가 확정적으로
+//   처리하므로 생성 프롬프트를 겹쳐 넣지 않는다(생성·굽기 중복 제거, 사용자 지시 2026-08-03).
+//   크래시인/아웃·램프·임팩트·푸시인 id 는 아래 매핑으로 '굽기 프리셋'만 배정된다.
+//   (🌀 vertigo 는 완전 폐기 — I2V 도 후처리도 실패, 다시 넣지 말 것.)
 export const CAMERA_PROMPTS = {
-  "crash-in":
-    "Camera direction — CRASH ZOOM IN, two speeds only: for most of the clip the camera pushes in almost imperceptibly slowly; then at the very end it SNAPS forward in one instant burst to a tight dramatic close-up. The acceleration is sudden, not gradual.",
-  "crash-out":
-    "Camera direction — CRASH ZOOM OUT: hold a tight close-up almost still for a beat; then in one instant burst the camera snaps far back, revealing the whole scene. A single sudden burst, not a gradual pull.",
-  "speed-ramp":
-    "Camera direction — SPEED RAMP IN: the camera starts gliding forward very slowly, then smoothly but rapidly accelerates, arriving fast and close to the subject right at the end. One continuous accelerating move.",
-  vertigo:
-    "Camera direction — DOLLY ZOOM (vertigo): the camera slowly pushes in while the lens zooms out, so the subject stays the same size while the background stretches and warps. Slow, continuous, unsettling.",
   "whip-pan":
     "Camera direction — WHIP PAN: the camera holds still for a beat, then whips sideways extremely fast with motion blur and snaps to a stop. One single whip.",
   "orbit-180":
@@ -28,12 +24,8 @@ export const CAMERA_PROMPTS = {
     "Camera direction — ELEGANT ORBIT: the camera glides in a slow, smooth 120-degree arc around the subject, luxurious and steady like a high-end commercial.",
   "orbit-spin":
     "Camera direction — ENDLESS SPIN: the camera circles the subject continuously at a steady speed without stopping, hypnotic and stylish.",
-  "impact-shake":
-    "Camera direction — IMPACT SHAKE: one sudden violent jolt like a shockwave, a fast rattling decay within half a second, then completely still.",
   static:
     "Camera direction — DELIBERATE STATIC SHOT: locked-off camera, completely still framing like a striking album-cover frame — only subtle ambient motion (drifting particles, hair, cloth, flickering light).",
-  "slow-in":
-    "Camera direction — SLOW CINEMATIC PUSH-IN: the camera glides forward very slowly and steadily toward the subject, calm and controlled, no sudden speed changes.",
 };
 // ★★연출 카메라 id → 카메라워크 프리셋(스펙 §2) 매핑.
 //   열흘간 "카메라 미리보기에 카메라워크가 안 보인다" 의 원인: AI 연출은 카메라를
@@ -44,7 +36,6 @@ export const DIRECTOR_CAMERA_TO_PRESET = {
   "crash-in": "crash_zoom",
   "crash-out": "pull_out",
   "speed-ramp": "push_in",
-  vertigo: "vertigo",
   "whip-pan": "whip",
   "orbit-180": "orbit",
   "orbit-120": "orbit",
@@ -53,7 +44,8 @@ export const DIRECTOR_CAMERA_TO_PRESET = {
   static: "static",
   "slow-in": "push_in",
 };
-const CAMERA_IDS = [...Object.keys(CAMERA_PROMPTS), "none"];
+// ★연출 어휘는 유지 — CAMERA_PROMPTS 에 없는 id(줌·셰이크 계열)는 굽기 프리셋으로만 배정된다.
+const CAMERA_IDS = ["crash-in", "crash-out", "speed-ramp", "whip-pan", "orbit-180", "orbit-120", "orbit-spin", "impact-shake", "static", "slow-in", "none"];
 const EMOTION_IDS = ["shout", "angry", "cry", "whisper", "laugh", "shock", "excited", "sigh", "none"];
 // 컷 끝 전환 — lib/types CutOntology.transition · /api/cut 화이트리스트와 일치해야 함.
 const TRANSITION_IDS = ["none", "fadeout", "fadein", "black", "dissolve"];
@@ -134,12 +126,12 @@ export async function directCut(png, cut, lines) {
                 `READ the dialogue meaning and the image, then design the full shot for this cut (type: ${cut?.type ?? "unknown"}).\n\n` +
                 `1) camera — pick the single most fitting EXAGGERATED cliché move. Options: ` +
                 `crash-in (slow creep then explosive zoom in), crash-out (explosive pull-back reveal), ` +
-                `speed-ramp (slow-motion bursting into a rush), vertigo (dolly-zoom background warp), whip-pan, ` +
+                `speed-ramp (slow-motion bursting into a rush), whip-pan, ` +
                 `orbit-180 (fast half orbit), orbit-120 (slow elegant orbit), orbit-spin (endless spinning), ` +
                 `impact-shake (shockwave hit), static (deliberate album-cover stillness), slow-in (slow elegant push-in). ` +
                 `Use "none" only when the cut is pure text/UI. ` +
                 `Prefer BOLD choices but VARY THE RHYTHM — a music video alternates fast and slow: ` +
-                `impact-shake for hits/surprise, crash-in for reveals/declarations, vertigo for dread, orbit for ` +
+                `impact-shake for hits/surprise, crash-in for reveals/declarations, orbit for ` +
                 `showcase moments, static/slow-in for quiet, emotional or lingering beats (do not make every cut fast).\n\n` +
                 `2) durationSec — how long this cut should stay on screen (a number of seconds). ` +
                 `Base it on the dialogue length (roughly enough time to read/speak it) and the beat: ` +

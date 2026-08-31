@@ -63,28 +63,32 @@ function CamPreviewVideo({ src, cameraWork }: { src: string; cameraWork?: CutOnt
   );
 }
 
-// 카메라 워크 프리셋 — 고르면 그 컷 모션 프롬프트(영문)를 이 문구로 채운다.
+// 카메라 워크 프리셋(I2V 생성 시) — 고르면 그 컷 모션 프롬프트(영문)를 이 문구로 채운다.
+// ★'엔진만 할 수 있는 무브'만(휩 팬·오빗·정지 앰비언트) — 줌·셰이크 계열은 ⑤ 굽기·⚡ 후처리
+//   카메라가 확정적으로 처리하므로 여기서 뺐다(생성·굽기 중복 제거, 사용자 지시 2026-08-03).
 // ★화려·과장 클리셰만(사용자 지정: 차분한 프리셋 제거). 속도 변화를 명시해야 모델이 따라온다.
 // ★"subject barely moves"류 정지 앵커 금지 — 과장 지시와 충돌해 밋밋하게 타협됨(가드는 MOTION_GUIDANCE 가 담당).
 const CAMERA_MOVES: [string, string, string][] = [
   // ★시간 구조(느림/빠름 구간)를 명시해야 I2V 가 '급가속 스냅'을 구현한다. '크게 움직여라'류
   //   막연한 강조는 피사체 동작만 키움(싸구려) — 각 문구는 Camera direction 으로 시작.
-  ["crash-in", "⚡ 크래시 줌인", "Camera direction — CRASH ZOOM IN, two speeds only: for most of the clip the camera pushes in almost imperceptibly slowly; then at the very end it SNAPS forward in one instant burst to a tight dramatic close-up. The acceleration is sudden, not gradual."],
-  ["crash-out", "💥 크래시 줌아웃", "Camera direction — CRASH ZOOM OUT: hold a tight close-up almost still for a beat; then in one instant burst the camera snaps far back, revealing the whole scene. A single sudden burst, not a gradual pull."],
-  ["speed-ramp", "🚀 스피드 램프", "Camera direction — SPEED RAMP IN: the camera starts gliding forward very slowly, then smoothly but rapidly accelerates, arriving fast and close to the subject right at the end. One continuous accelerating move."],
   // (폐기) 🌀 현기증(달리줌) — I2V 도 제대로 못 만든다(사용자: "잘 안 되던데", 2026-08-03).
   //   후처리 버티고와 함께 완전 폐기. 문구는 LEGACY_MOVE_PHRASES 로 이동(저장분 자동 정리).
   ["whip-pan", "💨 휩 팬", "Camera direction — WHIP PAN: the camera holds still for a beat, then whips sideways extremely fast with motion blur and snaps to a stop. One single whip."],
   ["orbit-180", "⟲ 오비트180(빠름)", "Camera direction — FAST ORBIT: the camera sweeps one fast 180-degree arc around the subject in a single smooth motion with slight motion blur."],
   ["orbit-120", "⟳ 오비트120(느림)", "Camera direction — ELEGANT ORBIT: the camera glides in a slow, smooth 120-degree arc around the subject, luxurious and steady like a high-end commercial."],
   ["orbit-spin", "🔄 오비트 무한", "Camera direction — ENDLESS SPIN: the camera circles the subject continuously at a steady speed without stopping, hypnotic and stylish."],
-  ["impact-shake", "📳 임팩트 쉐이크", "Camera direction — IMPACT SHAKE: one sudden violent jolt like a shockwave, a fast rattling decay within half a second, then completely still."],
   ["static", "■ 고정(정적)", "Camera direction — DELIBERATE STATIC SHOT: locked-off camera, completely still framing like a striking album-cover frame — only subtle ambient motion (drifting particles, hair, cloth, flickering light)."],
-  ["slow-in", "🐢 느린 푸시인", "Camera direction — SLOW CINEMATIC PUSH-IN: the camera glides forward very slowly and steadily toward the subject, calm and controlled, no sudden speed changes."],
 ];
 
 // (레거시) 예전 프리셋 문구 — 이미 저장된 컷의 motion 에서 지울 때만 사용(프리셋 교체 시 잔류 방지).
 const LEGACY_MOVE_PHRASES: string[] = [
+  // ★생성·굽기 중복 제거분(사용자 지시 2026-08-03) — 줌·셰이크는 굽기(후처리)가 확정적으로
+  //   처리하므로 생성 프롬프트에서 뺐다. 저장돼 있던 문구는 프리셋 교체 시 지워지게.
+  "Camera direction — CRASH ZOOM IN, two speeds only: for most of the clip the camera pushes in almost imperceptibly slowly; then at the very end it SNAPS forward in one instant burst to a tight dramatic close-up. The acceleration is sudden, not gradual.",
+  "Camera direction — CRASH ZOOM OUT: hold a tight close-up almost still for a beat; then in one instant burst the camera snaps far back, revealing the whole scene. A single sudden burst, not a gradual pull.",
+  "Camera direction — SPEED RAMP IN: the camera starts gliding forward very slowly, then smoothly but rapidly accelerates, arriving fast and close to the subject right at the end. One continuous accelerating move.",
+  "Camera direction — IMPACT SHAKE: one sudden violent jolt like a shockwave, a fast rattling decay within half a second, then completely still.",
+  "Camera direction — SLOW CINEMATIC PUSH-IN: the camera glides forward very slowly and steadily toward the subject, calm and controlled, no sudden speed changes.",
   // 🌀 현기증(달리줌) 폐기분 — 프리셋 교체 시 저장된 motion 에서 지워지게.
   "Camera direction — DOLLY ZOOM (vertigo): the camera slowly pushes in while the lens zooms out, so the subject stays the same size while the background stretches and warps. Slow, continuous, unsettling.",
   // v37~v46 세대(피사체 동작 폭주 세대)
